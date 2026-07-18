@@ -1,0 +1,18 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      MARKET_DATA_PROVIDER: mock
+      DATABASE_URL: sqlite:////data/liquidity_hunter.db
+      MOCK_SCENARIO: active
+      PAPER_ONLY: "true"
+    volumes: ["app-data:/data"]
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    depends_on: [backend]
+volumes:
+  app-data:
