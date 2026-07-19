@@ -64,7 +64,7 @@ Docker persists SQLite under the named `app-data` volume and seeds the demo on s
 
 ## Railway (single service)
 
-The root `Dockerfile` builds React and copies `frontend/dist` into the FastAPI image. FastAPI serves the API and the compiled frontend from the same Railway domain; frontend requests use the same-origin `/api` path.
+The root `Dockerfile` builds React, verifies its generated `index.html` and `assets` directory, and copies `frontend/dist` to `/app/frontend/dist` in the FastAPI image. `FRONTEND_DIST_DIR` pins FastAPI to that exact location, which is printed during container startup. FastAPI serves the API and the compiled frontend from the same Railway domain; frontend requests use the same-origin `/api` path.
 
 1. Create a Railway service from this GitHub repository. `railway.json` selects the root Dockerfile.
 2. Add a persistent Railway volume mounted at `/data`.
