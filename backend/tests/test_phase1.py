@@ -65,6 +65,8 @@ def test_seeded_journal_and_analytics():
     assert any(row['signal_type'] == 'lottery' for row in journal)
     assert analytics['sample_size'] == 6
     assert analytics['statistically_promising'] is False
+    for path in ('/api/health', '/api/dashboard', '/api/journal', '/api/analytics', '/api/candles/SPY'):
+        assert client.get(path).status_code == 200
 
 def test_candle_validation():
     assert client.get('/api/candles/DIA').status_code == 404

@@ -62,6 +62,17 @@ docker compose up --build
 
 Docker persists SQLite under the named `app-data` volume and seeds the demo on startup. Keep both `backend` and `frontend` services running while using the dashboard.
 
+## Railway (single service)
+
+The root `Dockerfile` builds React and copies `frontend/dist` into the FastAPI image. FastAPI serves the API and the compiled frontend from the same Railway domain; frontend requests use the same-origin `/api` path.
+
+1. Create a Railway service from this GitHub repository. `railway.json` selects the root Dockerfile.
+2. Add a persistent Railway volume mounted at `/data`.
+3. Set `MARKET_DATA_PROVIDER=mock`, `MOCK_SCENARIO=active`, `PAPER_ONLY=true`, and `DATABASE_URL=sqlite:////data/liquidity_hunter.db`.
+4. Generate a Railway domain. The dashboard is at `/`, API documentation is at `/docs`, and health checks use `/api/health`.
+
+Do not set live-provider or brokerage credentials. The container applies Alembic migrations and seeds an empty database before starting Uvicorn on Railway's `PORT`.
+
 ## Safety
 
 - Mock status is explicit in every provider response and prominently visible in the UI.

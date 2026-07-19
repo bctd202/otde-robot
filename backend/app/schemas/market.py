@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class ProviderStatus(BaseModel):
     provider: str
@@ -93,12 +93,23 @@ class LotteryOut(BaseModel):
     time_remaining_minutes: int
     worthless_reasons: list[str]
 
+class LiquidityLevelsOut(BaseModel):
+    previous_day_high: float
+    previous_day_low: float
+    opening_range_high: float
+    opening_range_low: float
+    session_high: float
+    session_low: float
+    vwap: float
+    equal_highs: list[float] = Field(default_factory=list)
+    equal_lows: list[float] = Field(default_factory=list)
+
 class DashboardOut(BaseModel):
     provider_status: ProviderStatus
     quotes: list[Quote]
     market_session: str
     volatility_proxy: float | None
-    levels: dict[str, dict[str, float]]
+    levels: dict[str, LiquidityLevelsOut]
     directional_bias: dict[str, str]
     news_warning: str
     normal_setups: list[SetupOut]
