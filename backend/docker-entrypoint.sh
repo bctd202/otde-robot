@@ -3,6 +3,7 @@ set -eu
 if [ -n "${FRONTEND_DIST_DIR:-}" ]; then
   echo "Frontend build path: ${FRONTEND_DIST_DIR}"
   test -f "${FRONTEND_DIST_DIR}/index.html"
+  test -f "${FRONTEND_DIST_DIR}/favicon.svg"
   test -d "${FRONTEND_DIST_DIR}/assets"
 fi
 alembic upgrade head

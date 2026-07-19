@@ -4,6 +4,10 @@ COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
 RUN npm run build
+RUN test -f /build/frontend/dist/index.html \
+    && test -f /build/frontend/dist/favicon.svg \
+    && test -d /build/frontend/dist/assets \
+    && find /build/frontend/dist -maxdepth 2 -type f -print | sort
 
 FROM python:3.12-slim AS runtime
 WORKDIR /app
@@ -21,7 +25,9 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=frontend-builder /build/frontend/dist ./frontend/dist
 RUN test -f /app/frontend/dist/index.html \
+    && test -f /app/frontend/dist/favicon.svg \
     && test -d /app/frontend/dist/assets \
+    && find /app/frontend/dist -maxdepth 2 -type f -print | sort \
     && chmod +x docker-entrypoint.sh \
     && mkdir -p /data
 EXPOSE 8000

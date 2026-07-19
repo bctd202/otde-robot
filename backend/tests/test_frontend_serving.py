@@ -28,6 +28,12 @@ def test_static_javascript_and_css_assets_are_served() -> None:
     assert stylesheet.headers["content-type"].startswith("text/css")
 
 
+def test_favicon_is_served() -> None:
+    response = client.get("/favicon.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+
+
 def test_spa_fallback_and_reserved_routes() -> None:
     assert client.get("/command-center").status_code == 200
     assert client.get("/command-center").headers["content-type"].startswith("text/html")

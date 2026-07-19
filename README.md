@@ -66,12 +66,14 @@ Docker persists SQLite under the named `app-data` volume and seeds the demo on s
 
 The root `Dockerfile` builds React, verifies its generated `index.html` and `assets` directory, and copies `frontend/dist` to `/app/frontend/dist` in the FastAPI image. `FRONTEND_DIST_DIR` pins FastAPI to that exact location, which is printed during container startup. FastAPI serves the API and the compiled frontend from the same Railway domain; frontend requests use the same-origin `/api` path.
 
-1. Create a Railway service from this GitHub repository. `railway.json` selects the root Dockerfile.
+1. Create a Railway service from this GitHub repository with its **Root Directory left empty (repository root)** and no dashboard-level Dockerfile override. `railway.json` selects the only backend-capable Dockerfile, at `/Dockerfile`.
 2. Add a persistent Railway volume mounted at `/data`.
 3. Set `MARKET_DATA_PROVIDER=mock`, `MOCK_SCENARIO=active`, `PAPER_ONLY=true`, and `DATABASE_URL=sqlite:////data/liquidity_hunter.db`.
 4. Generate a Railway domain. The dashboard is at `/`, API documentation is at `/docs`, and health checks use `/api/health`.
 
 Do not set live-provider or brokerage credentials. The container applies Alembic migrations and seeds an empty database before starting Uvicorn on Railway's `PORT`.
+
+The production build log must list `/build/frontend/dist/index.html`, `/build/frontend/dist/favicon.svg`, and generated `/build/frontend/dist/assets/*` files. Container startup must print `Frontend build path: /app/frontend/dist`. If those lines are absent, Railway is not building the repository-root Dockerfile.
 
 ## Safety
 
