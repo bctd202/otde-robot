@@ -27,7 +27,8 @@ test('shows mock warning, symbols, lottery risk, journal and analytics', async()
   expect(screen.getByText(/Most lottery contracts/)).toBeInTheDocument();
   expect(screen.getByText(/Signal Journal/)).toBeInTheDocument();
   expect(screen.getAllByText('None detected').length).toBeGreaterThan(0);
-  expect(screen.getByText('547.25, 547.50')).toBeInTheDocument();
+  const equalLowMatches = screen.getAllByText('547.25, 547.50');
+  expect(equalLowMatches.length).toBeGreaterThan(0);
   expect(screen.getByLabelText('Liquidity context')).toBeInTheDocument();
   expect(screen.getByText('Recent Liquidity Events')).toBeInTheDocument();
   expect(screen.getByText(/Visual research score only/)).toBeInTheDocument();
