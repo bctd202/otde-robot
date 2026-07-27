@@ -2,6 +2,20 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import { App } from './main';
 
+vi.mock('lightweight-charts', () => ({
+  CandlestickSeries: {},
+  ColorType: { Solid: 'solid' },
+  CrosshairMode: { Normal: 0 },
+  LineStyle: { Solid: 0, Dotted: 1, Dashed: 2, SparseDotted: 4 },
+  createSeriesMarkers: vi.fn(),
+  createChart: () => ({
+    addSeries: () => ({ setData: vi.fn(), createPriceLine: vi.fn() }),
+    applyOptions: vi.fn(),
+    remove: vi.fn(),
+    timeScale: () => ({ fitContent: vi.fn() }),
+  }),
+}));
+
 afterEach(()=>vi.restoreAllMocks());
 test('shows mock warning, symbols, lottery risk, journal and analytics', async()=>{
   const level={previous_day_high:552,previous_day_low:545,opening_range_high:551,opening_range_low:548,session_high:552,session_low:547,vwap:550,equal_highs:[],equal_lows:[547.25,547.5]};
@@ -9,10 +23,13 @@ test('shows mock warning, symbols, lottery risk, journal and analytics', async()
   vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>new Response(JSON.stringify(String(input).includes('dashboard')?dashboard:String(input).includes('journal')?[{id:1,symbol:'SPY',signal_type:'lottery',status:'not_taken',generated_at:'',payload:{}}]:{minimum_sample_size:30,sample_size:6,statistically_promising:false,win_rate:50,profit_factor:1.2,average_winner:20,average_loser:-15,expectancy:2,message:'Seeded results.'}),{status:200,headers:{'Content-Type':'application/json'}}));
   render(<App/>);
   await waitFor(()=>expect(screen.getByText('MOCK DATA — NOT LIVE')).toBeInTheDocument());
-  expect(screen.getByText('SPY')).toBeInTheDocument();
+  expect(screen.getAllByText('SPY').length).toBeGreaterThan(0);
   expect(screen.getByText(/Most lottery contracts/)).toBeInTheDocument();
   expect(screen.getByText(/Signal Journal/)).toBeInTheDocument();
   expect(screen.getAllByText('None detected').length).toBeGreaterThan(0);
-  expect(screen.getByText('547.25, 547.50')).toBeInTheDocument();
-  expect(screen.getByText(/Equal highs \(1\)/)).toBeInTheDocument();
+  const equalLowMatches = screen.getAllByText('547.25, 547.50');
+  expect(equalLowMatches.length).toBeGreaterThan(0);
+  expect(screen.getByLabelText('Liquidity context')).toBeInTheDocument();
+  expect(screen.getByText('Recent Liquidity Events')).toBeInTheDocument();
+  expect(screen.getByText(/Visual research score only/)).toBeInTheDocument();
 });
