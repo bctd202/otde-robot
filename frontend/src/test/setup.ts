@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 
-class ResizeObserverMock implements ResizeObserver {
-  observe(_target: Element, _options?: ResizeObserverOptions) {}
-  unobserve(_target: Element) {}
-  disconnect() {}
+class ResizeObserverMock {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
 }
 
 globalThis.ResizeObserver = ResizeObserverMock;
