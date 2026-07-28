@@ -125,6 +125,21 @@ def test_missed_premium_action_reports_the_actual_cause():
     assert missed.primary_action == f"MISSED — DO NOT CHASE ABOVE ${missed.no_chase_price:.2f}"
 
 
+class PartialQuoteProvider(MockMarketDataProvider):
+    def quotes(self, symbols):
+        if symbols == ["BROKEN"]:
+            raise ValueError("Malformed or unsupported symbol")
+        return super().quotes(symbols)
+
+
+def test_one_bad_quote_does_not_block_other_symbols():
+    results = rank_parlays(PartialQuoteProvider(), ["BROKEN", "SPY"])
+    by_symbol = {item.symbol: item for item in results}
+
+    assert by_symbol["BROKEN"].unavailable_reason == "Quote unavailable"
+    assert by_symbol["SPY"].unavailable_reason is None
+
+
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
     monkeypatch.setattr("app.api.routes.get_provider", lambda: MockMarketDataProvider())
     response = TestClient(app).get("/api/parlays")
