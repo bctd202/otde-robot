@@ -57,7 +57,7 @@ def test_plans_score_labels_actions_and_sorting():
     watch = next(item for item in results if item.signal_status == "WATCH")
     assert watch.primary_action.startswith("WAIT FOR ")
     missed = next(item for item in results if item.signal_status == "MISSED")
-    assert "DO NOT CHASE" in missed.primary_action
+    assert missed.primary_action == "MISSED — UNDERLYING ALREADY EXTENDED"
     for passed in (item for item in results if item.signal_status == "PASS"):
         assert passed.entry_low is None and passed.first_option_target is None
         assert passed.contract is None
@@ -77,7 +77,52 @@ def test_unavailable_fails_closed_without_mock_fallback():
     assert len(results) == 2
     assert all(item.signal_status == "UNAVAILABLE" for item in results)
     assert all(item.contract is None and item.entry_low is None for item in results)
-    assert all(item.primary_action == "UNAVAILABLE — QUOTE UNAVAILABLE" for item in results)
+    assert all(item.primary_action == "UNAVAILABLE — PROVIDER UNAVAILABLE" for item in results)
+
+
+class EmptyChainProvider(MockMarketDataProvider):
+    def option_chain(self, symbol):
+        return []
+
+
+class FailedChainProvider(EmptyChainProvider):
+    failed = False
+
+    def option_chain(self, symbol):
+        self.failed = True
+        return []
+
+    def status(self):
+        status = super().status()
+        if self.failed:
+            status.status = "unavailable"
+        return status
+
+
+class PremiumMissProvider(MockMarketDataProvider):
+    def option_chain(self, symbol):
+        chain = super().option_chain(symbol)
+        for contract in chain:
+            if contract.right == "call":
+                contract.bid = .68
+                contract.ask = .80
+                contract.last = .40
+        return chain
+
+
+def test_empty_and_failed_option_chains_have_accurate_reasons():
+    healthy = rank_parlays(EmptyChainProvider(), ["SPY"])[0]
+    failed = rank_parlays(FailedChainProvider(), ["SPY"])[0]
+    assert healthy.unavailable_reason == "No same-day expiration"
+    assert failed.unavailable_reason == "Option chain unavailable"
+    assert healthy.signal_status == failed.signal_status == "UNAVAILABLE"
+
+
+def test_missed_premium_action_reports_the_actual_cause():
+    missed = rank_parlays(PremiumMissProvider(), ["AAPL"])[0]
+    assert missed.signal_status == "MISSED"
+    assert missed.contract.ask > missed.no_chase_price
+    assert missed.primary_action == f"MISSED — DO NOT CHASE ABOVE ${missed.no_chase_price:.2f}"
 
 
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):

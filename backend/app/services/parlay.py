@@ -1,11 +1,13 @@
-from datetime import date
+from datetime import datetime
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.indicators import opening_range, spread_pct, vwap
 
 Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
+NY = ZoneInfo("America/New_York")
 
 
 def _score_label(score: float) -> Literal["PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"]:
@@ -53,7 +55,7 @@ def _directional_plan(candles: list[CandleOut]) -> tuple[Direction | None, int, 
 
 
 def _eligible_contract(chain: list[OptionContractOut], direction: Direction, target: float) -> tuple[OptionContractOut | None, list[str]]:
-    today = date.today()
+    today = datetime.now(NY).date()
     rejection: set[str] = set()
     eligible = []
     for contract in chain:
@@ -81,12 +83,17 @@ def _eligible_contract(chain: list[OptionContractOut], direction: Direction, tar
 def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
     """Build complete, deterministic paper-research plans without predicting outcomes."""
     provider_status = provider.status()
+    output: list[ParlayCandidateOut] = []
+    if provider_status.status == "unavailable":
+        output = [_unavailable(symbol, "Provider unavailable", provider_status.latest_timestamp) for symbol in symbols]
+        for position, candidate in enumerate(output, 1):
+            candidate.ranking_position = position
+        return output
     quotes = {}
     try:
         quotes = {quote.symbol: quote for quote in provider.quotes(symbols)}
     except (KeyError, TypeError, ValueError):
         pass
-    output: list[ParlayCandidateOut] = []
     for symbol in symbols:
         quote = quotes.get(symbol)
         if quote is None:
@@ -100,7 +107,9 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             output.append(_unavailable(symbol, "Candles unavailable", quote.timestamp))
             continue
         if not chain:
-            output.append(_unavailable(symbol, "No same-day expiration", quote.timestamp))
+            chain_status = provider.status()
+            reason = "Option chain unavailable" if chain_status.status == "unavailable" else "No same-day expiration"
+            output.append(_unavailable(symbol, reason, quote.timestamp))
             continue
         direction, checks, reasons, trigger, invalidation, confirmed = _directional_plan(candles)
         if direction is None:
@@ -121,13 +130,17 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
                 generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current"))
             continue
         midpoint = round((contract.bid + contract.ask) / 2, 2)
-        entry_low, entry_high = midpoint, round(min(1.0, midpoint * 1.08), 2)
-        no_chase = round(min(1.25, max(entry_high + .05, midpoint * 1.25)), 2)
+        preferred_entry = min(midpoint, contract.last) if contract.last > 0 else midpoint
+        entry_low = round(preferred_entry, 2)
+        entry_high = round(min(1.0, preferred_entry * 1.08), 2)
+        no_chase = round(min(1.25, max(entry_high + .05, preferred_entry * 1.25)), 2)
         spread = spread_pct(contract.bid, contract.ask)
         extension = ((candles[-1].close - trigger) if direction == "call" else (trigger - candles[-1].close)) / move
         score = max(0, min(100, 42 + checks * 8 + min(contract.volume / 250, 8)
             + min(contract.open_interest / 1000, 4) - spread / 4))
-        missed = confirmed and (contract.ask > no_chase or extension > 1.35)
+        premium_exceeded = contract.ask > no_chase
+        underlying_extended = extension > 1.35
+        missed = confirmed and (premium_exceeded or underlying_extended)
         if missed:
             signal: SignalStatus = "MISSED"
         elif score >= 85 and confirmed and contract.ask <= entry_high and extension <= 1.35:
@@ -143,9 +156,13 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
                 primary_action="PASS — TRIGGER NOT CONFIRMED", generated_at=quote.timestamp,
                 data_freshness=f"{provider_status.mode}_current"))
             continue
-        action = (f"BUY BELOW ${entry_high:.2f}" if signal == "BUY" else
-            f"MISSED — DO NOT CHASE ABOVE ${no_chase:.2f}" if signal == "MISSED" else
-            f"WAIT FOR {symbol} {'ABOVE' if direction == 'call' else 'BELOW'} ${trigger:.2f}")
+        if signal == "BUY":
+            action = f"BUY BELOW ${entry_high:.2f}"
+        elif signal == "MISSED":
+            action = (f"MISSED — DO NOT CHASE ABOVE ${no_chase:.2f}" if premium_exceeded else
+                "MISSED — UNDERLYING ALREADY EXTENDED")
+        else:
+            action = f"WAIT FOR {symbol} {'ABOVE' if direction == 'call' else 'BELOW'} ${trigger:.2f}"
         output.append(ParlayCandidateOut(symbol=symbol, rank=_score_label(score), direction=direction,
             signal_status=signal, score=round(score, 1), score_label=_score_label(score), underlying_price=quote.price,
             contract=contract, contract_cost=round(contract.ask * 100, 2), midpoint=midpoint, spread_percent=spread,
