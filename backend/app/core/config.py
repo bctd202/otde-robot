@@ -24,12 +24,22 @@ class Settings(BaseSettings):
     close_to_close_squeeze_enabled: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     mock_scenario: str = "active"
+    tradier_api_token: str | None = None
+    tradier_base_url: str = "https://api.tradier.com/v1"
+    parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @property
     def symbol_list(self) -> list[str]:
         return [s.strip().upper() for s in self.symbols.split(",") if s.strip()]
+
+    @property
+    def parlay_symbol_list(self) -> list[str]:
+        """The bounded, de-duplicated universe used by the Parlay scanner."""
+        return list(dict.fromkeys(
+            s.strip().upper() for s in self.parlay_symbols.split(",") if s.strip()
+        ))[:12]
 
 
 @lru_cache

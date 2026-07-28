@@ -1,0 +1,2 @@
+import type { ProviderStatus as Provider } from '../types';
+export function ProviderStatus({provider,updated,refreshing}:{provider:Provider;updated:Date|null;refreshing:boolean}) { const mode=provider.mode==='live'?'LIVE':provider.delay_seconds>0?'DELAYED':'MOCK'; return <div className="provider-status" aria-label="Market data status"><span>{provider.provider.toUpperCase()}</span><strong>{mode}</strong><span>{refreshing?'Refreshing…':`Updated ${updated?updated.toLocaleTimeString():'—'}`}</span></div>; }

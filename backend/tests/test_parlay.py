@@ -1,0 +1,91 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from fastapi.testclient import TestClient
+
+from app.core.config import get_settings
+from app.main import app
+from app.market_data.mock import MockMarketDataProvider
+from app.schemas.market import ProviderStatus
+from app.services.parlay import _score_label, rank_parlays
+
+NY = ZoneInfo("America/New_York")
+
+
+def board():
+    settings = get_settings()
+    return rank_parlays(MockMarketDataProvider(), settings.parlay_symbol_list)
+
+
+def test_default_mock_board_has_complete_deterministic_variety():
+    first, second = board(), board()
+    assert [item.model_dump() for item in first] == [item.model_dump() for item in second]
+    assert len(first) == 12
+    assert {item.symbol for item in first} == set(get_settings().parlay_symbol_list)
+    statuses = [item.signal_status for item in first]
+    assert statuses.count("BUY") >= 2
+    assert statuses.count("WATCH") >= 2
+    assert "MISSED" in statuses
+    assert statuses.count("PASS") >= 2
+    assert {item.direction for item in first} >= {"call", "put"}
+    provider = MockMarketDataProvider()
+    for symbol in get_settings().parlay_symbol_list:
+        assert provider.quotes([symbol])
+        assert provider.candles(symbol, "1m")
+        chain = provider.option_chain(symbol)
+        assert {contract.right for contract in chain} == {"call", "put"}
+        assert all(contract.volume and contract.open_interest for contract in chain)
+
+
+def test_plans_score_labels_actions_and_sorting():
+    results = board()
+    order = {"BUY": 0, "WATCH": 1, "MISSED": 2, "PASS": 3, "UNAVAILABLE": 4}
+    assert [item.ranking_position for item in results] == list(range(1, 13))
+    assert [(order[item.signal_status], -item.score) for item in results] == sorted(
+        (order[item.signal_status], -item.score) for item in results
+    )
+    assert [_score_label(score) for score in (85, 70, 55, 54)] == [
+        "PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"
+    ]
+    buy = next(item for item in results if item.signal_status == "BUY")
+    assert buy.primary_action.startswith("BUY BELOW $")
+    assert buy.entry_low <= buy.entry_high < buy.no_chase_price
+    assert buy.first_option_target == round(buy.entry_high * 2, 2)
+    assert buy.stretch_option_target == round(buy.entry_high * 4, 2)
+    assert buy.underlying_trigger is not None and buy.underlying_invalidation is not None
+    assert buy.first_underlying_target is not None and buy.stretch_underlying_target is not None
+    watch = next(item for item in results if item.signal_status == "WATCH")
+    assert watch.primary_action.startswith("WAIT FOR ")
+    missed = next(item for item in results if item.signal_status == "MISSED")
+    assert "DO NOT CHASE" in missed.primary_action
+    for passed in (item for item in results if item.signal_status == "PASS"):
+        assert passed.entry_low is None and passed.first_option_target is None
+        assert passed.contract is None
+
+
+class UnavailableProvider:
+    def status(self):
+        return ProviderStatus(provider="tradier", mode="live", status="unavailable", delay_seconds=0,
+            latest_timestamp=datetime.now(NY), message="Tradier data unavailable")
+
+    def quotes(self, symbols):
+        return []
+
+
+def test_unavailable_fails_closed_without_mock_fallback():
+    results = rank_parlays(UnavailableProvider(), ["SPY", "QQQ"])
+    assert len(results) == 2
+    assert all(item.signal_status == "UNAVAILABLE" for item in results)
+    assert all(item.contract is None and item.entry_low is None for item in results)
+    assert all(item.primary_action == "UNAVAILABLE — QUOTE UNAVAILABLE" for item in results)
+
+
+def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
+    monkeypatch.setattr("app.api.routes.get_provider", lambda: MockMarketDataProvider())
+    response = TestClient(app).get("/api/parlays")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_status"]["mode"] == "mock"
+    assert body["paper_only"] is True
+    assert body["universe"] == get_settings().parlay_symbol_list
+    assert len(body["candidates"]) == 12

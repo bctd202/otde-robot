@@ -73,6 +73,16 @@ The root `Dockerfile` builds React, verifies its generated `index.html` and `ass
 
 Do not set live-provider or brokerage credentials. The container applies Alembic migrations and seeds an empty database before starting Uvicorn on Railway's `PORT`.
 
+## Tradier market data and Parlay scanner
+
+Tradier is an optional, read-only market-data provider; no order endpoint is implemented. Set
+`MARKET_DATA_PROVIDER=tradier` and provide `TRADIER_API_TOKEN` through the environment. The
+`GET /api/parlays` endpoint scans the configurable `PARLAY_SYMBOLS` universe (at most 12 unique
+symbols), filters today's contracts to $20–$100 ask cost, and assigns deterministic `PLAY`,
+`WATCH`, `DEVELOPING`, or `PASS` labels. Missing credentials, upstream errors, missing same-day
+expirations, and incomplete data fail closed and are reported explicitly rather than replaced
+with mock data.
+
 The production build log must list `/build/frontend/dist/index.html`, `/build/frontend/dist/favicon.svg`, and generated `/build/frontend/dist/assets/*` files. Container startup must print `Frontend build path: /app/frontend/dist`. If those lines are absent, Railway is not building the repository-root Dockerfile.
 
 ## Safety

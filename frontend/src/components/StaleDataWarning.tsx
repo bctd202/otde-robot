@@ -1,0 +1,1 @@
+export function StaleDataWarning({updated,onRetry}:{updated:Date|null;onRetry:()=>void}) { return <div className="stale-warning" role="alert"><span><strong>Stale data.</strong> Latest refresh failed. Showing the board from {updated?.toLocaleTimeString()??'the last successful update'}.</span><button type="button" onClick={onRetry}>Retry Parlay board</button></div>; }

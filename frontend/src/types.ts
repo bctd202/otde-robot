@@ -7,3 +7,17 @@ export interface LiquidityLevels { previous_day_high:number; previous_day_low:nu
 export interface Dashboard { provider_status:ProviderStatus; quotes:Quote[]; market_session:string; volatility_proxy:number|null; levels:Record<string,LiquidityLevels>; directional_bias:Record<string,string>; news_warning:string; normal_setups:Setup[]; lottery_setups:Lottery[]; no_trade:boolean; paper_account:Record<string,string|number|boolean> }
 export interface JournalSignal { id:number; symbol:string; signal_type:string; status:string; generated_at:string; payload:Record<string,unknown> }
 export interface Analytics { minimum_sample_size:number; sample_size:number; statistically_promising:boolean; win_rate:number; profit_factor:number|null; average_winner:number; average_loser:number; expectancy:number; message:string }
+export type SignalStatus='BUY'|'WATCH'|'MISSED'|'PASS'|'UNAVAILABLE';
+export type ParlayDirection='call'|'put'|'none';
+export type ScoreLabel='PLAY'|'WATCH CLOSELY'|'DEVELOPING'|'PASS';
+export interface ParlayContract extends Contract { symbol:string; expiration:string; strike:number; right:string; last:number; iv:number|null; theta:number|null; vega:number|null; timestamp:string }
+export interface ParlayCandidate {
+  ranking_position:number; symbol:string; rank:string; direction:ParlayDirection; signal_status:SignalStatus;
+  score:number; score_label:ScoreLabel; underlying_price:number|null; contract:ParlayContract|null;
+  contract_cost:number|null; midpoint:number|null; spread_percent:number|null; entry_low:number|null;
+  entry_high:number|null; no_chase_price:number|null; underlying_trigger:number|null;
+  underlying_invalidation:number|null; first_underlying_target:number|null; stretch_underlying_target:number|null;
+  first_option_target:number|null; stretch_option_target:number|null; reasons:string[]; rejection_reasons:string[];
+  unavailable_reason:string|null; primary_action:string; generated_at:string; data_freshness:string;
+}
+export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; paper_only:boolean }

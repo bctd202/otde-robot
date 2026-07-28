@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 from pydantic import BaseModel, Field
 
 class ProviderStatus(BaseModel):
@@ -116,3 +117,38 @@ class DashboardOut(BaseModel):
     lottery_setups: list[LotteryOut]
     no_trade: bool
     paper_account: dict
+
+class ParlayCandidateOut(BaseModel):
+    ranking_position: int = 0
+    symbol: str
+    rank: str
+    direction: Literal["call", "put", "none"] = "none"
+    signal_status: Literal["BUY", "WATCH", "MISSED", "PASS", "UNAVAILABLE"]
+    score: float
+    score_label: Literal["PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"]
+    underlying_price: float | None = None
+    contract: OptionContractOut | None = None
+    contract_cost: float | None = None
+    midpoint: float | None = None
+    spread_percent: float | None = None
+    entry_low: float | None = None
+    entry_high: float | None = None
+    no_chase_price: float | None = None
+    underlying_trigger: float | None = None
+    underlying_invalidation: float | None = None
+    first_underlying_target: float | None = None
+    stretch_underlying_target: float | None = None
+    first_option_target: float | None = None
+    stretch_option_target: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    rejection_reasons: list[str] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+    primary_action: str
+    generated_at: datetime
+    data_freshness: str
+
+class ParlayResponse(BaseModel):
+    provider_status: ProviderStatus
+    universe: list[str]
+    candidates: list[ParlayCandidateOut]
+    paper_only: bool = True
