@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     mock_scenario: str = "active"
     tradier_api_token: str | None = None
     tradier_base_url: str = "https://api.tradier.com/v1"
-    parlay_symbols: str = "SPY,QQQ,IWM,DIA,AAPL,MSFT,NVDA,AMZN,META,TSLA,AMD,NFLX"
+    parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

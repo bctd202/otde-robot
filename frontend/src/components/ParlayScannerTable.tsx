@@ -1,0 +1,7 @@
+import { useState } from 'react';
+import type { ParlayCandidate } from '../types';
+import { DirectionBadge } from './DirectionBadge';
+import { SignalBadge } from './SignalBadge';
+import { TradePlan } from './TradePlan';
+const price=(value:number|null)=>value===null?'—':`$${value.toFixed(2)}`;
+export function ParlayScannerTable({candidates}:{candidates:ParlayCandidate[]}) { const [open,setOpen]=useState<string|null>(null); return <div className="scanner-wrap"><table><thead><tr><th>Rank</th><th>Symbol</th><th>Side</th><th>Status</th><th>Contract</th><th>Total cost</th><th>Score</th><th>Next action</th></tr></thead><tbody>{candidates.map(candidate=><tr key={candidate.symbol} className="scanner-row"><td colSpan={8}><button type="button" className="row-button" aria-expanded={open===candidate.symbol} aria-label={`Show ${candidate.symbol} details`} onClick={()=>setOpen(open===candidate.symbol?null:candidate.symbol)}><span>#{candidate.ranking_position}</span><strong>{candidate.symbol}</strong><DirectionBadge direction={candidate.direction}/><SignalBadge status={candidate.signal_status}/><span>{candidate.contract?.option_symbol??'—'}</span><span>{price(candidate.contract_cost)}</span><span>{candidate.score.toFixed(1)}</span><b>{candidate.primary_action}</b></button>{open===candidate.symbol&&<div className="row-details"><TradePlan candidate={candidate}/>{candidate.rejection_reasons.length>0&&<p>{candidate.rejection_reasons.join(' · ')}</p>}</div>}</td></tr>)}</tbody></table></div>; }
