@@ -5,11 +5,24 @@ from app.core.config import get_settings
 from app.db.models import Signal, TradeOutcome
 from app.db.session import get_db
 from app.market_data.factory import get_provider
-from app.schemas.market import DashboardOut
+from app.schemas.market import DashboardOut, ParlayResponse
 from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
+from app.services.parlay import rank_parlays
 
 router = APIRouter()
+
+@router.get("/parlays", response_model=ParlayResponse)
+def parlays():
+    settings = get_settings()
+    provider = get_provider()
+    universe = settings.parlay_symbol_list
+    candidates = rank_parlays(provider, universe)
+    return ParlayResponse(
+        provider_status=provider.status(),
+        universe=universe,
+        candidates=candidates,
+    )
 
 @router.get("/health")
 def health(): return {"status":"ok","paper_only": True}
