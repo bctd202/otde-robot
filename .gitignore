@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+liquidity_hunter.db
+node_modules/
+dist/
+*.tsbuildinfo
+.pytest_cache/
+.DS_Store
