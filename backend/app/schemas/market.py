@@ -116,3 +116,19 @@ class DashboardOut(BaseModel):
     lottery_setups: list[LotteryOut]
     no_trade: bool
     paper_account: dict
+
+class ParlayCandidateOut(BaseModel):
+    symbol: str
+    rank: str
+    score: float
+    underlying_price: float | None = None
+    contract: OptionContractOut | None = None
+    contract_cost: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+class ParlayResponse(BaseModel):
+    provider_status: ProviderStatus
+    universe: list[str]
+    candidates: list[ParlayCandidateOut]
+    paper_only: bool = True
