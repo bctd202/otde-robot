@@ -1,16 +1,65 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.db.models import Signal, TradeOutcome
+from app.db.models import ParlayPaperPosition, Signal, TradeOutcome
 from app.db.session import get_db
 from app.market_data.factory import get_provider
 from app.schemas.market import DashboardOut, ParlayResponse
+from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
+                                         PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.parlay import rank_parlays
+from app.services.paper_positions import (create_position, market_mark,
+                                          refresh_position, serialize)
 
 router = APIRouter()
+
+
+@router.post("/paper-positions", response_model=PaperPositionOut, status_code=201)
+def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(get_db)):
+    try:
+        position = create_position(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "already exists" in str(exc) else 422, detail=str(exc)) from exc
+    return serialize(position, option_price=position.entry_option_price,
+                     underlying_price=position.entry_underlying_price,
+                     freshness="entry_snapshot")
+
+
+@router.get("/paper-positions", response_model=PaperPositionsResponse)
+def paper_positions(db: Session = Depends(get_db)):
+    rows = db.scalars(select(ParlayPaperPosition).order_by(ParlayPaperPosition.opened_at.desc()).limit(50)).all()
+    provider = get_provider()
+    output = [refresh_position(db, row, provider) if row.lifecycle_status == "ACTIVE" else serialize(row)
+              for row in rows]
+    return PaperPositionsResponse(positions=output)
+
+
+@router.post("/paper-positions/{position_id}/exit", response_model=PaperPositionOut)
+def paper_position_exit(position_id: int, payload: PaperPositionExit, db: Session = Depends(get_db)):
+    position = db.get(ParlayPaperPosition, position_id)
+    if position is None:
+        raise HTTPException(status_code=404, detail="Paper position not found")
+    if position.lifecycle_status == "CLOSED":
+        raise HTTPException(status_code=409, detail="Paper position is already closed")
+    option_price, underlying_price, freshness = market_mark(position, get_provider())
+    option_price = option_price if option_price is not None else position.last_option_price
+    underlying_price = underlying_price if underlying_price is not None else position.last_underlying_price
+    if option_price is None:
+        raise HTTPException(status_code=409, detail="No defensible paper exit price is available")
+    position.exit_option_price = option_price
+    position.exit_underlying_price = underlying_price
+    position.exit_reason = payload.reason
+    position.closed_at = datetime.now(timezone.utc)
+    position.lifecycle_status = "CLOSED"
+    position.data_freshness = freshness
+    db.commit()
+    db.refresh(position)
+    return serialize(position)
 
 @router.get("/parlays", response_model=ParlayResponse)
 def parlays():
