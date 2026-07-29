@@ -721,6 +721,33 @@ nav a:hover {
   color:#7f7057;
 }
 
+.mock-banner.live {
+  background:#edfdf8;
+  border-color:#9edbcb;
+  color:#087b6d;
+}
+
+.mock-banner.delayed {
+  background:#f2f7ff;
+  border-color:#b9cae8;
+  color:#315b91;
+}
+
+.empty-state,
+.chart-empty-state {
+  padding:24px;
+  border:1px dashed var(--color-border);
+  border-radius:10px;
+  background:#fafcfb;
+  color:#42534f;
+}
+
+.empty-state p,
+.chart-empty-state p {
+  margin:8px 0 0;
+  color:#6b7975;
+}
+
 .quote-row {
   display:grid;
   grid-template-columns:repeat(4,1fr);
