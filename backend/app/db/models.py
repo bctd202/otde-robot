@@ -1,3 +1,6 @@
+from datetime import date, datetime
+from typing import Literal
+
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
@@ -137,6 +140,40 @@ class PositionMark(Base):
     position_id: Mapped[int] = mapped_column(ForeignKey("paper_positions.id"))
     timestamp: Mapped[str] = mapped_column(DateTime(timezone=True))
     mark_price: Mapped[float] = mapped_column(Float)
+
+class ParlayPaperPosition(Base):
+    __tablename__ = "parlay_paper_positions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(12), index=True)
+    option_symbol: Mapped[str] = mapped_column(String(64), index=True)
+    direction: Mapped[Literal["call", "put"]] = mapped_column(String(8))
+    expiration: Mapped[date] = mapped_column(Date)
+    strike: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    entry_option_price: Mapped[float] = mapped_column(Float)
+    entry_underlying_price: Mapped[float] = mapped_column(Float)
+    total_debit: Mapped[float] = mapped_column(Float)
+    underlying_trigger: Mapped[float] = mapped_column(Float)
+    underlying_invalidation: Mapped[float] = mapped_column(Float)
+    first_underlying_target: Mapped[float] = mapped_column(Float)
+    stretch_underlying_target: Mapped[float] = mapped_column(Float)
+    first_option_target: Mapped[float] = mapped_column(Float)
+    stretch_option_target: Mapped[float] = mapped_column(Float)
+    score: Mapped[float] = mapped_column(Float)
+    score_label: Mapped[str] = mapped_column(String(32))
+    entry_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    provider_mode: Mapped[str] = mapped_column(String(32))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_option_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lifecycle_status: Mapped[Literal["ACTIVE", "CLOSED"]] = mapped_column(String(16), default="ACTIVE", index=True)
+    last_option_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_freshness: Mapped[str] = mapped_column(String(32), default="current")
+
 
 class TradeOutcome(Base):
     __tablename__ = "trade_outcomes"

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { getAnalytics, getDashboard, getJournal, getParlays } from './api/client';
+import { exitPaperPosition, getAnalytics, getDashboard, getJournal, getPaperPositions, getParlays, paperEnter } from './api/client';
 import { CandlestickChart } from './components/CandlestickChart';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
-import type { Analytics, Dashboard, JournalSignal, LiquidityLevels, ParlayResponse } from './types';
+import type { Analytics, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
 import './style.css';
 
 function Card({title,children,danger=false,id}:{title:string;children:React.ReactNode;danger?:boolean;id?:string}) { return <section id={id} className={`card ${danger?'danger':''}`}><h2>{title}</h2>{children}</section> }
@@ -18,14 +18,21 @@ export function App() {
   const [parlays,setParlays]=useState<ParlayResponse|null>(null);
   const [parlayStale,setParlayStale]=useState(false);
   const [parlayRefreshing,setParlayRefreshing]=useState(false);
+  const [positions,setPositions]=useState<PaperPosition[]>([]);
+  const [positionsStale,setPositionsStale]=useState(false);
+  const [enteringSymbol,setEnteringSymbol]=useState<string|null>(null);
+  const [paperFeedback,setPaperFeedback]=useState('');
   const [lastParlayUpdate,setLastParlayUpdate]=useState<Date|null>(null);
   const parlayRequest=useRef(false);
   const [error,setError]=useState('');
   useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics()]).then(([d,j,a])=>{setDashboard(d);setJournal(j);setAnalytics(a)}).catch((reason:Error)=>setError(reason.message)); },[]);
-  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{const board=await getParlays();setParlays(board);setLastParlayUpdate(new Date());setParlayStale(false)}catch{setParlayStale(true)}finally{parlayRequest.current=false;setParlayRefreshing(false)}},[]);
+  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);const [boardResult,positionsResult]=await Promise.allSettled([getParlays(),getPaperPositions()]);if(boardResult.status==='fulfilled'){setParlays(boardResult.value);setLastParlayUpdate(new Date());setParlayStale(false)}else setParlayStale(true);if(positionsResult.status==='fulfilled'){setPositions(positionsResult.value.positions);setPositionsStale(false)}else setPositionsStale(true);parlayRequest.current=false;setParlayRefreshing(false)},[]);
   useEffect(()=>{void refreshParlays();const timer=window.setInterval(()=>void refreshParlays(),15000);return()=>window.clearInterval(timer)},[refreshParlays]);
+  const enterPaper=useCallback(async(candidate:ParlayCandidate)=>{if(!parlays)return;setEnteringSymbol(candidate.symbol);setPaperFeedback('');try{await paperEnter(candidate,parlays.provider_status.mode);setPaperFeedback(`${candidate.symbol} paper position recorded at the current ask.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to record paper position')}finally{setEnteringSymbol(null)}},[parlays,refreshParlays]);
+  const exitPaper=useCallback(async(position:PaperPosition)=>{if(!window.confirm(`Close the simulated ${position.symbol} position? This does not place an order.`))return;setPaperFeedback('');try{await exitPaperPosition(position.id,'USER CONFIRMED PAPER EXIT');setPaperFeedback(`${position.symbol} paper position closed.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to close paper position')}},[refreshParlays]);
   return <main>
-    {parlays?<ParlayBoard data={parlays} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()}/>:<ParlaySkeleton/>}
+    {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
+    {parlays?<ParlayBoard data={parlays} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol}/>:<ParlaySkeleton/>}
     <nav>{['parlay','context','charts','structured','lottery','journal','analytics'].map(item=><a key={item} href={`#${item}`}>{item}</a>)}</nav>
     {error&&<Card title="Unable to load market context" danger><p>{error}</p><p>The Parlay board will continue retrying independently.</p></Card>}
     {!dashboard&&<section className="legacy-skeleton" aria-label="Loading market context"/>}
