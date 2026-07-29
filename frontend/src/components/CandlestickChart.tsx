@@ -154,19 +154,19 @@ export function CandlestickChart({ symbol, currentPrice, levels, directionalBias
     const chart = createChart(container, {
       width: container.clientWidth,
       height: 340,
-      layout: { background: { type: ColorType.Solid, color: '#090f18' }, textColor: '#91a0b5', fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' },
-      grid: { vertLines: { color: '#172231' }, horzLines: { color: '#172231' } },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#718096', labelBackgroundColor: '#253348' }, horzLine: { color: '#718096', labelBackgroundColor: '#253348' } },
-      rightPriceScale: { borderColor: '#263244', scaleMargins: { top: 0.12, bottom: 0.12 } },
-      timeScale: { borderColor: '#263244', timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 6 },
+      layout: { background: { type: ColorType.Solid, color: '#ffffff' }, textColor: '#667085', fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' },
+      grid: { vertLines: { color: '#eef1f4' }, horzLines: { color: '#eef1f4' } },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#98a2b3', labelBackgroundColor: '#344054' }, horzLine: { color: '#98a2b3', labelBackgroundColor: '#344054' } },
+      rightPriceScale: { borderColor: '#dfe4e8', scaleMargins: { top: 0.12, bottom: 0.12 } },
+      timeScale: { borderColor: '#dfe4e8', timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 6 },
       handleScroll: true,
       handleScale: true,
       kineticScroll: { touch: true, mouse: true },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#36d6a3', downColor: '#f06472', borderUpColor: '#36d6a3', borderDownColor: '#f06472',
-      wickUpColor: '#64e8bb', wickDownColor: '#f58a95', priceLineVisible: false,
+      upColor: '#009f8c', downColor: '#d96b6b', borderUpColor: '#009f8c', borderDownColor: '#d96b6b',
+      wickUpColor: '#009f8c', wickDownColor: '#d96b6b', priceLineVisible: false,
     });
     candleSeries.setData(candles);
     liquidityLevels.forEach((level) => candleSeries.createPriceLine({
