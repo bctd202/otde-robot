@@ -47,10 +47,8 @@ def paper_position_exit(position_id: int, payload: PaperPositionExit, db: Sessio
     if position.lifecycle_status == "CLOSED":
         raise HTTPException(status_code=409, detail="Paper position is already closed")
     option_price, underlying_price, freshness = market_mark(position, get_provider())
-    option_price = option_price if option_price is not None else position.last_option_price
-    underlying_price = underlying_price if underlying_price is not None else position.last_underlying_price
     if option_price is None:
-        raise HTTPException(status_code=409, detail="No defensible paper exit price is available")
+        raise HTTPException(status_code=409, detail="No current defensible paper exit price is available")
     position.exit_option_price = option_price
     position.exit_underlying_price = underlying_price
     position.exit_reason = payload.reason

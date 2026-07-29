@@ -108,12 +108,34 @@ def test_put_invalidation_is_direction_aware(client):
 
 
 def test_missing_market_data_preserves_active_position(client):
-    position_id = client[0].post("/api/paper-positions", json=payload()).json()["id"]
+    created = client[0].post("/api/paper-positions", json=payload()).json()
     client[2].available = False
     body = client[0].get("/api/paper-positions").json()["positions"][0]
-    assert body["id"] == position_id and body["lifecycle_status"] == "ACTIVE"
+    assert body["id"] == created["id"] and body["lifecycle_status"] == "ACTIVE"
     assert body["decision_status"] == "DATA_UNAVAILABLE"
-    assert body["current_option_price"] is None
+    assert body["next_action"] == "DATA UNAVAILABLE — RETAINING LAST KNOWN POSITION STATE"
+    assert body["current_option_price"] == .75
+    assert body["current_underlying_price"] == 101
+    assert body["last_marked_at"] == created["last_marked_at"]
+    assert body["unrealized_pnl"] == 0
+    assert body["pnl_percent"] == 0
+    assert body["data_freshness"] == "data_unavailable"
+    assert body["closed_at"] is None and body["exit_option_price"] is None
+
+
+def test_unavailable_provider_cannot_exit_at_stale_mark(client):
+    created = client[0].post("/api/paper-positions", json=payload()).json()
+    client[2].available = False
+    response = client[0].post(f"/api/paper-positions/{created['id']}/exit",
+                              json={"reason": "MANUAL PAPER EXIT", "paper_only": True})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "No current defensible paper exit price is available"
+    with client[1]() as db:
+        position = db.get(ParlayPaperPosition, created["id"])
+        assert position is not None
+        assert position.lifecycle_status == "ACTIVE"
+        assert position.exit_option_price is None
+        assert position.closed_at is None
 
 
 def test_explicit_exit_realized_pnl_and_repeated_exit_rejection(client):

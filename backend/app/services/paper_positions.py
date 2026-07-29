@@ -78,13 +78,14 @@ def market_mark(position: ParlayPaperPosition, provider: Any) -> tuple[float | N
 
 
 def serialize(position: ParlayPaperPosition, *, option_price: float | None = None,
-              underlying_price: float | None = None, freshness: str | None = None) -> PaperPositionOut:
+              underlying_price: float | None = None, freshness: str | None = None,
+              market_data_available: bool = True) -> PaperPositionOut:
     closed = position.lifecycle_status == "CLOSED"
     current_option = position.exit_option_price if closed else option_price
     current_underlying = position.exit_underlying_price if closed else underlying_price
     if closed:
         decision, action = "CLOSED", f"CLOSED — {position.exit_reason}"
-    elif current_option is None or current_underlying is None:
+    elif not market_data_available or current_option is None or current_underlying is None:
         decision, action = "DATA_UNAVAILABLE", "DATA UNAVAILABLE — RETAINING LAST KNOWN POSITION STATE"
     else:
         decision, action = management_decision(position, current_option, current_underlying)
@@ -124,4 +125,10 @@ def refresh_position(db: Session, position: ParlayPaperPosition, provider: Any) 
         position.last_marked_at = datetime.now(timezone.utc)
         position.data_freshness = freshness
         db.commit()
-    return serialize(position, option_price=option_price, underlying_price=underlying_price, freshness=freshness)
+        return serialize(position, option_price=option_price, underlying_price=underlying_price,
+                         freshness=freshness)
+    # Retain the most recent mark for display and P&L, but keep the unavailable
+    # decision explicit so stale values can never trigger management logic.
+    return serialize(position, option_price=position.last_option_price,
+                     underlying_price=position.last_underlying_price,
+                     freshness=freshness, market_data_available=False)
