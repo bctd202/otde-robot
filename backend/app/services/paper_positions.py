@@ -1,11 +1,31 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal, cast
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
+
+EASTERN = ZoneInfo("America/New_York")
+
+
+def eastern_trading_date() -> date:
+    """Return the calendar date used by the US options market."""
+    return datetime.now(EASTERN).date()
+
+
+def expire_if_past_expiration(db: Session, position: ParlayPaperPosition) -> bool:
+    """Persist expiration without inventing a settlement or exit transaction."""
+    if position.lifecycle_status == "ACTIVE" and position.expiration < eastern_trading_date():
+        position.lifecycle_status = "EXPIRED"
+        position.expired_at = datetime.now(timezone.utc)
+        position.data_freshness = "historical_stale"
+        db.commit()
+        db.refresh(position)
+        return True
+    return position.lifecycle_status == "EXPIRED"
 
 
 def management_decision(position: ParlayPaperPosition, option_price: float, underlying_price: float) -> tuple[str, str]:
@@ -81,17 +101,20 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
               underlying_price: float | None = None, freshness: str | None = None,
               market_data_available: bool = True) -> PaperPositionOut:
     closed = position.lifecycle_status == "CLOSED"
+    expired = position.lifecycle_status == "EXPIRED"
     current_option = position.exit_option_price if closed else option_price
     current_underlying = position.exit_underlying_price if closed else underlying_price
     if closed:
         decision, action = "CLOSED", f"CLOSED — {position.exit_reason}"
+    elif expired:
+        decision, action = "EXPIRED", "EXPIRED — LAST-KNOWN PRICES ARE HISTORICAL; NO SETTLEMENT FABRICATED"
     elif not market_data_available or current_option is None or current_underlying is None:
         decision, action = "DATA_UNAVAILABLE", "DATA UNAVAILABLE — RETAINING LAST KNOWN POSITION STATE"
     else:
         decision, action = management_decision(position, current_option, current_underlying)
-    unrealized = None if closed or current_option is None else round((current_option - position.entry_option_price) * 100 * position.quantity, 2)
+    unrealized = None if closed or expired or current_option is None else round((current_option - position.entry_option_price) * 100 * position.quantity, 2)
     realized = None if not closed or position.exit_option_price is None else round((position.exit_option_price - position.entry_option_price) * 100 * position.quantity, 2)
-    pnl_price = position.exit_option_price if closed else current_option
+    pnl_price = position.exit_option_price if closed else (None if expired else current_option)
     pnl_percent = None if pnl_price is None else round((pnl_price - position.entry_option_price) / position.entry_option_price * 100, 2)
     return PaperPositionOut(
         id=position.id, symbol=position.symbol, option_symbol=position.option_symbol,
@@ -108,16 +131,21 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
         provider_mode=position.provider_mode, opened_at=position.opened_at,
         closed_at=position.closed_at, exit_option_price=position.exit_option_price,
         exit_underlying_price=position.exit_underlying_price, exit_reason=position.exit_reason,
-        lifecycle_status=position.lifecycle_status, current_option_price=current_option,
+        lifecycle_status=position.lifecycle_status, expired_at=position.expired_at,
+        current_option_price=current_option,
         current_underlying_price=current_underlying, unrealized_pnl=unrealized,
         realized_pnl=realized, pnl_percent=pnl_percent,
-        decision_status=cast(Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "CLOSED"], decision),
+        decision_status=cast(Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "EXPIRED", "CLOSED"], decision),
         data_freshness=freshness or position.data_freshness, next_action=action,
         last_marked_at=position.last_marked_at, paper_only=True,
     )
 
 
 def refresh_position(db: Session, position: ParlayPaperPosition, provider: Any) -> PaperPositionOut:
+    if expire_if_past_expiration(db, position):
+        return serialize(position, option_price=position.last_option_price,
+                         underlying_price=position.last_underlying_price,
+                         freshness="historical_stale", market_data_available=False)
     option_price, underlying_price, freshness = market_mark(position, provider)
     if option_price is not None and underlying_price is not None:
         position.last_option_price = option_price

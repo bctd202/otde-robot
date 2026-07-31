@@ -45,6 +45,13 @@ export function ParlayBoard({
     (candidate) => candidate.signal_status === 'BUY' || candidate.signal_status === 'WATCH',
   );
   const hero = qualified[0];
+  // Keep aggregate reporting resilient while a cached response from an older
+  // local backend is replaced after an incremental deployment.
+  const scannerHealth = data.scanner_health ?? {
+    candidate_count: data.candidates.length,
+    unavailable_candidate_count: data.candidates.filter((candidate) => candidate.signal_status === 'UNAVAILABLE').length,
+    provider_status: data.provider_status.status,
+  };
 
   return <section id="parlay" className="parlay-board" aria-labelledby="parlay-title">
     <header className="parlay-header">
@@ -62,12 +69,16 @@ export function ParlayBoard({
           <p>Disciplined, paper-only market research</p>
         </div>
       </div>
-      <ProviderStatus provider={data.provider_status} updated={updated} refreshing={refreshing} />
+      <ProviderStatus provider={data.provider_status} updated={updated} refreshing={refreshing} onRefresh={onRetry} />
     </header>
 
     <div className="board-meta">
       <p className="paper-notice"><strong>Paper only</strong><span>No live orders are placed.</span></p>
-      <p className="freshness">Data freshness: <strong>{data.candidates[0]?.data_freshness ?? data.provider_status.status}</strong></p>
+      <p className="freshness" aria-label="Aggregate scanner health">
+        Scanner health: <strong>{scannerHealth.candidate_count} candidates</strong>
+        <span>{scannerHealth.unavailable_candidate_count} unavailable</span>
+        <span>Provider {scannerHealth.provider_status}</span>
+      </p>
     </div>
     {stale && <StaleDataWarning updated={updated} onRetry={onRetry} />}
 

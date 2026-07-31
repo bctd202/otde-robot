@@ -6,6 +6,22 @@ import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import type { Analytics, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
 import './style.css';
 
+export const PARLAY_REFRESH_INTERVAL_MS = 120_000;
+
+const statusOrder:Record<ParlayCandidate['signal_status'],number>={BUY:0,WATCH:1,MISSED:2,PASS:3,UNAVAILABLE:4};
+
+export function stabilizeCandidateOrder(next:ParlayResponse,previous:ParlayResponse|null):ParlayResponse {
+  if(!previous)return next;
+  const priorIndex=new Map(previous.candidates.map((candidate,index)=>[candidate.symbol,index]));
+  const candidates=[...next.candidates].sort((left,right)=>{
+    const statusDifference=statusOrder[left.signal_status]-statusOrder[right.signal_status];
+    if(statusDifference!==0)return statusDifference;
+    if(Math.abs(left.score-right.score)>1)return right.score-left.score;
+    return (priorIndex.get(left.symbol)??Number.MAX_SAFE_INTEGER)-(priorIndex.get(right.symbol)??Number.MAX_SAFE_INTEGER);
+  }).map((candidate,index)=>({...candidate,ranking_position:index+1}));
+  return {...next,candidates};
+}
+
 function Card({title,children,danger=false,id}:{title:string;children:React.ReactNode;danger?:boolean;id?:string}) { return <section id={id} className={`card ${danger?'danger':''}`}><h2>{title}</h2>{children}</section> }
 function Metric({label,value}:{label:string;value:React.ReactNode}) { return <div className="metric"><span>{label}</span><strong>{value}</strong></div> }
 function formatLevels(values:number[]):string { return values.length ? values.map(value=>value.toFixed(2)).join(', ') : 'None detected'; }
@@ -30,8 +46,8 @@ export function App() {
   const parlayRequest=useRef(false);
   const [error,setError]=useState('');
   useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics()]).then(([d,j,a])=>{setDashboard(d);setJournal(j);setAnalytics(a)}).catch((reason:Error)=>setError(reason.message)); },[]);
-  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);const [boardResult,positionsResult]=await Promise.allSettled([getParlays(),getPaperPositions()]);if(boardResult.status==='fulfilled'){setParlays(boardResult.value);setLastParlayUpdate(new Date());setParlayStale(false)}else setParlayStale(true);if(positionsResult.status==='fulfilled'){setPositions(positionsResult.value.positions);setPositionsStale(false)}else setPositionsStale(true);parlayRequest.current=false;setParlayRefreshing(false)},[]);
-  useEffect(()=>{void refreshParlays();const timer=window.setInterval(()=>void refreshParlays(),15000);return()=>window.clearInterval(timer)},[refreshParlays]);
+  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{const [boardResult,positionsResult]=await Promise.all([getParlays(),getPaperPositions()]);setParlays(previous=>stabilizeCandidateOrder(boardResult,previous));setPositions(positionsResult.positions);setLastParlayUpdate(new Date());setParlayStale(false);setPositionsStale(false)}catch{setParlayStale(true);setPositionsStale(true)}finally{parlayRequest.current=false;setParlayRefreshing(false)}},[]);
+  useEffect(()=>{void refreshParlays();const timer=window.setInterval(()=>void refreshParlays(),PARLAY_REFRESH_INTERVAL_MS);return()=>window.clearInterval(timer)},[refreshParlays]);
   const enterPaper=useCallback(async(candidate:ParlayCandidate)=>{if(!parlays)return;setEnteringSymbol(candidate.symbol);setPaperFeedback('');try{await paperEnter(candidate,parlays.provider_status.mode);setPaperFeedback(`${candidate.symbol} paper position recorded at the current ask.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to record paper position')}finally{setEnteringSymbol(null)}},[parlays,refreshParlays]);
   const exitPaper=useCallback(async(position:PaperPosition)=>{if(!window.confirm(`Close the simulated ${position.symbol} position? This does not place an order.`))return;setPaperFeedback('');try{await exitPaperPosition(position.id,'USER CONFIRMED PAPER EXIT');setPaperFeedback(`${position.symbol} paper position closed.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to close paper position')}},[refreshParlays]);
   const chartQuote=dashboard?.quotes.find(quote=>quote.symbol==='SPY'&&Boolean(dashboard.levels[quote.symbol]))

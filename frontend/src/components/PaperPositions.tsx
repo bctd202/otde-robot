@@ -6,6 +6,7 @@ const time=(value:string|null)=>value?new Intl.DateTimeFormat('en-US',{dateStyle
 
 export function PaperPositions({positions,stale,onExit}:{positions:PaperPosition[];stale:boolean;onExit:(position:PaperPosition)=>void}){
   const active=positions.filter(position=>position.lifecycle_status==='ACTIVE');
+  const expired=positions.filter(position=>position.lifecycle_status==='EXPIRED');
   const closed=positions.filter(position=>position.lifecycle_status==='CLOSED');
   return <div className="paper-positions-region">
     <section className="paper-positions" aria-labelledby="open-paper-title">
@@ -18,6 +19,7 @@ export function PaperPositions({positions,stale,onExit}:{positions:PaperPosition
         <button className="paper-exit" type="button" onClick={()=>onExit(position)}>Exit Paper Position</button>
       </article>)}</div>}
     </section>
+    {expired.length>0&&<section className="recent-exits expired-positions" aria-labelledby="expired-positions-title"><h2 id="expired-positions-title">Expired Paper Positions</h2>{expired.map(position=><article key={position.id}><strong>{position.symbol} {position.direction.toUpperCase()}</strong><span>Expired {position.expiration}</span><span>Last-known option {price(position.current_option_price)}</span><span>Last-known underlying {price(position.current_underlying_price)}</span><span>Historical / stale — no settlement price recorded</span><time>Last marked {time(position.last_marked_at)}</time></article>)}</section>}
     {closed.length>0&&<section className="recent-exits" aria-labelledby="recent-exits-title"><h2 id="recent-exits-title">Recent Paper Exits</h2>{closed.map(position=><article key={position.id}><strong>{position.symbol} {position.direction.toUpperCase()}</strong><span>Entry {price(position.entry_option_price)}</span><span>Exit {price(position.exit_option_price)}</span><span>Realized {position.realized_pnl===null?'—':dollars.format(position.realized_pnl)}</span><span>{position.exit_reason}</span><time>{time(position.opened_at)} → {time(position.closed_at)}</time></article>)}</section>}
   </div>;
 }

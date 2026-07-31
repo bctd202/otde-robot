@@ -59,13 +59,14 @@ class PaperPositionOut(BaseModel):
     exit_option_price: float | None
     exit_underlying_price: float | None
     exit_reason: str | None
-    lifecycle_status: Literal["ACTIVE", "CLOSED"]
+    lifecycle_status: Literal["ACTIVE", "EXPIRED", "CLOSED"]
+    expired_at: datetime | None
     current_option_price: float | None
     current_underlying_price: float | None
     unrealized_pnl: float | None
     realized_pnl: float | None
     pnl_percent: float | None
-    decision_status: Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "CLOSED"]
+    decision_status: Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "EXPIRED", "CLOSED"]
     data_freshness: str
     next_action: str
     last_marked_at: datetime | None
