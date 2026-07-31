@@ -1,6 +1,7 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import { App } from './main';
+import { App, PARLAY_REFRESH_INTERVAL_MS, stabilizeCandidateOrder } from './main';
+import type { ParlayCandidate, ParlayResponse } from './types';
 
 vi.mock('lightweight-charts', () => ({
   CandlestickSeries: {},
@@ -72,4 +73,53 @@ test('uses the first quoted symbol with liquidity levels when SPY has none',asyn
   expect(screen.getByLabelText('Liquidity context')).toHaveTextContent('bearish');
   expect(screen.queryByText('Chart unavailable')).not.toBeInTheDocument();
   expect(screen.getByText('Market Context')).toBeInTheDocument();
+});
+
+test('schedules automatic Parlay scans every 120 seconds',()=>{
+  const interval=vi.spyOn(window,'setInterval');
+  renderDashboard({});
+  expect(PARLAY_REFRESH_INTERVAL_MS).toBe(120_000);
+  expect(interval).toHaveBeenCalledWith(expect.any(Function),120_000);
+});
+
+test('manual refresh retains the board, prevents overlap, and marks a failed scan stale',async()=>{
+  const interval=vi.spyOn(window,'setInterval');
+  const providerStatus={provider:'tradier',mode:'live',status:'healthy',delay_seconds:0,latest_timestamp:'2026-07-29T14:00:00-04:00',message:'Live paper research data.'};
+  const dashboard={provider_status:providerStatus,quotes:[],market_session:'regular',volatility_proxy:null,levels:{},directional_bias:{},news_warning:'',normal_setups:[],lottery_setups:[],no_trade:true,paper_account:{mode:'PAPER ONLY',equity:25000,kill_switch:false}};
+  const board={provider_status:providerStatus,universe:['SPY'],scanner_health:{candidate_count:0,unavailable_candidate_count:0,provider_status:'healthy'},paper_only:true,candidates:[]};
+  let parlayCalls=0;
+  let rejectRefresh:((reason?:unknown)=>void)|undefined;
+  vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>{
+    const url=String(input);
+    if(url.includes('parlays')){
+      parlayCalls+=1;
+      if(parlayCalls>1)return new Promise<Response>((_,reject)=>{rejectRefresh=reject});
+      return new Response(JSON.stringify(board),{status:200,headers:{'Content-Type':'application/json'}});
+    }
+    const body=url.includes('paper-positions')?{positions:[],paper_only:true}:url.includes('dashboard')?dashboard:url.includes('journal')?[]:{minimum_sample_size:30,sample_size:0,statistically_promising:false,win_rate:0,profit_factor:null,average_winner:0,average_loser:0,expectancy:0,message:'No samples.'};
+    return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+  });
+  render(<App/>);
+  await waitFor(()=>expect(screen.getByText('NO QUALIFIED PARLAYS RIGHT NOW')).toBeInTheDocument());
+  const refresh=screen.getByRole('button',{name:'Refresh'});
+  fireEvent.click(refresh);
+  fireEvent.click(refresh);
+  const automaticScan=interval.mock.calls.find(([,delay])=>delay===PARLAY_REFRESH_INTERVAL_MS)?.[0];
+  await act(async()=>{if(typeof automaticScan==='function')automaticScan()});
+  expect(parlayCalls).toBe(2);
+  expect(refresh).toBeDisabled();
+  expect(screen.getByText('NO QUALIFIED PARLAYS RIGHT NOW')).toBeInTheDocument();
+  expect(screen.getByText('Refreshing…')).toBeVisible();
+  await act(async()=>rejectRefresh?.(new Error('scan failed')));
+  await waitFor(()=>expect(screen.getByText('Stale data.')).toBeInTheDocument());
+  expect(screen.getByText('NO QUALIFIED PARLAYS RIGHT NOW')).toBeInTheDocument();
+  expect(refresh).toBeEnabled();
+});
+
+test('keeps prior order for same-status candidates with similar scores',()=>{
+  const spy={symbol:'SPY',signal_status:'WATCH',score:80,ranking_position:1} as ParlayCandidate;
+  const qqq={symbol:'QQQ',signal_status:'WATCH',score:79.5,ranking_position:2} as ParlayCandidate;
+  const previous={provider_status:{provider:'mock',mode:'mock',status:'healthy',delay_seconds:0,latest_timestamp:'',message:''},universe:['SPY','QQQ'],scanner_health:{candidate_count:2,unavailable_candidate_count:0,provider_status:'healthy'},paper_only:true,candidates:[spy,qqq]} satisfies ParlayResponse;
+  const next={...previous,candidates:[{...qqq,score:80.2,ranking_position:1},{...spy,ranking_position:2}]};
+  expect(stabilizeCandidateOrder(next,previous).candidates.map(candidate=>candidate.symbol)).toEqual(['SPY','QQQ']);
 });

@@ -7,7 +7,7 @@ from app.core.config import get_settings
 from app.db.models import ParlayPaperPosition, Signal, TradeOutcome
 from app.db.session import get_db
 from app.market_data.factory import get_provider
-from app.schemas.market import DashboardOut, ParlayResponse
+from app.schemas.market import DashboardOut, ParlayResponse, ScannerHealth
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
@@ -73,11 +73,11 @@ def parlays():
         provider_status=provider.status(),
         universe=universe,
         candidates=candidates,
-        scanner_health={
-            "candidate_count": len(candidates),
-            "unavailable_candidate_count": sum(candidate.signal_status == "UNAVAILABLE" for candidate in candidates),
-            "provider_status": provider.status().status,
-        },
+        scanner_health=ScannerHealth(
+            candidate_count=len(candidates),
+            unavailable_candidate_count=sum(candidate.signal_status == "UNAVAILABLE" for candidate in candidates),
+            provider_status=provider.status().status,
+        ),
     )
 
 @router.get("/health")

@@ -69,7 +69,7 @@ export function ParlayBoard({
           <p>Disciplined, paper-only market research</p>
         </div>
       </div>
-      <ProviderStatus provider={data.provider_status} updated={updated} refreshing={refreshing} />
+      <ProviderStatus provider={data.provider_status} updated={updated} refreshing={refreshing} onRefresh={onRetry} />
     </header>
 
     <div className="board-meta">
