@@ -149,3 +149,8 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
     assert body["paper_only"] is True
     assert body["universe"] == get_settings().parlay_symbol_list
     assert len(body["candidates"]) == 12
+    assert body["scanner_health"] == {
+        "candidate_count": 12,
+        "unavailable_candidate_count": 0,
+        "provider_status": "healthy",
+    }

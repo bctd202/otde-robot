@@ -14,6 +14,7 @@ from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.parlay import rank_parlays
 from app.services.paper_positions import (create_position, market_mark,
+                                          expire_if_past_expiration,
                                           refresh_position, serialize)
 
 router = APIRouter()
@@ -34,7 +35,8 @@ def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(ge
 def paper_positions(db: Session = Depends(get_db)):
     rows = db.scalars(select(ParlayPaperPosition).order_by(ParlayPaperPosition.opened_at.desc()).limit(50)).all()
     provider = get_provider()
-    output = [refresh_position(db, row, provider) if row.lifecycle_status == "ACTIVE" else serialize(row)
+    output = [refresh_position(db, row, provider) if row.lifecycle_status == "ACTIVE" else
+              serialize(row, option_price=row.last_option_price, underlying_price=row.last_underlying_price)
               for row in rows]
     return PaperPositionsResponse(positions=output)
 
@@ -44,6 +46,8 @@ def paper_position_exit(position_id: int, payload: PaperPositionExit, db: Sessio
     position = db.get(ParlayPaperPosition, position_id)
     if position is None:
         raise HTTPException(status_code=404, detail="Paper position not found")
+    if expire_if_past_expiration(db, position):
+        raise HTTPException(status_code=409, detail="Expired paper positions cannot be exited")
     if position.lifecycle_status == "CLOSED":
         raise HTTPException(status_code=409, detail="Paper position is already closed")
     option_price, underlying_price, freshness = market_mark(position, get_provider())
@@ -69,6 +73,11 @@ def parlays():
         provider_status=provider.status(),
         universe=universe,
         candidates=candidates,
+        scanner_health={
+            "candidate_count": len(candidates),
+            "unavailable_candidate_count": sum(candidate.signal_status == "UNAVAILABLE" for candidate in candidates),
+            "provider_status": provider.status().status,
+        },
     )
 
 @router.get("/health")

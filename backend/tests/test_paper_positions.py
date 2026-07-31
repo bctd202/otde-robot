@@ -11,6 +11,7 @@ from app.db.models import ParlayPaperPosition
 from app.db.session import Base, get_db
 from app.main import app
 from app.schemas.market import OptionContractOut, ProviderStatus, Quote
+from app.services import paper_positions as paper_position_service
 
 
 NOW = datetime(2026, 7, 29, 14, 30, tzinfo=timezone.utc)
@@ -19,6 +20,7 @@ NOW = datetime(2026, 7, 29, 14, 30, tzinfo=timezone.utc)
 class Provider:
     def __init__(self, underlying: float = 101, bid: float = 0.7, available: bool = True):
         self.underlying, self.bid, self.available = underlying, bid, available
+        self.option_chain_calls = 0
 
     def status(self):
         return ProviderStatus(provider="test", mode="mock", status="healthy" if self.available else "unavailable",
@@ -28,6 +30,7 @@ class Provider:
         return [Quote(symbol=symbols[0], price=self.underlying, timestamp=NOW)] if self.available else []
 
     def option_chain(self, symbol):
+        self.option_chain_calls += 1
         if not self.available:
             return []
         return [OptionContractOut(symbol=symbol, option_symbol="SPY260729C00101000", expiration=date(2026, 7, 29),
@@ -48,6 +51,7 @@ def client(monkeypatch):
 
     app.dependency_overrides[get_db] = db_override
     monkeypatch.setattr(routes, "get_provider", lambda: provider)
+    monkeypatch.setattr(paper_position_service, "eastern_trading_date", lambda: date(2026, 7, 29))
     with TestClient(app) as test_client:
         yield test_client, local, provider
     app.dependency_overrides.clear()
@@ -149,3 +153,31 @@ def test_explicit_exit_realized_pnl_and_repeated_exit_rejection(client):
     assert response.json()["exit_reason"] == "MANUAL PAPER EXIT"
     assert client[0].post(f"/api/paper-positions/{created['id']}/exit",
                           json={"reason": "again", "paper_only": True}).status_code == 409
+
+
+def test_past_expiration_becomes_expired_without_market_mark_or_settlement(client, monkeypatch):
+    created = client[0].post("/api/paper-positions", json=payload()).json()
+    calls_before = client[2].option_chain_calls
+    monkeypatch.setattr(paper_position_service, "eastern_trading_date", lambda: date(2026, 7, 30))
+
+    body = client[0].get("/api/paper-positions").json()["positions"][0]
+
+    assert body["id"] == created["id"]
+    assert body["lifecycle_status"] == "EXPIRED"
+    assert body["decision_status"] == "EXPIRED"
+    assert body["data_freshness"] == "historical_stale"
+    assert body["current_option_price"] == .75
+    assert body["current_underlying_price"] == 101
+    assert body["unrealized_pnl"] is None and body["pnl_percent"] is None
+    assert body["expired_at"] is not None
+    assert body["closed_at"] is None and body["exit_option_price"] is None
+    assert client[2].option_chain_calls == calls_before
+
+
+def test_expired_position_cannot_be_manually_exited(client, monkeypatch):
+    created = client[0].post("/api/paper-positions", json=payload()).json()
+    monkeypatch.setattr(paper_position_service, "eastern_trading_date", lambda: date(2026, 7, 30))
+    response = client[0].post(f"/api/paper-positions/{created['id']}/exit",
+                              json={"reason": "MANUAL PAPER EXIT", "paper_only": True})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Expired paper positions cannot be exited"

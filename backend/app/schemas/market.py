@@ -147,8 +147,15 @@ class ParlayCandidateOut(BaseModel):
     generated_at: datetime
     data_freshness: str
 
+class ScannerHealth(BaseModel):
+    candidate_count: int
+    unavailable_candidate_count: int
+    provider_status: str
+
+
 class ParlayResponse(BaseModel):
     provider_status: ProviderStatus
     universe: list[str]
     candidates: list[ParlayCandidateOut]
+    scanner_health: ScannerHealth
     paper_only: bool = True

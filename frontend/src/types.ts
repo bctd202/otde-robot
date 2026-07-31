@@ -20,8 +20,9 @@ export interface ParlayCandidate {
   first_option_target:number|null; stretch_option_target:number|null; reasons:string[]; rejection_reasons:string[];
   unavailable_reason:string|null; primary_action:string; generated_at:string; data_freshness:string;
 }
-export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; paper_only:boolean }
-export type PaperDecision='HOLD'|'TAKE_PROFIT'|'EXIT'|'DATA_UNAVAILABLE'|'CLOSED';
+export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string }
+export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; scanner_health:ScannerHealth; paper_only:boolean }
+export type PaperDecision='HOLD'|'TAKE_PROFIT'|'EXIT'|'DATA_UNAVAILABLE'|'EXPIRED'|'CLOSED';
 export interface PaperPosition {
   id:number; symbol:string; option_symbol:string; direction:'call'|'put'; expiration:string; strike:number;
   quantity:number; entry_option_price:number; entry_underlying_price:number; total_debit:number;
@@ -29,7 +30,7 @@ export interface PaperPosition {
   stretch_underlying_target:number; first_option_target:number; stretch_option_target:number;
   score:number; score_label:string; entry_reasons:string[]; provider_mode:string; opened_at:string;
   closed_at:string|null; exit_option_price:number|null; exit_underlying_price:number|null; exit_reason:string|null;
-  lifecycle_status:'ACTIVE'|'CLOSED'; current_option_price:number|null; current_underlying_price:number|null;
+  lifecycle_status:'ACTIVE'|'EXPIRED'|'CLOSED'; expired_at:string|null; current_option_price:number|null; current_underlying_price:number|null;
   unrealized_pnl:number|null; realized_pnl:number|null; pnl_percent:number|null; decision_status:PaperDecision;
   data_freshness:string; next_action:string; last_marked_at:string|null; paper_only:boolean;
 }
