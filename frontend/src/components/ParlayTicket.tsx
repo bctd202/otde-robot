@@ -1,14 +1,68 @@
 import type { ParlayCandidate } from '../types';
 import { DirectionBadge } from './DirectionBadge';
-import { SignalBadge } from './SignalBadge';
-import { TradePlan } from './TradePlan';
-const value=(number:number|null)=>number===null?'—':`$${number.toFixed(2)}`;
-export function ParlayTicket({candidate,hero=false,onPaperEnter,entering=false}:{candidate:ParlayCandidate;hero?:boolean;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) { return <article className={`parlay-ticket ${hero?'hero-ticket':''}`}>
-  {hero&&<p className="ticket-kicker">Best Play Right Now</p>}
-  <div className="ticket-top"><span className="ranking">#{candidate.ranking_position}</span><div><h3>{candidate.symbol}</h3><DirectionBadge direction={candidate.direction}/></div><SignalBadge status={candidate.signal_status}/><div className="score"><strong>{candidate.score.toFixed(1)}</strong><span>{candidate.score_label}</span></div></div>
-  <p className="primary-action">{candidate.primary_action}</p>
-  {candidate.contract&&<div className="contract-line"><strong>{candidate.contract.option_symbol}</strong><span>Bid {value(candidate.contract.bid)}</span><span>Ask {value(candidate.contract.ask)}</span><span>Cost {value(candidate.contract_cost)}</span></div>}
-  <TradePlan candidate={candidate}/>
-  {candidate.reasons.length>0&&<div className="ticket-reasons"><span>WHY THIS RANKS</span><ul>{candidate.reasons.slice(0,3).map(reason=><li key={reason}>✓ {reason}</li>)}</ul></div>}
-  {candidate.signal_status==='BUY'&&candidate.contract&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
-</article>; }
+
+const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
+const date=(value:string)=>{
+  if(!value)return '—';
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())?value:parsed.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+};
+const time=(value:string)=>{
+  if(!value)return '—';
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())?value:parsed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+};
+
+export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) {
+  const action=candidate.signal_status==='BUY'?'BUY NOW':'WAIT';
+  const contract=candidate.contract;
+  return <article className={`parlay-ticket decision-ticket decision-${candidate.signal_status.toLowerCase()}`}>
+    <header className="decision-header">
+      <div><span className="ranking">#{candidate.ranking_position}</span><h3>{candidate.symbol}</h3></div>
+      <DirectionBadge direction={candidate.direction}/>
+      <strong className="decision-action">{action}</strong>
+    </header>
+
+    <div className="decision-prices">
+      <div><span>Current underlying price</span><strong>{money(candidate.underlying_price)}</strong></div>
+      <div><span>Underlying entry</span><strong>{money(candidate.underlying_trigger)}</strong></div>
+      <div className="risk"><span>Underlying stop</span><strong>{money(candidate.underlying_invalidation)}</strong></div>
+      <div><span>Underlying target</span><strong>{money(candidate.first_underlying_target)}</strong></div>
+    </div>
+
+    <section className="contract-block" aria-label={`${candidate.symbol} exact option contract`}>
+      <p>Exact option contract</p>
+      {contract?<>
+        <strong className="option-symbol">{contract.option_symbol}</strong>
+        <dl>
+          <div><dt>Expiration</dt><dd>{date(contract.expiration)}</dd></div>
+          <div><dt>Strike</dt><dd>{money(contract.strike)}</dd></div>
+          <div><dt>Option type</dt><dd>{contract.right.toUpperCase()}</dd></div>
+          <div><dt>Current bid</dt><dd>{money(contract.bid)}</dd></div>
+          <div><dt>Option ask</dt><dd>{money(contract.ask)}</dd></div>
+          <div className="contract-cost"><dt>Estimated contract cost</dt><dd>{money(candidate.contract_cost)}</dd></div>
+        </dl>
+      </>:<strong>Contract unavailable — wait for complete data</strong>}
+    </section>
+
+    <div className="signal-clock">
+      <span><b>Signal timing</b> Intraday setup generated {time(candidate.generated_at)}</span>
+      <span><b>Last updated</b> {time(contract?.timestamp||candidate.generated_at)}</span>
+    </div>
+
+    <details className="setup-explanation">
+      <summary>Why this setup?</summary>
+      <div className="diagnostic-grid">
+        <p><span>Score</span><strong>{candidate.score.toFixed(1)} · {candidate.score_label}</strong></p>
+        <p><span>Technical action</span><strong>{candidate.primary_action}</strong></p>
+        <p><span>Data freshness</span><strong>{candidate.data_freshness.replaceAll('_',' ')}</strong></p>
+        <p><span>Entry range</span><strong>{money(candidate.entry_low)}–{money(candidate.entry_high)}</strong></p>
+        <p><span>No-chase level</span><strong>{money(candidate.no_chase_price)}</strong></p>
+        <p><span>Stretch target</span><strong>{money(candidate.stretch_underlying_target)}</strong></p>
+      </div>
+      {candidate.reasons.length>0&&<ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
+      {candidate.rejection_reasons.length>0&&<ul className="rejection-list">{candidate.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
+    </details>
+    {candidate.signal_status==='BUY'&&contract&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
+  </article>;
+}
