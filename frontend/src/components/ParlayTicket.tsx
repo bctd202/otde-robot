@@ -1,17 +1,8 @@
 import type { ParlayCandidate } from '../types';
+import { formatDateOnly, formatEasternTime } from '../lib/dates';
 import { DirectionBadge } from './DirectionBadge';
 
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
-const date=(value:string)=>{
-  if(!value)return '—';
-  const parsed=new Date(value);
-  return Number.isNaN(parsed.getTime())?value:parsed.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
-};
-const time=(value:string)=>{
-  if(!value)return '—';
-  const parsed=new Date(value);
-  return Number.isNaN(parsed.getTime())?value:parsed.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'});
-};
 
 export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) {
   const action=candidate.signal_status==='BUY'?'BUY NOW':'WAIT';
@@ -35,7 +26,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
       {contract?<>
         <strong className="option-symbol">{contract.option_symbol}</strong>
         <dl>
-          <div><dt>Expiration</dt><dd>{date(contract.expiration)}</dd></div>
+          <div><dt>Expiration</dt><dd>{formatDateOnly(contract.expiration)}</dd></div>
           <div><dt>Strike</dt><dd>{money(contract.strike)}</dd></div>
           <div><dt>Option type</dt><dd>{contract.right.toUpperCase()}</dd></div>
           <div><dt>Current bid</dt><dd>{money(contract.bid)}</dd></div>
@@ -46,8 +37,8 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
     </section>
 
     <div className="signal-clock">
-      <span><b>Signal timing</b> Intraday setup generated {time(candidate.generated_at)}</span>
-      <span><b>Last updated</b> {time(contract?.timestamp||candidate.generated_at)}</span>
+      <span><b>Signal timing</b> Intraday setup generated {formatEasternTime(candidate.generated_at)}</span>
+      <span><b>Last updated</b> {formatEasternTime(contract?.timestamp||candidate.generated_at)}</span>
     </div>
 
     <details className="setup-explanation">
