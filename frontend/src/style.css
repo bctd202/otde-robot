@@ -386,6 +386,57 @@ button:focus-visible,a:focus-visible,summary:focus-visible {
   margin:18px 0 38px;
 }
 
+/* Intraday decision board */
+.decision-section { margin:2rem 0 2.75rem; }
+.decision-section-heading { display:flex;align-items:end;justify-content:space-between;gap:1rem;margin-bottom:1rem; }
+.decision-section-heading h2 { margin:.2rem 0 0;font-size:1.65rem; }
+.decision-section-heading>span { color:var(--color-text-muted);font-size:.72rem;font-weight:800;letter-spacing:.06em; }
+.section-note,.section-empty { margin:-.55rem 0 1rem;color:var(--color-text-muted);font-size:.75rem; }
+.decision-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem; }
+.decision-ticket { min-width:0;padding:1.4rem; }
+.decision-buy { border-top:4px solid var(--color-primary); }
+.decision-watch { border-top:4px solid #d49a36; }
+.decision-header { display:flex;align-items:center;gap:.75rem; }
+.decision-header>div:first-child { display:flex;align-items:baseline;gap:.55rem; }
+.decision-header h3 { margin:0;font-size:2rem;letter-spacing:-.04em; }
+.decision-header .direction { margin:0; }
+.decision-action { margin-left:auto;padding:.55rem .75rem;border-radius:8px;background:#e7f6ee;color:#20724f;font-size:.85rem;letter-spacing:.04em; }
+.decision-watch .decision-action { background:#fff3d9;color:#8b5b10; }
+.decision-prices { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;margin-top:1.15rem;overflow:hidden;border:1px solid var(--color-border);border-radius:10px;background:var(--color-border); }
+.decision-prices>div { display:flex;flex-direction:column;gap:.35rem;padding:.8rem;background:#fff; }
+.decision-prices span,.contract-block dt,.diagnostic-grid span { color:var(--color-text-muted);font-size:.62rem;font-weight:800;letter-spacing:.04em; }
+.decision-prices strong { font-size:.9rem;font-variant-numeric:tabular-nums; }
+.decision-prices .risk strong { color:var(--color-danger); }
+.contract-block { margin-top:1rem;padding:1rem;border-radius:10px;background:var(--color-surface-subtle); }
+.contract-block>p { margin:0 0 .35rem;color:var(--color-text-muted);font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em; }
+.option-symbol { display:block;overflow-wrap:anywhere;font-size:1rem; }
+.contract-block dl { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;margin:1rem 0 0; }
+.contract-block dl div { min-width:0; }
+.contract-block dt { margin-bottom:.25rem; }
+.contract-block dd { margin:0;font-size:.82rem;font-weight:750;font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
+.contract-block .contract-cost dd { color:#087b6d;font-size:1rem; }
+.signal-clock { display:flex;flex-wrap:wrap;justify-content:space-between;gap:.5rem 1rem;margin-top:.85rem;color:var(--color-text-muted);font-size:.68rem; }
+.signal-clock b { color:var(--color-text); }
+.setup-explanation { margin-top:1rem;border-top:1px solid var(--color-border);padding-top:.85rem; }
+.setup-explanation summary { cursor:pointer;color:#087b6d;font-size:.78rem;font-weight:800; }
+.diagnostic-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin-top:.8rem; }
+.diagnostic-grid p { display:flex;flex-direction:column;gap:.25rem;margin:0; }
+.diagnostic-grid strong { font-size:.72rem;overflow-wrap:anywhere; }
+.setup-explanation ul { margin:.75rem 0 0;padding-left:1.2rem;color:#56615f;font-size:.73rem; }
+.setup-explanation .rejection-list { color:var(--color-danger); }
+.no-trade-section { margin:0 0 2.5rem;border:1px solid var(--color-border);border-radius:var(--radius-card);background:#fff;box-shadow:var(--shadow-card); }
+.no-trade-section>summary { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.15rem 1.3rem;cursor:pointer; }
+.no-trade-section>summary span { display:flex;flex-direction:column;gap:.2rem; }
+.no-trade-section>summary b { font-size:1.2rem; }
+.no-trade-section>summary small { color:var(--color-text-muted); }
+.no-trade-section>summary>strong { padding:.35rem .6rem;border-radius:999px;background:#eef1f0; }
+.no-trade-list { padding:0 1rem 1rem; }
+.no-trade-row { border-top:1px solid var(--color-border); }
+.no-trade-row>summary { display:grid;grid-template-columns:minmax(100px,1fr) auto 90px;align-items:center;gap:1rem;padding:.8rem .25rem;cursor:pointer; }
+.no-trade-row>summary>span:last-child { color:var(--color-text-muted);font-size:.7rem;text-align:right; }
+.no-trade-row>div { padding:0 .25rem 1rem;color:var(--color-text-muted);font-size:.75rem; }
+.no-trade-row p { margin:.35rem 0; }
+
 .supporting-tickets .trade-plan {
   grid-template-columns:1fr 1fr;
 }
@@ -1157,6 +1208,9 @@ footer {
   .supporting-tickets,.position-grid {
     grid-template-columns:1fr;
   }
+  .decision-grid { grid-template-columns:1fr; }
+  .decision-prices { grid-template-columns:1fr 1fr; }
+  .contract-block dl,.diagnostic-grid { grid-template-columns:1fr 1fr; }
   .trade-plan,.supporting-tickets .trade-plan {
     grid-template-columns:1fr 1fr;
   }
@@ -1232,6 +1286,11 @@ footer {
   .hero-ticket,.parlay-ticket {
     padding:20px;
   }
+  .decision-header { flex-wrap:wrap; }
+  .decision-action { width:100%;margin-left:0;text-align:center; }
+  .contract-block dl { grid-template-columns:1fr 1fr; }
+  .no-trade-row>summary { grid-template-columns:1fr auto;gap:.5rem; }
+  .no-trade-row>summary>span:last-child { grid-column:1/3;text-align:left; }
   .ticket-top h3 {
     font-size:1.6rem;
   }
