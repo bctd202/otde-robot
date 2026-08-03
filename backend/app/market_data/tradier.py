@@ -86,6 +86,23 @@ class TradierMarketDataProvider:
                 continue
         return result
 
+    def historical_candles(self, symbol: str, timeframe: str, start: date, end: date) -> list[CandleOut]:
+        """Fetch regular-session history; Tradier may truncate ranges by plan."""
+        if timeframe not in {"1m", "5m", "15m"}:
+            return []
+        data = self._get("/markets/timesales", {"symbol": symbol, "interval": timeframe.replace("m", "min"),
+            "start": f"{start.isoformat()} 09:30", "end": f"{end.isoformat()} 16:00", "session_filter": "open"})
+        result = []
+        for row in _rows(data or {}, "series", "data"):
+            try:
+                stamp = datetime.fromisoformat(str(row["time"]))
+                if stamp.tzinfo is None: stamp = stamp.replace(tzinfo=NY)
+                result.append(CandleOut(symbol=symbol.upper(), timeframe=timeframe, timestamp=stamp, open=float(row["open"]),
+                    high=float(row["high"]), low=float(row["low"]), close=float(row["close"]), volume=int(row["volume"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return sorted(result, key=lambda candle: candle.timestamp)
+
     def expirations(self, symbol: str) -> list[date]:
         data = self._get("/markets/options/expirations", {"symbol": symbol, "includeAllRoots": "true"})
         values: Any = (data or {}).get("expirations", {}).get("date", [])

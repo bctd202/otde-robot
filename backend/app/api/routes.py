@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.db.models import ParlayPaperPosition, Signal, TradeOutcome
+from app.db.models import BacktestRun, ParlayPaperPosition, Signal, SignalPerformance, TradeOutcome
 from app.db.session import get_db
 from app.market_data.factory import get_provider
 from app.schemas.market import DashboardOut, ParlayResponse, ScannerHealth
@@ -16,6 +16,8 @@ from app.services.parlay import rank_parlays
 from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
+from app.services.backtest import run_backtest
+from app.services.performance import link_paper_position, metrics, track_candidates
 
 router = APIRouter()
 
@@ -26,6 +28,7 @@ def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(ge
         position = create_position(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=409 if "already exists" in str(exc) else 422, detail=str(exc)) from exc
+    link_paper_position(db, position)
     return serialize(position, option_price=position.entry_option_price,
                      underlying_price=position.entry_underlying_price,
                      freshness="entry_snapshot")
@@ -64,11 +67,12 @@ def paper_position_exit(position_id: int, payload: PaperPositionExit, db: Sessio
     return serialize(position)
 
 @router.get("/parlays", response_model=ParlayResponse)
-def parlays():
+def parlays(db: Session = Depends(get_db)):
     settings = get_settings()
     provider = get_provider()
     universe = settings.parlay_symbol_list
     candidates = rank_parlays(provider, universe)
+    track_candidates(db, candidates)
     return ParlayResponse(
         provider_status=provider.status(),
         universe=universe,
@@ -79,6 +83,51 @@ def parlays():
             provider_status=provider.status().status,
         ),
     )
+
+
+def _ledger(row: SignalPerformance) -> dict:
+    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+@router.get("/performance")
+def performance(source: str | None = None, ticker: str | None = None, direction: str | None = None,
+                setup_type: str | None = None, exit_reason: str | None = None, user_entered: bool | None = None,
+                start: date | None = None, end: date | None = None, min_score: float | None = None,
+                max_score: float | None = None, db: Session = Depends(get_db)):
+    query = select(SignalPerformance).order_by(SignalPerformance.triggered_at.desc())
+    for condition in (SignalPerformance.source == source if source else None,
+        SignalPerformance.ticker == ticker.upper() if ticker else None,
+        SignalPerformance.direction == direction.upper() if direction else None,
+        SignalPerformance.setup_type == setup_type if setup_type else None,
+        SignalPerformance.exit_reason == exit_reason if exit_reason else None,
+        SignalPerformance.user_entered == user_entered if user_entered is not None else None,
+        SignalPerformance.trading_date >= start if start else None, SignalPerformance.trading_date <= end if end else None,
+        SignalPerformance.score >= min_score if min_score is not None else None,
+        SignalPerformance.score <= max_score if max_score is not None else None):
+        if condition is not None: query = query.where(condition)
+    rows = list(db.scalars(query).all())
+    return {"metrics": metrics(rows), "signals": [_ledger(row) for row in rows], "timezone": "America/New_York",
+        "underlying_only": True, "paper_only": True}
+
+
+@router.get("/backtests")
+def backtests(db: Session = Depends(get_db)):
+    runs = db.scalars(select(BacktestRun).order_by(BacktestRun.started_at.desc()).limit(30)).all()
+    return [{column.name: getattr(run, column.name) for column in run.__table__.columns} for run in runs]
+
+
+@router.post("/backtests", status_code=201)
+def backtest_create(payload: dict, db: Session = Depends(get_db)):
+    settings = get_settings()
+    try:
+        start, end = date.fromisoformat(payload["start"]), date.fromisoformat(payload["end"])
+        tickers = [str(value).upper() for value in payload.get("tickers", settings.parlay_symbol_list)
+                   if str(value).upper() in settings.parlay_symbol_list]
+        if not tickers or start > end: raise ValueError("Invalid date range or ticker selection")
+        run = run_backtest(db, get_provider(), start, end, tickers)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=409 if "already running" in str(exc) else 422, detail=str(exc)) from exc
+    return {column.name: getattr(run, column.name) for column in run.__table__.columns}
 
 @router.get("/health")
 def health(): return {"status":"ok","paper_only": True}
