@@ -72,7 +72,7 @@ def parlays(db: Session = Depends(get_db)):
     provider = get_provider()
     universe = settings.parlay_symbol_list
     candidates = rank_parlays(provider, universe)
-    track_candidates(db, candidates)
+    track_candidates(db, candidates, provider)
     return ParlayResponse(
         provider_status=provider.status(),
         universe=universe,

@@ -154,3 +154,13 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
         "unavailable_candidate_count": 0,
         "provider_status": "healthy",
     }
+
+
+def test_live_and_replay_share_identical_completed_candle_evaluation():
+    from app.services.backtest import replay_evaluation
+    from app.services.parlay import evaluate_underlying_setup
+    provider=MockMarketDataProvider();candles=provider.candles("SPY","1m")
+    live=evaluate_underlying_setup(candles,candles[-1].close)
+    replay=replay_evaluation(candles,candles[-1].close)
+    assert replay == live
+    assert (replay.direction,replay.trigger,replay.stop,replay.target,replay.checks,replay.confirmed) == (live.direction,live.trigger,live.stop,live.target,live.checks,live.confirmed)

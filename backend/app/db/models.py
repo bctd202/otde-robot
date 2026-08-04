@@ -236,6 +236,7 @@ class SignalPerformance(Base):
     conservative_same_candle: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class TradeOutcome(Base):

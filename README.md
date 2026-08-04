@@ -94,7 +94,7 @@ The production build log must list `/build/frontend/dist/index.html`, `/build/fr
 
 ## Performance tracking and Backtest Lab
 
-Parlay now separates **live forward tracking** from **historical backtesting**. Every qualified live BUY is frozen in a persistent signal ledger even when the user does not enter a paper position; manually entered paper positions are linked to that record rather than defining whether the signal is measured. Historical runs replay regular-session candles chronologically through the production directional strategy logic and never route a paper or brokerage order.
+Parlay now separates **live forward tracking** from **historical backtesting**. Every qualified live BUY is frozen in a persistent signal ledger even when the user does not enter a paper position; manually entered paper positions are linked to that record rather than defining whether the signal is measured. Historical runs replay regular-session 1-minute candles chronologically through the same production setup evaluator used by the live scanner and never route a paper or brokerage order.
 
 Historical outcomes are measured on the **underlying in R-multiples** (`price movement / initial underlying risk`). Tradier plans may return limited or incomplete intraday history and do not provide enough expired option quotes to reconstruct honest contract P&L, so Parlay does not synthesize or claim historical option returns. Partial ranges and per-ticker failures remain visible.
 
