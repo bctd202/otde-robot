@@ -6,6 +6,7 @@ os.environ.setdefault(
     "FRONTEND_DIST_DIR",
     str(Path(__file__).parent / "static_site"),
 )
+os.environ.setdefault("ENABLE_DEMO_OPTION_CONTRACTS", "true")
 
 
 def pytest_sessionstart(session):

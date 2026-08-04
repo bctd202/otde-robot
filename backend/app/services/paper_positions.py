@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
+from app.services.contracts import annotate_chain
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -45,7 +46,17 @@ def management_decision(position: ParlayPaperPosition, option_price: float, unde
     return "HOLD", f"HOLD — SETUP REMAINS {side} INVALIDATION"
 
 
-def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPosition:
+def create_position(db: Session, payload: PaperPositionCreate, provider: Any) -> ParlayPaperPosition:
+    status = provider.status()
+    if status.provider != "tradier" or status.mode != "live" or status.status != "healthy":
+        raise ValueError("Paper entry requires a verified current Tradier contract")
+    try:
+        chain = annotate_chain(provider.option_chain(payload.symbol.upper()), payload.symbol.upper(), status.latest_timestamp)
+    except (KeyError, TypeError, ValueError):
+        chain = []
+    contract = next((item for item in chain if item.option_symbol == payload.option_symbol and item.actionable), None)
+    if contract is None:
+        raise ValueError("No verified actionable Tradier contract is currently available")
     duplicate = db.scalar(select(ParlayPaperPosition).where(
         ParlayPaperPosition.option_symbol == payload.option_symbol,
         ParlayPaperPosition.lifecycle_status == "ACTIVE",
@@ -54,7 +65,10 @@ def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPos
         raise ValueError("An active paper position already exists for this option symbol")
     if payload.signal_status != "BUY":
         raise ValueError("Only qualified BUY candidates can be paper entered")
-    fill = payload.option_ask  # New simulated entries always pay the displayed ask.
+    if (contract.expiration != payload.expiration or contract.strike != payload.strike or
+            contract.right != payload.direction):
+        raise ValueError("Paper entry contract identity does not match the current Tradier chain")
+    fill = contract.ask  # Server-derived current ask; never trust the browser snapshot.
     position = ParlayPaperPosition(
         symbol=payload.symbol.upper(), option_symbol=payload.option_symbol,
         direction=payload.direction, expiration=payload.expiration, strike=payload.strike,
@@ -71,6 +85,11 @@ def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPos
         lifecycle_status="ACTIVE", last_option_price=fill,
         last_underlying_price=payload.underlying_entry_price,
         last_marked_at=payload.entry_timestamp, data_freshness="entry_snapshot",
+        provenance_provider=contract.provider, provenance_data_mode=contract.data_mode,
+        verification_status=contract.verification_status, verification_reason=contract.verification_reason,
+        actionable=contract.actionable, original_occ_symbol=contract.option_symbol,
+        normalized_option_symbol=contract.normalized_symbol, bid_timestamp=contract.bid_timestamp,
+        ask_timestamp=contract.ask_timestamp, quote_timestamp=contract.timestamp,
     )
     db.add(position)
     db.commit()
@@ -138,6 +157,11 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
         decision_status=cast(Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "EXPIRED", "CLOSED"], decision),
         data_freshness=freshness or position.data_freshness, next_action=action,
         last_marked_at=position.last_marked_at, paper_only=True,
+        provenance_provider=position.provenance_provider, provenance_data_mode=position.provenance_data_mode,
+        verification_status=position.verification_status, verification_reason=position.verification_reason,
+        actionable=position.actionable, original_occ_symbol=position.original_occ_symbol,
+        normalized_option_symbol=position.normalized_option_symbol, bid_timestamp=position.bid_timestamp,
+        ask_timestamp=position.ask_timestamp, quote_timestamp=position.quote_timestamp,
     )
 
 

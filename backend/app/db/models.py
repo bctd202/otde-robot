@@ -174,6 +174,16 @@ class ParlayPaperPosition(Base):
     last_underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_freshness: Mapped[str] = mapped_column(String(32), default="current")
+    provenance_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provenance_data_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actionable: Mapped[bool] = mapped_column(Boolean, default=False)
+    original_occ_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalized_option_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ask_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quote_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class BacktestRun(Base):
@@ -237,6 +247,19 @@ class SignalPerformance(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    provenance_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provenance_data_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    actionable: Mapped[bool] = mapped_column(Boolean, default=False)
+    original_occ_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalized_option_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ask_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quote_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    contract_expiration: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contract_strike: Mapped[float | None] = mapped_column(Float, nullable=True)
+    contract_option_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
 
 class TradeOutcome(Base):

@@ -23,7 +23,7 @@ class Provider:
         self.option_chain_calls = 0
 
     def status(self):
-        return ProviderStatus(provider="test", mode="mock", status="healthy" if self.available else "unavailable",
+        return ProviderStatus(provider="tradier", mode="live", status="healthy" if self.available else "unavailable",
                               delay_seconds=0, latest_timestamp=NOW, message="paper test data")
 
     def quotes(self, symbols):
@@ -33,9 +33,11 @@ class Provider:
         self.option_chain_calls += 1
         if not self.available:
             return []
-        return [OptionContractOut(symbol=symbol, option_symbol="SPY260729C00101000", expiration=date(2026, 7, 29),
-                                  strike=101, right="call", bid=self.bid, ask=self.bid + .05, last=self.bid,
-                                  volume=500, open_interest=900, timestamp=NOW)]
+        return [OptionContractOut(symbol=symbol, option_symbol=f"SPY260729{kind}00101000", expiration=date(2026, 7, 29),
+                                  strike=101, right=right, bid=self.bid, ask=self.bid + .05, last=self.bid,
+                                  volume=500, open_interest=900, timestamp=NOW, bid_timestamp=NOW,
+                                  ask_timestamp=NOW, provider="tradier", data_mode="live")
+                for kind, right in (("C", "call"), ("P", "put"))]
 
 
 @pytest.fixture()
@@ -66,7 +68,7 @@ def payload(status="BUY", direction="call"):
             "stretch_underlying_target": 104 if direction == "call" else 98,
             "first_option_target": 1.5, "stretch_option_target": 3, "score": 91,
             "score_label": "PLAY", "reasons": ["VWAP reclaimed"], "signal_status": status,
-            "provider_mode": "mock", "entry_timestamp": NOW.isoformat(), "paper_only": True}
+            "provider_mode": "live", "entry_timestamp": NOW.isoformat(), "paper_only": True}
 
 
 def test_create_buy_uses_exact_ask_and_is_paper_only(client):

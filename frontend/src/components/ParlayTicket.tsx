@@ -33,7 +33,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
           <div><dt>Option ask</dt><dd>{money(contract.ask)}</dd></div>
           <div className="contract-cost"><dt>Estimated contract cost</dt><dd>{money(candidate.contract_cost)}</dd></div>
         </dl>
-      </>:<strong>Contract unavailable — wait for complete data</strong>}
+      </>:<><strong>No verified contract available</strong>{candidate.contract_verification_reason&&<p>{candidate.contract_verification_reason}</p>}</>}
     </section>
 
     <div className="signal-clock">
@@ -54,6 +54,6 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
       {candidate.reasons.length>0&&<ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
       {candidate.rejection_reasons.length>0&&<ul className="rejection-list">{candidate.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
     </details>
-    {candidate.signal_status==='BUY'&&contract&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
+    {candidate.signal_status==='BUY'&&candidate.actionable!==false&&contract?.actionable!==false&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
   </article>;
 }

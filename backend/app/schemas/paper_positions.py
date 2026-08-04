@@ -71,6 +71,16 @@ class PaperPositionOut(BaseModel):
     next_action: str
     last_marked_at: datetime | None
     paper_only: bool = True
+    provenance_provider: str | None = None
+    provenance_data_mode: str | None = None
+    verification_status: str | None = None
+    verification_reason: str | None = None
+    actionable: bool = False
+    original_occ_symbol: str | None = None
+    normalized_option_symbol: str | None = None
+    bid_timestamp: datetime | None = None
+    ask_timestamp: datetime | None = None
+    quote_timestamp: datetime | None = None
 
 
 class PaperPositionsResponse(BaseModel):

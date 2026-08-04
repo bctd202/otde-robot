@@ -16,7 +16,7 @@ def structured_setups(symbol, candles, quote, chain):
     swept = prev.high > lv["opening_range_high"] and last.close > lv["opening_range_high"] and last.close > lv["vwap"]
     if swept:
         risk=max(last.close-lv["opening_range_high"], 0.1); target=last.close+risk*2.4
-        contract=next((c for c in chain if c.right=="call" and c.delta and 0.25 >= c.delta >= 0.05), None)
+        contract=next((c for c in chain if c.actionable and c.right=="call" and c.delta and 0.25 >= c.delta >= 0.05), None)
         setups.append(SetupOut(symbol=symbol, setup_type="structured", name="Opening-range breakout retest", direction="call", grade="B+", score=78, entry_trigger=round(last.close+0.05,2), current_underlying_price=quote.price, invalidation=round(lv["opening_range_high"]-0.05,2), target1=round(last.close+risk*2,2), target2=round(target,2), reward_risk=round((target-last.close)/risk,2), contract=contract, confluences=["VWAP alignment", "Opening range reclaimed", "Range expansion"], avoid_reasons=[], generated_at=quote.timestamp, expires_at=quote.timestamp+timedelta(minutes=45), data_freshness="fresh_mock"))
     return [s for s in setups if s.reward_risk >= get_settings().structured_min_rr]
 
@@ -25,6 +25,7 @@ def lottery_candidates(symbol, candles, quote, chain):
     bullish = last.close > lv["vwap"] and last.close >= lv["opening_range_high"]
     out=[]
     for c in chain:
+        if not c.actionable: continue
         sp=spread_pct(c.bid,c.ask); abs_delta=abs(c.delta or 0); debit=c.ask*100
         trigger_ok = bullish and c.right=="call"
         if not trigger_ok or not (s.lottery_min_ask <= c.ask <= s.lottery_max_ask and debit <= s.lottery_max_debit and c.volume >= s.lottery_min_volume and c.open_interest >= s.lottery_min_open_interest and sp <= s.lottery_max_spread_pct and s.lottery_min_delta <= abs_delta <= s.lottery_max_delta and c.bid > 0):

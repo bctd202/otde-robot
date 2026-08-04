@@ -42,6 +42,14 @@ class OptionContractOut(BaseModel):
     theta: float | None = None
     vega: float | None = None
     timestamp: datetime
+    bid_timestamp: datetime | None = None
+    ask_timestamp: datetime | None = None
+    provider: str = "unknown"
+    data_mode: str = "unknown"
+    verification_status: str = "unverified"
+    verification_reason: str = "Contract has not been independently verified"
+    actionable: bool = False
+    normalized_symbol: str | None = None
 
 class SetupOut(BaseModel):
     symbol: str
@@ -146,6 +154,10 @@ class ParlayCandidateOut(BaseModel):
     primary_action: str
     generated_at: datetime
     data_freshness: str
+    contract_verification_status: str = "unverified"
+    contract_verification_reason: str | None = None
+    actionable: bool = False
+    demo_mode: bool = False
 
 class ScannerHealth(BaseModel):
     candidate_count: int

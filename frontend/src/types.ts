@@ -10,7 +10,7 @@ export interface Analytics { minimum_sample_size:number; sample_size:number; sta
 export type SignalStatus='BUY'|'WATCH'|'MISSED'|'PASS'|'UNAVAILABLE';
 export type ParlayDirection='call'|'put'|'none';
 export type ScoreLabel='PLAY'|'WATCH CLOSELY'|'DEVELOPING'|'PASS';
-export interface ParlayContract extends Contract { symbol:string; expiration:string; strike:number; right:string; last:number; iv:number|null; theta:number|null; vega:number|null; timestamp:string }
+export interface ParlayContract extends Contract { symbol:string; expiration:string; strike:number; right:string; last:number; iv:number|null; theta:number|null; vega:number|null; timestamp:string; bid_timestamp?:string|null; ask_timestamp?:string|null; provider?:string; data_mode?:string; verification_status?:string; verification_reason?:string; actionable?:boolean; normalized_symbol?:string|null }
 export interface ParlayCandidate {
   ranking_position:number; symbol:string; rank:string; direction:ParlayDirection; signal_status:SignalStatus;
   score:number; score_label:ScoreLabel; underlying_price:number|null; contract:ParlayContract|null;
@@ -19,6 +19,7 @@ export interface ParlayCandidate {
   underlying_invalidation:number|null; first_underlying_target:number|null; stretch_underlying_target:number|null;
   first_option_target:number|null; stretch_option_target:number|null; reasons:string[]; rejection_reasons:string[];
   unavailable_reason:string|null; primary_action:string; generated_at:string; data_freshness:string;
+  contract_verification_status?:string; contract_verification_reason?:string|null; actionable?:boolean; demo_mode?:boolean;
 }
 export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string }
 export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; scanner_health:ScannerHealth; paper_only:boolean }

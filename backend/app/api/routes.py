@@ -25,7 +25,7 @@ router = APIRouter()
 @router.post("/paper-positions", response_model=PaperPositionOut, status_code=201)
 def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(get_db)):
     try:
-        position = create_position(db, payload)
+        position = create_position(db, payload, get_provider())
     except ValueError as exc:
         raise HTTPException(status_code=409 if "already exists" in str(exc) else 422, detail=str(exc)) from exc
     link_paper_position(db, position)
@@ -138,7 +138,14 @@ def dashboard():
     status=provider.status(); quotes=provider.quotes(symbols)
     levels={}; bias={}; setups=[]; lottos=[]
     for q in quotes:
-        candles=provider.candles(q.symbol,"1m"); chain=provider.option_chain(q.symbol)
+        try: candles=provider.candles(q.symbol,"1m")
+        except (KeyError, TypeError, ValueError): candles=[]
+        if len(candles) < 12: continue
+        try:
+            from app.services.contracts import annotate_chain
+            raw_chain=provider.option_chain(q.symbol)
+            chain=annotate_chain(raw_chain,q.symbol,provider.status().latest_timestamp)
+        except (KeyError, TypeError, ValueError): chain=[]
         levels[q.symbol]=levels_for(candles)
         bias[q.symbol]="bullish" if candles[-1].close > levels[q.symbol]["vwap"] else "neutral"
         setups += structured_setups(q.symbol,candles,q,chain)
