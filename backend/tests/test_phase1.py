@@ -42,7 +42,7 @@ def test_dashboard_has_all_symbols_and_candidates():
     data=client.get('/api/dashboard').json()
     assert {q['symbol'] for q in data['quotes']} == {'SPY','QQQ','IWM'}
     assert data['normal_setups']
-    assert data['lottery_setups']
+    assert data['lottery_setups'] == []
     assert len(data['lottery_setups']) <= 3
 
 def test_no_trade_scenario():
@@ -62,7 +62,6 @@ def test_seeded_journal_and_analytics():
     journal=client.get('/api/journal').json()
     analytics=client.get('/api/analytics').json()
     assert any(row['signal_type'] == 'no_trade' for row in journal)
-    assert any(row['signal_type'] == 'lottery' for row in journal)
     assert analytics['sample_size'] == 6
     assert analytics['statistically_promising'] is False
     for path in ('/api/health', '/api/dashboard', '/api/journal', '/api/analytics', '/api/candles/SPY'):

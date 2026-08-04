@@ -25,7 +25,7 @@ def lottery_candidates(symbol, candles, quote, chain):
     bullish = last.close > lv["vwap"] and last.close >= lv["opening_range_high"]
     out=[]
     for c in chain:
-        if not c.actionable and c.data_mode != "mock":
+        if not c.actionable and not (c.verification_status == "demo" and s.enable_demo_option_contracts):
             continue
         sp=spread_pct(c.bid,c.ask); abs_delta=abs(c.delta or 0); debit=c.ask*100
         trigger_ok = bullish and c.right=="call"

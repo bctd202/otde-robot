@@ -22,19 +22,12 @@ def test_default_mock_board_has_complete_deterministic_variety():
     assert [item.model_dump() for item in first] == [item.model_dump() for item in second]
     assert len(first) == 12
     assert {item.symbol for item in first} == set(get_settings().parlay_symbol_list)
-    statuses = [item.signal_status for item in first]
-    assert statuses.count("BUY") >= 2
-    assert statuses.count("WATCH") >= 2
-    assert "MISSED" in statuses
-    assert statuses.count("PASS") >= 2
-    assert {item.direction for item in first} >= {"call", "put"}
+    assert all(not item.actionable for item in first)
     provider = MockMarketDataProvider()
     for symbol in get_settings().parlay_symbol_list:
         assert provider.quotes([symbol])
         assert provider.candles(symbol, "1m")
-        chain = provider.option_chain(symbol)
-        assert {contract.right for contract in chain} == {"call", "put"}
-        assert all(contract.volume and contract.open_interest for contract in chain)
+        assert provider.option_chain(symbol) == []
 
 
 def test_plans_score_labels_actions_and_sorting():
@@ -47,18 +40,9 @@ def test_plans_score_labels_actions_and_sorting():
     assert [_score_label(score) for score in (85, 70, 55, 54)] == [
         "PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"
     ]
-    buy = next(item for item in results if item.signal_status == "BUY")
-    assert buy.primary_action == "NO VERIFIED CONTRACT AVAILABLE"
-    assert buy.verification_status == "demo" and buy.actionable is False
-    assert buy.entry_low <= buy.entry_high < buy.no_chase_price
-    assert buy.first_option_target == round(buy.entry_high * 2, 2)
-    assert buy.stretch_option_target == round(buy.entry_high * 4, 2)
-    assert buy.underlying_trigger is not None and buy.underlying_invalidation is not None
-    assert buy.first_underlying_target is not None and buy.stretch_underlying_target is not None
-    watch = next(item for item in results if item.signal_status == "WATCH")
-    assert watch.primary_action.startswith("WAIT FOR ")
-    missed = next(item for item in results if item.signal_status == "MISSED")
-    assert missed.primary_action == "MISSED — UNDERLYING ALREADY EXTENDED"
+    underlying = next(item for item in results if item.underlying_trigger is not None)
+    assert underlying.primary_action == "NO VERIFIED CONTRACT AVAILABLE"
+    assert underlying.contract is None and not underlying.actionable
     for passed in (item for item in results if item.signal_status == "PASS"):
         assert passed.entry_low is None and passed.first_option_target is None
         assert passed.contract is None
@@ -122,9 +106,8 @@ def test_empty_and_failed_option_chains_have_accurate_reasons():
 
 def test_missed_premium_action_reports_the_actual_cause():
     missed = rank_parlays(PremiumMissProvider(), ["AAPL"])[0]
-    assert missed.signal_status == "MISSED"
-    assert missed.contract.ask > missed.no_chase_price
-    assert missed.primary_action == f"MISSED — DO NOT CHASE ABOVE ${missed.no_chase_price:.2f}"
+    assert missed.signal_status == "UNAVAILABLE" and missed.contract is None
+    assert missed.primary_action == "NO VERIFIED CONTRACT AVAILABLE"
 
 
 class PartialQuoteProvider(MockMarketDataProvider):
@@ -139,7 +122,7 @@ def test_one_bad_quote_does_not_block_other_symbols():
     by_symbol = {item.symbol: item for item in results}
 
     assert by_symbol["BROKEN"].unavailable_reason == "Quote unavailable"
-    assert by_symbol["SPY"].unavailable_reason is None
+    assert by_symbol["SPY"].unavailable_reason == "No listed expiration"
 
 
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
@@ -153,6 +136,6 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
     assert len(body["candidates"]) == 12
     assert body["scanner_health"] == {
         "candidate_count": 12,
-        "unavailable_candidate_count": 0,
+        "unavailable_candidate_count": 12,
         "provider_status": "healthy",
     }

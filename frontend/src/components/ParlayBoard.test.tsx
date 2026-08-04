@@ -25,7 +25,7 @@ test('Paper Enter appears on BUY only and invokes entry handler',()=>{const ente
 
 test('mock contracts are clearly demo data and cannot be paper entered',()=>{
   const base=candidate('SPY',0);const demoCandidate={...base,actionable:false,provider:'mock',data_mode:'mock',quote_freshness:'unknown',verification_status:'demo',verification_reason:'explicit mock option data',contract:{...base.contract!,actionable:false,provider:'mock',data_mode:'mock' as const,quote_freshness:'unknown' as const,verification_status:'demo' as const,verification_reason:'explicit mock option data'}};
-  const demo={...data,provider_status:{...data.provider_status,provider:'mock',mode:'mock'},candidates:[demoCandidate]};
+  const demo={...data,provider_status:{...data.provider_status,provider:'mock',mode:'mock',demo_options_enabled:true},candidates:[demoCandidate]};
   render(<ParlayBoard data={demo} updated={new Date()} refreshing={false} stale={false} onRetry={vi.fn()} onPaperEnter={vi.fn()}/>);
   expect(screen.getByText('DEMO MODE — MOCK OPTION DATA — DO NOT TRADE')).toBeInTheDocument();
   expect(screen.getByText('0 BUY NOW')).toBeInTheDocument();

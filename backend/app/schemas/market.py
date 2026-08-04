@@ -9,6 +9,7 @@ class ProviderStatus(BaseModel):
     delay_seconds: int
     latest_timestamp: datetime
     message: str
+    demo_options_enabled: bool = False
 
 class Quote(BaseModel):
     symbol: str
@@ -42,6 +43,9 @@ class OptionContractOut(BaseModel):
     theta: float | None = None
     vega: float | None = None
     timestamp: datetime
+    bid_timestamp: datetime | None = None
+    ask_timestamp: datetime | None = None
+    trade_timestamp: datetime | None = None
     provider: str = "unknown"
     data_mode: Literal["live", "delayed", "mock", "unavailable"] = "unavailable"
     quote_freshness: Literal["current", "stale", "unknown"] = "unknown"
@@ -49,6 +53,7 @@ class OptionContractOut(BaseModel):
     verification_reason: str = "Contract provenance has not been verified"
     actionable: bool = False
     original_option_symbol: str | None = None
+    chain_member: bool = False
 
 class SetupOut(BaseModel):
     symbol: str

@@ -1,4 +1,4 @@
-export interface ProviderStatus { provider:string; mode:string; status:string; delay_seconds:number; latest_timestamp:string; message:string }
+export interface ProviderStatus { provider:string; mode:string; status:string; delay_seconds:number; latest_timestamp:string; message:string;demo_options_enabled?:boolean }
 export interface Quote { symbol:string; price:number; timestamp:string }
 export interface Contract { option_symbol:string; bid:number; ask:number; volume:number; open_interest:number; delta:number|null; gamma:number|null;provider:string;data_mode:'live'|'delayed'|'mock'|'unavailable';quote_freshness:'current'|'stale'|'unknown';verification_status:'verified'|'unverified'|'demo';verification_reason:string;actionable:boolean;timestamp:string;expiration:string;strike:number;right:string }
 export interface Setup { symbol:string; name:string; direction:string; grade:string; score:number; entry_trigger:number; invalidation:number; target1:number; target2:number; reward_risk:number; contract:Contract|null; confluences:string[] }

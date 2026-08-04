@@ -6,6 +6,7 @@ services:
     ports: ["8000:8000"]
     environment:
       MARKET_DATA_PROVIDER: mock
+      ENABLE_DEMO_OPTION_CONTRACTS: "false"
       DATABASE_URL: sqlite:////data/liquidity_hunter.db
       MOCK_SCENARIO: active
       PAPER_ONLY: "true"

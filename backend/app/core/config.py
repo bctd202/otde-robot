@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     tradier_base_url: str = "https://api.tradier.com/v1"
     parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT"
     option_quote_freshness_seconds: int = 120
+    enable_demo_option_contracts: bool = False
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

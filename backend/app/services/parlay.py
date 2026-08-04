@@ -62,6 +62,9 @@ def _eligible_contract(chain: list[OptionContractOut], direction: Direction, tar
     for contract in chain:
         if contract.right != direction:
             continue
+        if not contract.actionable or contract.verification_status != "verified" or contract.provider != "tradier":
+            rejection.add(contract.verification_reason or "Unverified contract")
+            continue
         spread = spread_pct(contract.bid, contract.ask)
         reachable = contract.strike <= target if direction == "call" else contract.strike >= target
         if contract.expiration != today:

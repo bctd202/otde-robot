@@ -13,6 +13,7 @@ from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
 from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.parlay import rank_parlays
+from app.services.indicators import spread_pct
 from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
@@ -32,8 +33,10 @@ def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(ge
     exact = bool(contract and contract.symbol == payload.symbol.upper() and
         contract.expiration == payload.expiration and contract.strike == payload.strike and
         contract.right == payload.direction and contract.ask == payload.option_ask)
+    liquid = bool(contract and contract.volume >= 250 and contract.open_interest > 0 and
+                  spread_pct(contract.bid, contract.ask) <= 20)
     if (status.provider != "tradier" or contract is None or not exact or
-            not contract.actionable or contract.verification_status != "verified"):
+            not liquid or not contract.actionable or contract.verification_status != "verified"):
         raise HTTPException(status_code=422, detail="Paper entry requires the exact verified Tradier chain contract")
     try:
         position = create_position(db, payload)
