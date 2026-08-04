@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
+from app.services.contract_verification import verify_contract
 
 NY = ZoneInfo("America/New_York")
 BASE = {"SPY": 550.0, "QQQ": 485.0, "IWM": 220.0, "TSLA": 182.0, "NVDA": 138.0,
@@ -62,10 +63,11 @@ class MockMarketDataProvider:
                 ask = round(.36 + n * .04, 2)
                 bid = round(ask - .04, 2)
                 delta = round((.27 - n * .035) * (1 if right == "call" else -1), 3)
-                rows.append(OptionContractOut(symbol=symbol,
+                rows.append(verify_contract(OptionContractOut(symbol=symbol,
                     option_symbol=f"{symbol}{today:%y%m%d}{right[0].upper()}{int(strike * 1000):08d}",
                     expiration=today, strike=strike, right=right, bid=bid, ask=ask,
                     last=round((bid + ask) / 2, 2), volume=700 + n * 110,
                     open_interest=1200 + n * 180, iv=.24 + n * .01, delta=delta,
-                    gamma=.035 + n * .003, theta=-.08, vega=.02, timestamp=self.now))
+                    gamma=.035 + n * .003, theta=-.08, vega=.02, timestamp=self.now), self.status(),
+                    symbol=symbol, right=right))
         return rows

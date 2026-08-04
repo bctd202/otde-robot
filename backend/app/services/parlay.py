@@ -23,7 +23,8 @@ def _score_label(score: float) -> Literal["PLAY", "WATCH CLOSELY", "DEVELOPING",
 def _unavailable(symbol: str, reason: str, generated_at: Any) -> ParlayCandidateOut:
     return ParlayCandidateOut(symbol=symbol, rank="PASS", direction="none", signal_status="UNAVAILABLE",
         score=0, score_label="PASS", unavailable_reason=reason,
-        primary_action=f"UNAVAILABLE — {reason.upper()}", generated_at=generated_at, data_freshness="unavailable")
+        primary_action=f"UNAVAILABLE — {reason.upper()}", generated_at=generated_at, data_freshness="unavailable",
+        verification_reason=reason)
 
 
 def _directional_plan(candles: list[CandleOut]) -> tuple[Direction | None, int, list[str], float, float, bool]:
@@ -111,11 +112,6 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
         if len(candles) < 8:
             output.append(_unavailable(symbol, "Candles unavailable", quote.timestamp))
             continue
-        if not chain:
-            chain_status = provider.status()
-            reason = "Option chain unavailable" if chain_status.status == "unavailable" else "No same-day expiration"
-            output.append(_unavailable(symbol, reason, quote.timestamp))
-            continue
         direction, checks, reasons, trigger, invalidation, confirmed = _directional_plan(candles)
         if direction is None:
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction="none", signal_status="PASS",
@@ -127,6 +123,20 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
         move = max(abs(trigger - invalidation), quote.price * .002)
         first_target = trigger + move * (1.5 if direction == "call" else -1.5)
         stretch_target = trigger + move * (2.5 if direction == "call" else -2.5)
+        if not chain:
+            chain_status = provider.status()
+            reason = "Option chain unavailable" if chain_status.status == "unavailable" else "No listed expiration"
+            output.append(ParlayCandidateOut(symbol=symbol, rank=_score_label(min(84, 42 + checks * 8)),
+                direction=direction, signal_status="UNAVAILABLE", score=min(84, 42 + checks * 8),
+                score_label=_score_label(min(84, 42 + checks * 8)), underlying_price=quote.price,
+                underlying_trigger=round(trigger, 2), underlying_invalidation=round(invalidation, 2),
+                first_underlying_target=round(first_target, 2), stretch_underlying_target=round(stretch_target, 2),
+                reasons=reasons[:3], rejection_reasons=[reason], unavailable_reason=reason,
+                primary_action="NO VERIFIED CONTRACT AVAILABLE", generated_at=quote.timestamp,
+                data_freshness=f"{provider_status.mode}_current", provider=provider_status.provider,
+                data_mode="mock" if provider_status.mode == "mock" else "unavailable",
+                verification_reason=reason, actionable=False))
+            continue
         contract, rejection = _eligible_contract(chain, direction, first_target)
         if contract is None:
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction=direction, signal_status="PASS",
@@ -161,8 +171,10 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
                 primary_action="PASS — TRIGGER NOT CONFIRMED", generated_at=quote.timestamp,
                 data_freshness=f"{provider_status.mode}_current"))
             continue
-        if signal == "BUY":
+        if signal == "BUY" and contract.actionable:
             action = f"BUY BELOW ${entry_high:.2f}"
+        elif signal == "BUY":
+            action = "NO VERIFIED CONTRACT AVAILABLE"
         elif signal == "MISSED":
             action = (f"MISSED — DO NOT CHASE ABOVE ${no_chase:.2f}" if premium_exceeded else
                 "MISSED — UNDERLYING ALREADY EXTENDED")
@@ -175,7 +187,10 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             underlying_invalidation=round(invalidation, 2), first_underlying_target=round(first_target, 2),
             stretch_underlying_target=round(stretch_target, 2), first_option_target=round(entry_high * 2, 2),
             stretch_option_target=round(entry_high * 4, 2), reasons=reasons[:3], rejection_reasons=rejection,
-            primary_action=action, generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current"))
+            primary_action=action, generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current",
+            provider=contract.provider, data_mode=contract.data_mode, quote_freshness=contract.quote_freshness,
+            verification_status=contract.verification_status, verification_reason=contract.verification_reason,
+            actionable=contract.actionable))
     order = {"BUY": 0, "WATCH": 1, "MISSED": 2, "PASS": 3, "UNAVAILABLE": 4}
     output.sort(key=lambda item: (order[item.signal_status], -item.score, item.symbol))
     for position, candidate in enumerate(output, 1):

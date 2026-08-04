@@ -22,6 +22,19 @@ router = APIRouter()
 
 @router.post("/paper-positions", response_model=PaperPositionOut, status_code=201)
 def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(get_db)):
+    provider = get_provider()
+    status = provider.status()
+    try:
+        contract = next((item for item in provider.option_chain(payload.symbol)
+            if item.option_symbol == payload.option_symbol), None)
+    except (KeyError, TypeError, ValueError):
+        contract = None
+    exact = bool(contract and contract.symbol == payload.symbol.upper() and
+        contract.expiration == payload.expiration and contract.strike == payload.strike and
+        contract.right == payload.direction and contract.ask == payload.option_ask)
+    if (status.provider != "tradier" or contract is None or not exact or
+            not contract.actionable or contract.verification_status != "verified"):
+        raise HTTPException(status_code=422, detail="Paper entry requires the exact verified Tradier chain contract")
     try:
         position = create_position(db, payload)
     except ValueError as exc:

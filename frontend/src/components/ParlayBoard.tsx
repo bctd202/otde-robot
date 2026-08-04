@@ -14,14 +14,15 @@ interface ParlayBoardProps { data:ParlayResponse;updated:Date|null;refreshing:bo
 
 export function ParlayBoard({data,updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol}:ParlayBoardProps) {
   const groups=useMemo(()=>({
-    ready:data.candidates.filter(item=>item.signal_status==='BUY'),
+    ready:data.candidates.filter(item=>item.signal_status==='BUY'&&item.actionable),
     waiting:data.candidates.filter(item=>item.signal_status==='WATCH').sort((a,b)=>a.ranking_position-b.ranking_position),
-    noTrade:data.candidates.filter(item=>!['BUY','WATCH'].includes(item.signal_status)),
+    noTrade:data.candidates.filter(item=>item.signal_status!=='WATCH'&&!(item.signal_status==='BUY'&&item.actionable)),
   }),[data.candidates]);
   const scannerHealth=data.scanner_health??{candidate_count:data.candidates.length,unavailable_candidate_count:data.candidates.filter(item=>item.signal_status==='UNAVAILABLE').length,provider_status:data.provider_status.status};
   return <section id="parlay" className="parlay-board" aria-labelledby="parlay-title">
     <header className="parlay-header"><div className="brand-lockup"><img src="/parlay-logo.png" alt="Parlay logo" width="1395" height="446" decoding="async"/><div><p className="eyebrow">Paper 0DTE Decision Board</p><h1 id="parlay-title" className="sr-only">Parlay</h1><p>Disciplined, paper-only market research</p></div></div><ProviderStatus provider={data.provider_status} updated={updated} refreshing={refreshing} onRefresh={onRetry}/></header>
     <div className="board-meta"><p className="paper-notice"><strong>Paper only</strong><span>No live orders are placed.</span></p><p className="freshness" aria-label="Aggregate scanner health">Scanner health: <strong>{scannerHealth.candidate_count} candidates</strong><span>{scannerHealth.unavailable_candidate_count} unavailable</span><span>Provider {scannerHealth.provider_status}</span></p></div>
+    {data.provider_status.mode==='mock'&&<div className="demo-warning" role="status">DEMO MODE — MOCK OPTION DATA — DO NOT TRADE</div>}
     {stale&&<StaleDataWarning updated={updated} onRetry={onRetry}/>}
 
     <section className="decision-section ready-section" aria-labelledby="ready-title"><div className="decision-section-heading"><div><p className="eyebrow">Act now</p><h2 id="ready-title">Ready to Trade</h2></div><span>{groups.ready.length} BUY NOW</span></div>{groups.ready.length===0?<div className="empty-state"><strong>NO QUALIFIED PARLAYS RIGHT NOW</strong><span>Continue scanning. Do not force a trade.</span></div>:<div className="decision-grid">{groups.ready.map(item=><ParlayTicket key={item.symbol} candidate={item} onPaperEnter={onPaperEnter} entering={enteringSymbol===item.symbol}/>)}</div>}</section>

@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     app_name: str = "0DTE Liquidity Hunter"
     database_url: str = "sqlite:///./liquidity_hunter.db"
-    market_data_provider: str = "mock"
+    market_data_provider: str = "unconfigured"
     symbols: str = "SPY,QQQ,IWM"
     timezone: str = "America/New_York"
     structured_risk_percent: float = 0.25
@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     tradier_api_token: str | None = None
     tradier_base_url: str = "https://api.tradier.com/v1"
     parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT"
+    option_quote_freshness_seconds: int = 120
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

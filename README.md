@@ -91,3 +91,15 @@ The production build log must list `/build/frontend/dist/index.html`, `/build/fr
 - API credentials belong only in environment variables; `.env` is ignored.
 - Lottery candidates can lose the entire displayed debit and never appear in structured rankings.
 - Signals are generated only by deterministic Python rules.
+
+## Option contract verification and demo data
+
+Parlay only marks an option recommendation actionable when the exact contract and quote came from a successful current Tradier chain response. Verification checks the provider-returned OCC symbol without rewriting it, underlying, calendar-date expiration, strike, CALL/PUT type, bid/ask integrity, quote timestamp, configured freshness limit, and the existing spread and liquidity rules. A date-only expiration is never timezone shifted.
+
+Data labels are explicit: **verified live** is current Tradier data, **verified delayed** is Tradier data with its delay shown, **demo** is intentionally generated mock data, and **unavailable/unverified** cannot be acted on. Enable demo mode only with `MARKET_DATA_PROVIDER=mock`. It displays `DEMO MODE — MOCK OPTION DATA — DO NOT TRADE`, never describes itself as live or delayed, and disables paper entry. The provider factory does not fall back to mock when Tradier or another provider fails.
+
+When no listed contract passes verification, Parlay keeps useful underlying context visible and says **No verified contract available** with the reason. It does not invent a strike, expiration, OCC symbol, premium, Greeks, volume, or open interest, and it does not show an actionable contract instruction.
+
+### Why older builds could show plausible mock contracts
+
+The application setting and production image previously defaulted to the deterministic mock provider. That provider intentionally constructs synthetic option symbols, strikes, quotes, Greeks, volume, and open interest for development, while Lottery Lab rendered those fields without an expiration/OCC/provenance trust treatment. This was configuration-driven demo data, not a Tradier failure fallback—the provider factory never switched a failed Tradier request to mock—but an unset production provider could therefore look actionable. The application and production image now default to an unavailable provider; mock data requires an explicit environment setting and is never actionable.

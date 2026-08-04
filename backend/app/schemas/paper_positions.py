@@ -24,6 +24,9 @@ class PaperPositionCreate(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     signal_status: Literal["BUY", "WATCH", "MISSED", "PASS", "UNAVAILABLE"]
     provider_mode: str
+    provider: str
+    verification_status: Literal["verified"]
+    actionable: Literal[True]
     entry_timestamp: datetime
     paper_only: Literal[True]
 

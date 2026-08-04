@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
+from app.services.contract_verification import verify_contract
 
 NY = ZoneInfo("America/New_York")
 
@@ -103,13 +104,14 @@ class TradierMarketDataProvider:
             greeks = row.get("greeks") or {}
             try:
                 stamp = datetime.fromtimestamp(int(row["trade_date"]) / 1000, NY)
-                result.append(OptionContractOut(symbol=symbol.upper(), option_symbol=str(row["symbol"]),
+                contract = OptionContractOut(symbol=symbol.upper(), option_symbol=str(row["symbol"]),
                     expiration=date.fromisoformat(str(row["expiration_date"])), strike=float(row["strike"]),
                     right=str(row["option_type"]).lower(), bid=float(row.get("bid") or 0),
                     ask=float(row.get("ask") or 0), last=float(row.get("last") or 0),
                     volume=int(row.get("volume") or 0), open_interest=int(row.get("open_interest") or 0),
                     iv=greeks.get("mid_iv"), delta=greeks.get("delta"), gamma=greeks.get("gamma"),
-                    theta=greeks.get("theta"), vega=greeks.get("vega"), timestamp=stamp))
+                    theta=greeks.get("theta"), vega=greeks.get("vega"), timestamp=stamp)
+                result.append(verify_contract(contract, self.status(), symbol=symbol, right=contract.right))
                 self._latest = max(self._latest, stamp)
             except (KeyError, TypeError, ValueError, OSError):
                 continue

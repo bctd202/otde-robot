@@ -24,7 +24,7 @@ test('shows mock warning, symbols, lottery risk, journal and analytics', async()
   const parlay={provider_status:dashboard.provider_status,universe:['SPY'],paper_only:true,candidates:[{ranking_position:1,symbol:'SPY',rank:'PLAY',direction:'call',signal_status:'BUY',score:90,score_label:'PLAY',underlying_price:550,contract:null,contract_cost:null,midpoint:null,spread_percent:null,entry_low:.4,entry_high:.48,no_chase_price:.57,underlying_trigger:551,underlying_invalidation:549,first_underlying_target:552,stretch_underlying_target:554,first_option_target:.96,stretch_option_target:1.92,reasons:['Price reclaimed VWAP'],rejection_reasons:[],unavailable_reason:null,primary_action:'BUY BELOW $0.48',generated_at:'',data_freshness:'mock_current'}]};
   vi.spyOn(globalThis,'fetch').mockImplementation(async(input)=>{const url=String(input);const body=url.includes('paper-positions')?{positions:[],paper_only:true}:url.includes('parlays')?parlay:url.includes('dashboard')?dashboard:url.includes('journal')?[{id:1,symbol:'SPY',signal_type:'lottery',status:'not_taken',generated_at:'',payload:{}}]:{minimum_sample_size:30,sample_size:6,statistically_promising:false,win_rate:50,profit_factor:1.2,average_winner:20,average_loser:-15,expectancy:2,message:'Seeded results.'};return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}})});
   render(<App/>);
-  await waitFor(()=>expect(screen.getByText('MOCK DATA — NOT LIVE')).toBeInTheDocument());
+  await waitFor(()=>expect(screen.getAllByText('DEMO MODE — MOCK OPTION DATA — DO NOT TRADE').length).toBeGreaterThan(0));
   expect(screen.getAllByText('SPY').length).toBeGreaterThan(0);
   expect(screen.getByText(/Most lottery contracts/)).toBeInTheDocument();
   expect(screen.getByText(/Signal Journal/)).toBeInTheDocument();
@@ -56,7 +56,7 @@ test('keeps the application visible when SPY liquidity levels are missing',async
   expect(screen.getByText('Market Context')).toBeInTheDocument();
   expect(screen.getByText('Parlay')).toBeInTheDocument();
   expect(screen.getByText('LIVE MARKET DATA')).toBeInTheDocument();
-  expect(screen.queryByText('MOCK DATA — NOT LIVE')).not.toBeInTheDocument();
+  expect(screen.queryByText('DEMO MODE — MOCK OPTION DATA — DO NOT TRADE')).not.toBeInTheDocument();
 });
 
 test('shows chart and liquidity empty states when no levels are available',async()=>{

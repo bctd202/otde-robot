@@ -42,6 +42,13 @@ class OptionContractOut(BaseModel):
     theta: float | None = None
     vega: float | None = None
     timestamp: datetime
+    provider: str = "unknown"
+    data_mode: Literal["live", "delayed", "mock", "unavailable"] = "unavailable"
+    quote_freshness: Literal["current", "stale", "unknown"] = "unknown"
+    verification_status: Literal["verified", "unverified", "demo"] = "unverified"
+    verification_reason: str = "Contract provenance has not been verified"
+    actionable: bool = False
+    original_option_symbol: str | None = None
 
 class SetupOut(BaseModel):
     symbol: str
@@ -93,6 +100,14 @@ class LotteryOut(BaseModel):
     max_allocation: float
     time_remaining_minutes: int
     worthless_reasons: list[str]
+    option_symbol: str
+    quote_timestamp: datetime
+    provider: str
+    data_mode: Literal["live", "delayed", "mock", "unavailable"]
+    quote_freshness: Literal["current", "stale", "unknown"]
+    verification_status: Literal["verified", "unverified", "demo"]
+    verification_reason: str
+    actionable: bool
 
 class LiquidityLevelsOut(BaseModel):
     previous_day_high: float
@@ -146,6 +161,12 @@ class ParlayCandidateOut(BaseModel):
     primary_action: str
     generated_at: datetime
     data_freshness: str
+    provider: str = "unknown"
+    data_mode: Literal["live", "delayed", "mock", "unavailable"] = "unavailable"
+    quote_freshness: Literal["current", "stale", "unknown"] = "unknown"
+    verification_status: Literal["verified", "unverified", "demo"] = "unverified"
+    verification_reason: str = "No verified contract available"
+    actionable: bool = False
 
 class ScannerHealth(BaseModel):
     candidate_count: int

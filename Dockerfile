@@ -14,7 +14,7 @@ WORKDIR /app
 ENV PYTHONPATH=/app \
     DATABASE_URL=sqlite:////data/liquidity_hunter.db \
     FRONTEND_DIST_DIR=/app/frontend/dist \
-    MARKET_DATA_PROVIDER=mock \
+    MARKET_DATA_PROVIDER=unconfigured \
     PAPER_ONLY=true \
     PORT=8000
 COPY backend/requirements.txt ./requirements.txt

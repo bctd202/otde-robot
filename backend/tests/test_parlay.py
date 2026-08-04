@@ -48,7 +48,8 @@ def test_plans_score_labels_actions_and_sorting():
         "PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"
     ]
     buy = next(item for item in results if item.signal_status == "BUY")
-    assert buy.primary_action.startswith("BUY BELOW $")
+    assert buy.primary_action == "NO VERIFIED CONTRACT AVAILABLE"
+    assert buy.verification_status == "demo" and buy.actionable is False
     assert buy.entry_low <= buy.entry_high < buy.no_chase_price
     assert buy.first_option_target == round(buy.entry_high * 2, 2)
     assert buy.stretch_option_target == round(buy.entry_high * 4, 2)
@@ -113,9 +114,10 @@ class PremiumMissProvider(MockMarketDataProvider):
 def test_empty_and_failed_option_chains_have_accurate_reasons():
     healthy = rank_parlays(EmptyChainProvider(), ["SPY"])[0]
     failed = rank_parlays(FailedChainProvider(), ["SPY"])[0]
-    assert healthy.unavailable_reason == "No same-day expiration"
+    assert healthy.unavailable_reason == "No listed expiration"
     assert failed.unavailable_reason == "Option chain unavailable"
     assert healthy.signal_status == failed.signal_status == "UNAVAILABLE"
+    assert healthy.underlying_trigger is not None and healthy.contract is None and not healthy.actionable
 
 
 def test_missed_premium_action_reports_the_actual_cause():

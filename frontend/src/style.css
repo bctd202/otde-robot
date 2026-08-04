@@ -1317,3 +1317,4 @@ footer {
     animation:none!important;
   }
 }
+.demo-warning{position:sticky;top:0;z-index:30;margin:.75rem 0;padding:1rem;border:3px solid #ff5a36;border-radius:10px;background:#4a130b;color:#fff;text-align:center;font-size:clamp(1rem,2.5vw,1.35rem);font-weight:900;letter-spacing:.04em}.verification{display:inline-flex;margin:.35rem 0;padding:.3rem .55rem;border-radius:999px;font-weight:800}.verification.verified{background:#0d5f43;color:#b7ffe4}.verification.demo,.verification.unverified{background:#5a2418;color:#ffd5ca}@media(max-width:600px){.lotto,.contract-block{overflow-wrap:anywhere;min-width:0}.option-symbol{word-break:break-all}}

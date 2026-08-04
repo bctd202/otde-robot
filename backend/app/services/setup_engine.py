@@ -16,7 +16,7 @@ def structured_setups(symbol, candles, quote, chain):
     swept = prev.high > lv["opening_range_high"] and last.close > lv["opening_range_high"] and last.close > lv["vwap"]
     if swept:
         risk=max(last.close-lv["opening_range_high"], 0.1); target=last.close+risk*2.4
-        contract=next((c for c in chain if c.right=="call" and c.delta and 0.25 >= c.delta >= 0.05), None)
+        contract=next((c for c in chain if c.actionable and c.right=="call" and c.delta and 0.25 >= c.delta >= 0.05), None)
         setups.append(SetupOut(symbol=symbol, setup_type="structured", name="Opening-range breakout retest", direction="call", grade="B+", score=78, entry_trigger=round(last.close+0.05,2), current_underlying_price=quote.price, invalidation=round(lv["opening_range_high"]-0.05,2), target1=round(last.close+risk*2,2), target2=round(target,2), reward_risk=round((target-last.close)/risk,2), contract=contract, confluences=["VWAP alignment", "Opening range reclaimed", "Range expansion"], avoid_reasons=[], generated_at=quote.timestamp, expires_at=quote.timestamp+timedelta(minutes=45), data_freshness="fresh_mock"))
     return [s for s in setups if s.reward_risk >= get_settings().structured_min_rr]
 
@@ -25,11 +25,13 @@ def lottery_candidates(symbol, candles, quote, chain):
     bullish = last.close > lv["vwap"] and last.close >= lv["opening_range_high"]
     out=[]
     for c in chain:
+        if not c.actionable and c.data_mode != "mock":
+            continue
         sp=spread_pct(c.bid,c.ask); abs_delta=abs(c.delta or 0); debit=c.ask*100
         trigger_ok = bullish and c.right=="call"
         if not trigger_ok or not (s.lottery_min_ask <= c.ask <= s.lottery_max_ask and debit <= s.lottery_max_debit and c.volume >= s.lottery_min_volume and c.open_interest >= s.lottery_min_open_interest and sp <= s.lottery_max_spread_pct and s.lottery_min_delta <= abs_delta <= s.lottery_max_delta and c.bid > 0):
             continue
         mid=round((c.bid+c.ask)/2,2); otm=max((c.strike-quote.price)/quote.price*100,0) if c.right=="call" else max((quote.price-c.strike)/quote.price*100,0)
         score=min(100, 40 + c.volume/50 + c.open_interest/200 + (c.gamma or 0)*300 - sp/2)
-        out.append(LotteryOut(symbol=symbol,right=c.right,strike=c.strike,expiration=c.expiration,bid=c.bid,ask=c.ask,midpoint=mid,last=c.last,total_debit=debit,otm_percent=round(otm,2),delta=c.delta,gamma=c.gamma,theta=c.theta,iv=c.iv,volume=c.volume,open_interest=c.open_interest,spread_percent=sp,underlying_trigger=round(max(lv["session_high"], c.strike-0.8),2),underlying_invalidation=round(lv["vwap"]-0.2,2),break_even=round(c.strike+c.ask,2),estimated_2x_underlying=round(c.strike+c.ask*2,2),estimated_5x_underlying=round(c.strike+c.ask*5,2),estimated_10x_underlying=round(c.strike+c.ask*10,2),explanation="Modeled estimates use simple intrinsic-value thresholds and are not guarantees; 0DTE options can expire worthless.",catalyst="Confirmed momentum runner: above VWAP and opening-range high in mock data.",setup_score=round(score,1),max_allocation=20,time_remaining_minutes=355,worthless_reasons=["Underlying may fail to reach strike quickly", "Bid-ask spread and theta decay can erase premium", "Mock data is not tradable live data"]))
+        out.append(LotteryOut(symbol=symbol,right=c.right,strike=c.strike,expiration=c.expiration,bid=c.bid,ask=c.ask,midpoint=mid,last=c.last,total_debit=debit,otm_percent=round(otm,2),delta=c.delta,gamma=c.gamma,theta=c.theta,iv=c.iv,volume=c.volume,open_interest=c.open_interest,spread_percent=sp,underlying_trigger=round(max(lv["session_high"], c.strike-0.8),2),underlying_invalidation=round(lv["vwap"]-0.2,2),break_even=round(c.strike+c.ask,2),estimated_2x_underlying=round(c.strike+c.ask*2,2),estimated_5x_underlying=round(c.strike+c.ask*5,2),estimated_10x_underlying=round(c.strike+c.ask*10,2),explanation="Modeled estimates use simple intrinsic-value thresholds and are not guarantees; 0DTE options can expire worthless.",catalyst="Confirmed momentum runner: above VWAP and opening-range high in mock data.",setup_score=round(score,1),max_allocation=20,time_remaining_minutes=355,worthless_reasons=["Underlying may fail to reach strike quickly", "Bid-ask spread and theta decay can erase premium", "Mock data is not tradable live data"],option_symbol=c.option_symbol,quote_timestamp=c.timestamp,provider=c.provider,data_mode=c.data_mode,quote_freshness=c.quote_freshness,verification_status=c.verification_status,verification_reason=c.verification_reason,actionable=c.actionable))
     return sorted(out, key=lambda x: x.setup_score, reverse=True)[:3]

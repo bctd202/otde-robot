@@ -46,6 +46,10 @@ def management_decision(position: ParlayPaperPosition, option_price: float, unde
 
 
 def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPosition:
+    if payload.provider != "tradier" or payload.provider_mode not in {"live", "delayed"}:
+        raise ValueError("Paper entry requires a verified Tradier contract; mock data is never actionable")
+    if payload.verification_status != "verified" or not payload.actionable:
+        raise ValueError("Paper entry requires a verified actionable contract")
     duplicate = db.scalar(select(ParlayPaperPosition).where(
         ParlayPaperPosition.option_symbol == payload.option_symbol,
         ParlayPaperPosition.lifecycle_status == "ACTIVE",
