@@ -23,10 +23,12 @@ def _rows(payload: dict[str, Any], *path: str) -> list[dict[str, Any]]:
 class TradierMarketDataProvider:
     """Read-only Tradier adapter. Every upstream failure returns no fabricated data."""
 
-    def __init__(self, token: str | None, base_url: str, client: httpx.Client | None = None):
+    def __init__(self, token: str | None, base_url: str, client: httpx.Client | None = None,
+                 trading_date: date | None = None):
         self.token = token
         self.base_url = base_url.rstrip("/")
         self.client = client or httpx.Client(timeout=10.0)
+        self._trading_date = trading_date
         self._error = "Tradier API token is not configured." if not token else None
         self._latest = datetime.now(NY)
 
@@ -111,7 +113,7 @@ class TradierMarketDataProvider:
         return [parsed for value in values if isinstance(value, str) for parsed in [date.fromisoformat(value)]]
 
     def option_chain(self, symbol: str) -> list[OptionContractOut]:
-        today = datetime.now(NY).date()
+        today = self._trading_date or datetime.now(NY).date()
         if today not in self.expirations(symbol):
             return []
         data = self._get("/markets/options/chains", {"symbol": symbol, "expiration": today.isoformat(), "greeks": "true"})

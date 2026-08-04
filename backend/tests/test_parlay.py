@@ -1,6 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -10,11 +11,27 @@ from app.schemas.market import ProviderStatus
 from app.services.parlay import _score_label, rank_parlays
 
 NY = ZoneInfo("America/New_York")
+FIXED_SESSION_TIME = datetime(2026, 1, 15, 10, 5, tzinfo=NY)
+
+
+class FixedDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return FIXED_SESSION_TIME if tz is None else FIXED_SESSION_TIME.astimezone(tz)
+
+
+@pytest.fixture(autouse=True)
+def fixed_eastern_strategy_clock(monkeypatch):
+    monkeypatch.setattr("app.services.parlay.datetime", FixedDateTime)
+
+
+def mock_provider():
+    return MockMarketDataProvider(now=FIXED_SESSION_TIME)
 
 
 def board():
     settings = get_settings()
-    return rank_parlays(MockMarketDataProvider(), settings.parlay_symbol_list)
+    return rank_parlays(mock_provider(), settings.parlay_symbol_list)
 
 
 def test_default_mock_board_has_complete_deterministic_variety():
@@ -28,7 +45,7 @@ def test_default_mock_board_has_complete_deterministic_variety():
     assert "MISSED" in statuses
     assert statuses.count("PASS") >= 2
     assert {item.direction for item in first} >= {"call", "put"}
-    provider = MockMarketDataProvider()
+    provider = mock_provider()
     for symbol in get_settings().parlay_symbol_list:
         assert provider.quotes([symbol])
         assert provider.candles(symbol, "1m")
@@ -111,15 +128,15 @@ class PremiumMissProvider(MockMarketDataProvider):
 
 
 def test_empty_and_failed_option_chains_have_accurate_reasons():
-    healthy = rank_parlays(EmptyChainProvider(), ["SPY"])[0]
-    failed = rank_parlays(FailedChainProvider(), ["SPY"])[0]
+    healthy = rank_parlays(EmptyChainProvider(now=FIXED_SESSION_TIME), ["SPY"])[0]
+    failed = rank_parlays(FailedChainProvider(now=FIXED_SESSION_TIME), ["SPY"])[0]
     assert healthy.unavailable_reason == "No same-day expiration"
     assert failed.unavailable_reason == "Option chain unavailable"
     assert healthy.signal_status == failed.signal_status == "UNAVAILABLE"
 
 
 def test_missed_premium_action_reports_the_actual_cause():
-    missed = rank_parlays(PremiumMissProvider(), ["AAPL"])[0]
+    missed = rank_parlays(PremiumMissProvider(now=FIXED_SESSION_TIME), ["AAPL"])[0]
     assert missed.signal_status == "MISSED"
     assert missed.contract.ask > missed.no_chase_price
     assert missed.primary_action == f"MISSED — DO NOT CHASE ABOVE ${missed.no_chase_price:.2f}"
@@ -133,7 +150,7 @@ class PartialQuoteProvider(MockMarketDataProvider):
 
 
 def test_one_bad_quote_does_not_block_other_symbols():
-    results = rank_parlays(PartialQuoteProvider(), ["BROKEN", "SPY"])
+    results = rank_parlays(PartialQuoteProvider(now=FIXED_SESSION_TIME), ["BROKEN", "SPY"])
     by_symbol = {item.symbol: item for item in results}
 
     assert by_symbol["BROKEN"].unavailable_reason == "Quote unavailable"
@@ -141,7 +158,7 @@ def test_one_bad_quote_does_not_block_other_symbols():
 
 
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
-    monkeypatch.setattr("app.api.routes.get_provider", lambda: MockMarketDataProvider())
+    monkeypatch.setattr("app.api.routes.get_provider", mock_provider)
     response = TestClient(app).get("/api/parlays")
     assert response.status_code == 200
     body = response.json()
@@ -159,7 +176,7 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
 def test_live_and_replay_share_identical_completed_candle_evaluation():
     from app.services.backtest import replay_evaluation
     from app.services.parlay import evaluate_underlying_setup
-    provider=MockMarketDataProvider();candles=provider.candles("SPY","1m")
+    provider=mock_provider();candles=provider.candles("SPY","1m")
     live=evaluate_underlying_setup(candles,candles[-1].close)
     replay=replay_evaluation(candles,candles[-1].close)
     assert replay == live

@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
@@ -15,8 +15,9 @@ PROFILE = {"SPY": "buy_call", "QQQ": "buy_put", "IWM": "watch_call", "TSLA": "wa
 
 
 class MockMarketDataProvider:
-    def __init__(self):
-        self.now = datetime.combine(date.today(), time(10, 5), tzinfo=NY)
+    def __init__(self, now: datetime | None = None):
+        """Build deterministic mock data at an injectable Eastern session time."""
+        self.now = now or datetime.combine(datetime.now(NY).date(), time(10, 5), tzinfo=NY)
 
     def status(self):
         return ProviderStatus(provider="mock", mode="mock", status="healthy", delay_seconds=0,
@@ -28,7 +29,7 @@ class MockMarketDataProvider:
     def candles(self, symbol, timeframe="1m"):
         base, profile = BASE[symbol], PROFILE[symbol]
         step = 5 if timeframe == "5m" else 1
-        start = datetime.combine(date.today(), time(9, 30), tzinfo=NY)
+        start = datetime.combine(self.now.date(), time(9, 30), tzinfo=NY)
         rows = []
         sign = -1 if profile.endswith("put") else 1
         for i in range(36 // step):
@@ -52,7 +53,7 @@ class MockMarketDataProvider:
         return rows
 
     def option_chain(self, symbol):
-        today = date.today()
+        today = self.now.date()
         underlying = BASE[symbol] + .25 if PROFILE[symbol].startswith("missed") else self.candles(symbol)[-1].close
         rows = []
         for right in ["call", "put"]:
