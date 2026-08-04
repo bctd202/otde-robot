@@ -50,3 +50,33 @@ def test_upgrade_from_0005_classifies_ambiguous_live_rows_unknown(tmp_path):
     with sqlite3.connect(db) as conn:
         source = conn.execute("SELECT source FROM signal_performance WHERE signal_id='legacy-live'").fetchone()[0]
     assert source == "UNKNOWN"
+
+
+def test_unknown_audit_rows_do_not_change_live_metrics():
+    from datetime import date, datetime, timezone
+
+    from app.db.models import SignalPerformance
+    from app.services.performance import metrics
+
+    live = SignalPerformance(signal_id="live", source="LIVE", dedupe_key="live", ticker="SPY", direction="CALL",
+        backend_status="BUY", setup_type="directional-liquidity", strategy_version="test", strategy_snapshot={},
+        condition_snapshot={}, trading_date=date(2026, 8, 4), triggered_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        entry_price=100, stop_price=99, target_price=102, exit_reason="TARGET", result_r=2, mfe_r=2, mae_r=.1,
+        duration_minutes=10, score=90, user_entered=False, option_snapshot=None, conservative_same_candle=False,
+        created_at=datetime(2026, 8, 4, tzinfo=timezone.utc), updated_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        last_evaluated_at=datetime(2026, 8, 4, tzinfo=timezone.utc))
+    unknown = SignalPerformance(signal_id="unknown", source="UNKNOWN", dedupe_key="unknown", ticker="IWN", direction="CALL",
+        backend_status="BUY", setup_type="directional-liquidity", strategy_version="test", strategy_snapshot={},
+        condition_snapshot={}, trading_date=date(2026, 8, 4), triggered_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        entry_price=100, stop_price=99, target_price=102, exit_reason="STOP", result_r=-100, mfe_r=.1, mae_r=100,
+        duration_minutes=10, score=90, user_entered=False, option_snapshot=None, conservative_same_candle=False,
+        created_at=datetime(2026, 8, 4, tzinfo=timezone.utc), updated_at=datetime(2026, 8, 4, tzinfo=timezone.utc),
+        last_evaluated_at=datetime(2026, 8, 4, tzinfo=timezone.utc))
+
+    live_metrics = metrics([row for row in [live, unknown] if row.source == "LIVE"])
+
+    assert live_metrics["total_triggered_signals"] == 1
+    assert live_metrics["win_rate"] == 100
+    assert live_metrics["average_r"] == 2
+    assert live_metrics["cumulative_r"] == 2
+    assert live_metrics["maximum_drawdown_r"] == 0

@@ -22,3 +22,49 @@ jobs:
       - run: npm --prefix frontend run lint
       - run: npm --prefix frontend run typecheck
       - run: npm --prefix frontend run build
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t otde-ci .
+      - name: Mock provider with demo contracts disabled
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 18080:8000 -e MARKET_DATA_PROVIDER=mock -e ENABLE_DEMO_OPTION_CONTRACTS=false -e DATABASE_URL=sqlite:////data/mock.db otde-ci)
+          trap 'docker rm -f "$cid"' EXIT
+          for i in {1..60}; do curl -fsS http://127.0.0.1:18080/api/health && break || sleep 1; done
+          curl -fsS http://127.0.0.1:18080/api/parlays -o /tmp/parlays.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/parlays.json'))
+          assert data['provider_status']['provider']=='mock'
+          assert 'option contracts are disabled' in data['provider_status']['message']
+          assert all(c.get('contract') is None and c.get('actionable') is False for c in data['candidates'])
+          PY
+      - name: Explicit demo-option mode remains non-actionable and warned
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 18081:8000 -e MARKET_DATA_PROVIDER=mock -e ENABLE_DEMO_OPTION_CONTRACTS=true -e DATABASE_URL=sqlite:////data/demo.db otde-ci)
+          trap 'docker rm -f "$cid"' EXIT
+          for i in {1..60}; do curl -fsS http://127.0.0.1:18081/api/health && break || sleep 1; done
+          curl -fsS http://127.0.0.1:18081/api/parlays -o /tmp/parlays.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/parlays.json'))
+          assert data['provider_status']['message']=='DEMO MODE — MOCK OPTION DATA — DO NOT TRADE'
+          assert all(c.get('contract') is None and c.get('actionable') is False for c in data['candidates'])
+          PY
+      - name: Provider unavailable remains safe
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 18082:8000 -e MARKET_DATA_PROVIDER=live -e DATABASE_URL=sqlite:////data/unavailable.db otde-ci)
+          trap 'docker rm -f "$cid"' EXIT
+          for i in {1..60}; do curl -fsS http://127.0.0.1:18082/api/health && break || sleep 1; done
+          curl -fsS http://127.0.0.1:18082/api/parlays -o /tmp/parlays.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/parlays.json'))
+          assert data['provider_status']['status']=='unavailable'
+          assert all(c['signal_status']=='UNAVAILABLE' and c.get('contract') is None and c.get('actionable') is False for c in data['candidates'])
+          PY
