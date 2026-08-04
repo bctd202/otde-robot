@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -8,6 +9,31 @@ from app.services.indicators import opening_range, spread_pct, vwap
 Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
 NY = ZoneInfo("America/New_York")
+PRODUCTION_TIMEFRAME = "1m"
+
+
+@dataclass(frozen=True)
+class UnderlyingEvaluation:
+    direction: Direction | None
+    checks: int
+    reasons: list[str]
+    trigger: float
+    stop: float
+    target: float
+    confirmed: bool
+    extension_r: float
+
+
+def evaluate_underlying_setup(candles: list[CandleOut], underlying_price: float) -> UnderlyingEvaluation:
+    """Single production setup path shared by live scans and chronological replay."""
+    direction, checks, reasons, trigger, stop, confirmed = _directional_plan(candles)
+    if direction is None:
+        return UnderlyingEvaluation(None, checks, reasons, trigger, stop, 0, confirmed, 0)
+    risk = max(abs(trigger - stop), underlying_price * .002)
+    target = trigger + risk * (1.5 if direction == "call" else -1.5)
+    extension = ((candles[-1].close - trigger) if direction == "call" else
+                 (trigger - candles[-1].close)) / risk
+    return UnderlyingEvaluation(direction, checks, reasons, trigger, stop, target, confirmed, extension)
 
 
 def _score_label(score: float) -> Literal["PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"]:
@@ -105,7 +131,7 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             output.append(_unavailable(symbol, "Quote unavailable", provider_status.latest_timestamp))
             continue
         try:
-            candles, chain = provider.candles(symbol, "1m"), provider.option_chain(symbol)
+            candles, chain = provider.candles(symbol, PRODUCTION_TIMEFRAME), provider.option_chain(symbol)
         except (KeyError, TypeError, ValueError):
             candles, chain = [], []
         if len(candles) < 8:
@@ -116,7 +142,9 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             reason = "Option chain unavailable" if chain_status.status == "unavailable" else "No same-day expiration"
             output.append(_unavailable(symbol, reason, quote.timestamp))
             continue
-        direction, checks, reasons, trigger, invalidation, confirmed = _directional_plan(candles)
+        setup = evaluate_underlying_setup(candles, quote.price)
+        direction, checks, reasons = setup.direction, setup.checks, setup.reasons
+        trigger, invalidation, confirmed = setup.trigger, setup.stop, setup.confirmed
         if direction is None:
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction="none", signal_status="PASS",
                 score=min(54, 25 + checks * 6), score_label="PASS", underlying_price=quote.price,
@@ -125,7 +153,7 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
                 data_freshness=f"{provider_status.mode}_current"))
             continue
         move = max(abs(trigger - invalidation), quote.price * .002)
-        first_target = trigger + move * (1.5 if direction == "call" else -1.5)
+        first_target = setup.target
         stretch_target = trigger + move * (2.5 if direction == "call" else -2.5)
         contract, rejection = _eligible_contract(chain, direction, first_target)
         if contract is None:
@@ -140,7 +168,7 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
         entry_high = round(min(1.0, preferred_entry * 1.08), 2)
         no_chase = round(min(1.25, max(entry_high + .05, preferred_entry * 1.25)), 2)
         spread = spread_pct(contract.bid, contract.ask)
-        extension = ((candles[-1].close - trigger) if direction == "call" else (trigger - candles[-1].close)) / move
+        extension = setup.extension_r
         score = max(0, min(100, 42 + checks * 8 + min(contract.volume / 250, 8)
             + min(contract.open_interest / 1000, 4) - spread / 4))
         premium_exceeded = contract.ask > no_chase

@@ -23,10 +23,12 @@ def _rows(payload: dict[str, Any], *path: str) -> list[dict[str, Any]]:
 class TradierMarketDataProvider:
     """Read-only Tradier adapter. Every upstream failure returns no fabricated data."""
 
-    def __init__(self, token: str | None, base_url: str, client: httpx.Client | None = None):
+    def __init__(self, token: str | None, base_url: str, client: httpx.Client | None = None,
+                 trading_date: date | None = None):
         self.token = token
         self.base_url = base_url.rstrip("/")
         self.client = client or httpx.Client(timeout=10.0)
+        self._trading_date = trading_date
         self._error = "Tradier API token is not configured." if not token else None
         self._latest = datetime.now(NY)
 
@@ -86,6 +88,23 @@ class TradierMarketDataProvider:
                 continue
         return result
 
+    def historical_candles(self, symbol: str, timeframe: str, start: date, end: date) -> list[CandleOut]:
+        """Fetch regular-session history; Tradier may truncate ranges by plan."""
+        if timeframe not in {"1m", "5m", "15m"}:
+            return []
+        data = self._get("/markets/timesales", {"symbol": symbol, "interval": timeframe.replace("m", "min"),
+            "start": f"{start.isoformat()} 09:30", "end": f"{end.isoformat()} 16:00", "session_filter": "open"})
+        result = []
+        for row in _rows(data or {}, "series", "data"):
+            try:
+                stamp = datetime.fromisoformat(str(row["time"]))
+                if stamp.tzinfo is None: stamp = stamp.replace(tzinfo=NY)
+                result.append(CandleOut(symbol=symbol.upper(), timeframe=timeframe, timestamp=stamp, open=float(row["open"]),
+                    high=float(row["high"]), low=float(row["low"]), close=float(row["close"]), volume=int(row["volume"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return sorted(result, key=lambda candle: candle.timestamp)
+
     def expirations(self, symbol: str) -> list[date]:
         data = self._get("/markets/options/expirations", {"symbol": symbol, "includeAllRoots": "true"})
         values: Any = (data or {}).get("expirations", {}).get("date", [])
@@ -94,7 +113,7 @@ class TradierMarketDataProvider:
         return [parsed for value in values if isinstance(value, str) for parsed in [date.fromisoformat(value)]]
 
     def option_chain(self, symbol: str) -> list[OptionContractOut]:
-        today = datetime.now(NY).date()
+        today = self._trading_date or datetime.now(NY).date()
         if today not in self.expirations(symbol):
             return []
         data = self._get("/markets/options/chains", {"symbol": symbol, "expiration": today.isoformat(), "greeks": "true"})

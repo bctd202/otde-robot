@@ -6,7 +6,8 @@ from app.market_data.tradier import TradierMarketDataProvider
 
 
 def test_tradier_normalizes_quotes_candles_expirations_and_chain():
-    today = date.today().isoformat()
+    expiration = date(2026, 1, 15)
+    expiration_text = expiration.isoformat()
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -16,13 +17,13 @@ def test_tradier_normalizes_quotes_candles_expirations_and_chain():
             }}})
         if path.endswith("/timesales"):
             return httpx.Response(200, json={"series": {"data": [{
-                "time": f"{today}T09:30:00", "open": 550, "high": 551,
+                "time": f"{expiration_text}T09:30:00", "open": 550, "high": 551,
                 "low": 549.5, "close": 550.5, "volume": 1000,
             }]}})
         if path.endswith("/expirations"):
-            return httpx.Response(200, json={"expirations": {"date": today}})
+            return httpx.Response(200, json={"expirations": {"date": expiration_text}})
         return httpx.Response(200, json={"options": {"option": {
-            "symbol": "SPY260101C00550000", "expiration_date": today,
+            "symbol": "SPY260115C00550000", "expiration_date": expiration_text,
             "strike": 550, "option_type": "call", "bid": .35, "ask": .40,
             "last": .38, "volume": 900, "open_interest": 2000,
             "trade_date": 1_722_000_000_000,
@@ -30,10 +31,10 @@ def test_tradier_normalizes_quotes_candles_expirations_and_chain():
         }}})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    provider = TradierMarketDataProvider("secret", "https://example.test/v1", client)
+    provider = TradierMarketDataProvider("secret", "https://example.test/v1", client, trading_date=expiration)
     assert provider.quotes(["SPY"])[0].price == 550.25
     assert provider.candles("SPY")[0].volume == 1000
-    assert provider.expirations("SPY") == [date.today()]
+    assert provider.expirations("SPY") == [expiration]
     contract = provider.option_chain("SPY")[0]
     assert contract.right == "call"
     assert contract.delta == .4

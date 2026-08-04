@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { exitPaperPosition, getAnalytics, getDashboard, getJournal, getPaperPositions, getParlays, paperEnter } from './api/client';
 import { CandlestickChart } from './components/CandlestickChart';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
+import { Performance } from './components/Performance';
+import { BacktestLab } from './components/BacktestLab';
 import type { Analytics, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
 import './style.css';
 
@@ -57,6 +59,7 @@ export function App() {
   const isMock=dashboard?.provider_status.mode==='mock'||dashboard?.provider_status.provider==='mock';
   const isDelayed=Boolean(dashboard&&dashboard.provider_status.delay_seconds>0);
   return <main>
+    <nav className="top-navigation" aria-label="Primary"><a href="#parlay">Trade Board</a><a href="#performance">Performance</a><a href="#backtest-lab">Backtest Lab</a></nav>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
     {parlays?<ParlayBoard data={parlays} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol}/>:<ParlaySkeleton/>}
     <nav>{['parlay','context','charts','structured','lottery','journal','analytics'].map(item=><a key={item} href={`#${item}`}>{item}</a>)}</nav>
@@ -72,6 +75,8 @@ export function App() {
     <div className="grid"><Card id="charts" title="Chart Workspace">{chartQuote&&chartLevels?<CandlestickChart symbol={chartQuote.symbol} currentPrice={chartQuote.price} levels={chartLevels} directionalBias={chartBias ?? 'unavailable'}/>:<div className="chart-empty-state"><strong>Chart unavailable</strong><p>The live provider did not return enough intraday data to build liquidity levels.</p></div>}</Card><Card id="journal" title={`Signal Journal · ${journal.length}`}>{journal.length===0?<p>Run the seed command to create sample signals.</p>:journal.slice(0,6).map(row=><div className="journal-row" key={row.id}><span>{row.symbol}</span><strong>{row.signal_type.replace('_',' ')}</strong><small>{row.status}</small></div>)}</Card><Card id="analytics" title="Seeded Paper Analytics">{analytics&&<><div className="analytics-grid"><Metric label="Samples" value={analytics.sample_size}/><Metric label="Win rate" value={`${analytics.win_rate}%`}/><Metric label="Profit factor" value={analytics.profit_factor ?? 'N/A'}/><Metric label="Expectancy" value={`${analytics.expectancy}%`}/></div><p>{analytics.message}</p><small>Minimum sample size: {analytics.minimum_sample_size}; promising: {analytics.statistically_promising?'yes':'no'}.</small></>}</Card></div>
     <footer>Parlay paper-only research · No brokerage adapter or order-routing path exists.</footer>
     </>}
+    <Performance/>
+    <BacktestLab/>
   </main>;
 }
 

@@ -6,3 +6,10 @@ os.environ.setdefault(
     "FRONTEND_DIST_DIR",
     str(Path(__file__).parent / "static_site"),
 )
+
+
+def pytest_sessionstart(session):
+    """Route tests use the configured app database, so create its complete test schema."""
+    from app.db import models  # noqa: F401
+    from app.db.session import Base, engine
+    Base.metadata.create_all(engine)

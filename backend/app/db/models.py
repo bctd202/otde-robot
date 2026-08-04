@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -174,6 +174,69 @@ class ParlayPaperPosition(Base):
     last_underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data_freshness: Mapped[str] = mapped_column(String(32), default="current")
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    requested_start: Mapped[date] = mapped_column(Date)
+    requested_end: Mapped[date] = mapped_column(Date)
+    actual_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    actual_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tickers: Mapped[list] = mapped_column(JSON)
+    strategy_snapshot: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    failures: Mapped[dict] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LiveWaitCandidate(Base):
+    __tablename__ = "live_wait_candidates"
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    direction: Mapped[str] = mapped_column(String(4))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    condition_snapshot: Mapped[dict] = mapped_column(JSON)
+
+
+class SignalPerformance(Base):
+    __tablename__ = "signal_performance"
+    __table_args__ = (UniqueConstraint("source", "dedupe_key", name="uq_signal_performance_source_key"),
+        Index("ix_signal_performance_filters", "source", "trading_date", "ticker", "exit_reason"))
+    signal_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source: Mapped[str] = mapped_column(String(12))
+    dedupe_key: Mapped[str] = mapped_column(String(160))
+    backtest_run_id: Mapped[str | None] = mapped_column(ForeignKey("backtest_runs.id"), nullable=True, index=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    direction: Mapped[str] = mapped_column(String(4))
+    backend_status: Mapped[str] = mapped_column(String(16))
+    setup_type: Mapped[str] = mapped_column(String(64), index=True)
+    strategy_version: Mapped[str] = mapped_column(String(32))
+    strategy_snapshot: Mapped[dict] = mapped_column(JSON)
+    condition_snapshot: Mapped[dict] = mapped_column(JSON)
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    first_wait_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_price: Mapped[float] = mapped_column(Float)
+    target_price: Mapped[float] = mapped_column(Float)
+    exit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str] = mapped_column(String(16), default="OPEN", index=True)
+    result_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mfe_r: Mapped[float] = mapped_column(Float, default=0)
+    mae_r: Mapped[float] = mapped_column(Float, default=0)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score: Mapped[float] = mapped_column(Float)
+    user_entered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    paper_position_id: Mapped[int | None] = mapped_column(ForeignKey("parlay_paper_positions.id"), nullable=True)
+    option_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    conservative_same_candle: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class TradeOutcome(Base):
