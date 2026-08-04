@@ -148,8 +148,8 @@ def dashboard():
         except (KeyError, TypeError, ValueError): chain=[]
         levels[q.symbol]=levels_for(candles)
         bias[q.symbol]="bullish" if candles[-1].close > levels[q.symbol]["vwap"] else "neutral"
-        setups += structured_setups(q.symbol,candles,q,chain)
-        lottos += lottery_candidates(q.symbol,candles,q,chain)
+        setups += structured_setups(q.symbol,candles,q,chain,status)
+        lottos += lottery_candidates(q.symbol,candles,q,chain,status)
     return DashboardOut(provider_status=status, quotes=quotes, market_session=market_session(status.latest_timestamp), volatility_proxy=14.2, levels=levels, directional_bias=bias, news_warning="Economic calendar adapter unavailable in Phase 1; no events fabricated.", normal_setups=setups, lottery_setups=sorted(lottos, key=lambda x: x.setup_score, reverse=True)[:3], no_trade=(not setups and not lottos), paper_account={"mode":"PAPER ONLY", "equity": settings.paper_account_size, "kill_switch": False, "structured_risk_percent": settings.structured_risk_percent, "lottery_daily_limit": 40})
 
 @router.get("/candles/{symbol}")

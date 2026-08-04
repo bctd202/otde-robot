@@ -12,9 +12,11 @@ export function ParlaySkeleton() {
 
 interface ParlayBoardProps { data:ParlayResponse;updated:Date|null;refreshing:boolean;stale:boolean;onRetry:()=>void;positions?:PaperPosition[];positionsStale?:boolean;onPaperEnter?:(candidate:ParlayCandidate)=>void;onPaperExit?:(position:PaperPosition)=>void;enteringSymbol?:string|null }
 
+const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&item.actionable===true&&item.contract?.actionable===true&&item.contract.verification_status==='verified'&&item.contract.provider==='tradier'&&item.contract.data_mode==='live'&&Boolean(item.contract.normalized_symbol)&&Boolean(item.contract.bid_timestamp)&&Boolean(item.contract.ask_timestamp)&&Boolean(item.contract.timestamp);
+
 export function ParlayBoard({data,updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol}:ParlayBoardProps) {
   const groups=useMemo(()=>({
-    ready:data.candidates.filter(item=>item.signal_status==='BUY'),
+    ready:data.candidates.filter(isVerifiedActionable),
     waiting:data.candidates.filter(item=>item.signal_status==='WATCH').sort((a,b)=>a.ranking_position-b.ranking_position),
     noTrade:data.candidates.filter(item=>!['BUY','WATCH'].includes(item.signal_status)),
   }),[data.candidates]);

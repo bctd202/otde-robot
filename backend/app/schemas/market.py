@@ -73,6 +73,17 @@ class SetupOut(BaseModel):
 
 class LotteryOut(BaseModel):
     symbol: str
+
+    option_symbol: str
+    normalized_symbol: str | None = None
+    provider: str
+    data_mode: str
+    verification_status: str
+    verification_reason: str
+    bid_timestamp: datetime
+    ask_timestamp: datetime
+    quote_timestamp: datetime
+    actionable: bool
     right: str
     strike: float
     expiration: date

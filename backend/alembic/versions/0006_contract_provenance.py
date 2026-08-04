@@ -29,6 +29,19 @@ def upgrade() -> None:
         for name, kind in fields:
             if name not in existing:
                 op.add_column(table, sa.Column(name, kind, nullable=True))
+    op.execute("""
+        UPDATE signal_performance
+        SET source = 'UNKNOWN'
+        WHERE source = 'LIVE' AND (
+            provenance_provider IS NULL OR provenance_provider != 'tradier' OR
+            provenance_data_mode IS NULL OR provenance_data_mode != 'live' OR
+            verification_status IS NULL OR verification_status != 'verified' OR
+            actionable IS NULL OR actionable != 1 OR
+            original_occ_symbol IS NULL OR normalized_option_symbol IS NULL OR
+            bid_timestamp IS NULL OR ask_timestamp IS NULL OR quote_timestamp IS NULL OR
+            contract_expiration IS NULL OR contract_strike IS NULL OR contract_option_type IS NULL
+        )
+    """)
 
 
 def downgrade() -> None:

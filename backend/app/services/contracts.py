@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from app.schemas.market import OptionContractOut
+
+ACCEPTED_ACTIONABLE_DATA_MODES = {"live"}
 from app.services.indicators import spread_pct
 
 OCC = re.compile(r"^([A-Z0-9]{1,6})(\d{6})([CP])(\d{8})$")
@@ -32,8 +34,12 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     parsed = (root, expiry, strike, right)
     if parsed != expected or contract.symbol.upper() != underlying.upper():
         return ContractDecision(False, False, "OCC identity disagrees with Tradier chain row")
-    if contract.provider != "tradier" or contract.data_mode != "live":
-        return ContractDecision(contract.data_mode == "demo", False, "Demo contracts are never actionable")
+    if contract.provider != "tradier":
+        return ContractDecision(contract.data_mode == "demo", False, "Only Tradier contracts can be actionable")
+    if contract.data_mode == "demo":
+        return ContractDecision(True, False, "Demo contracts are never actionable")
+    if contract.data_mode not in ACCEPTED_ACTIONABLE_DATA_MODES:
+        return ContractDecision(True, False, "Provider data mode is not explicitly accepted for trading")
     now = now or datetime.now(timezone.utc)
     if contract.expiration != now.astimezone(contract.timestamp.tzinfo).date():
         return ContractDecision(True, False, "No valid same-day expiration")
@@ -60,3 +66,17 @@ def annotate_chain(chain: list[OptionContractOut], underlying: str, now: datetim
         contract.actionable = decision.actionable
         contract.normalized_symbol = contract.option_symbol.strip().upper() if decision.authentic else None
     return chain
+
+
+def has_complete_provenance(contract: OptionContractOut) -> bool:
+    return all([
+        contract.provider, contract.data_mode, contract.verification_status, contract.verification_reason,
+        contract.option_symbol, contract.normalized_symbol, contract.bid_timestamp, contract.ask_timestamp,
+        contract.timestamp, contract.expiration, contract.strike is not None, contract.right,
+    ])
+
+
+def is_verified_actionable_contract(contract: OptionContractOut | None) -> bool:
+    return bool(contract and contract.actionable is True and contract.verification_status == "verified"
+                and contract.provider == "tradier" and contract.data_mode in ACCEPTED_ACTIONABLE_DATA_MODES
+                and has_complete_provenance(contract))

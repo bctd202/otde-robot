@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.models import SignalPerformance
 from app.db.session import Base
 from app.market_data.mock import MockMarketDataProvider
-from app.schemas.market import OptionContractOut
+from app.schemas.market import OptionContractOut, ProviderStatus, Quote
 from app.services.contracts import validate_contract
 from app.services.parlay import rank_parlays
 from app.services.performance import track_candidates
@@ -45,18 +45,44 @@ def test_authenticity_is_separate_from_quote_and_liquidity_eligibility():
         assert result.authentic and not result.actionable and result.reason == reason
 
 
-class MissingExpiration(MockMarketDataProvider):
+class IwnTradierMissingExpiration:
+    def __init__(self):
+        self.now = NOW
+        base = MockMarketDataProvider(now=NOW)
+        self._candles = base.candles("SPY")
+        for candle in self._candles:
+            candle.symbol = "IWN"
+            candle.open -= 300
+            candle.high -= 300
+            candle.low -= 300
+            candle.close -= 300
+
+    def status(self):
+        return ProviderStatus(provider="tradier", mode="live", status="healthy", delay_seconds=0,
+                              latest_timestamp=NOW, message="Tradier live test fixture")
+
+    def quotes(self, symbols):
+        return [Quote(symbol="IWN", price=self._candles[-1].close, timestamp=NOW)]
+
+    def candles(self, symbol, timeframe="1m"):
+        return self._candles
+
+    def expirations(self, symbol):
+        return [date(2026, 8, 5)]
+
     def option_chain(self, symbol):
-        return []
+        if NOW.date() not in self.expirations(symbol):
+            return []
+        raise AssertionError("Fixture must not fabricate a chain for an unlisted expiration")
 
 
-def test_iwn_underlying_setup_survives_absent_tradier_expiration_without_live_contamination(monkeypatch):
-    monkeypatch.setitem(__import__("app.market_data.mock", fromlist=["BASE"]).BASE, "IWN", 250.0)
-    monkeypatch.setitem(__import__("app.market_data.mock", fromlist=["PROFILE"]).PROFILE, "IWN", "buy_call")
-    candidate = rank_parlays(MissingExpiration(now=NOW), ["IWN"])[0]
+def test_iwn_tradier_missing_listed_expiration_keeps_underlying_without_live_contamination():
+    candidate = rank_parlays(IwnTradierMissingExpiration(), ["IWN"])[0]
     assert candidate.direction == "call" and candidate.underlying_trigger is not None
     assert candidate.primary_action == "No verified contract available"
-    assert candidate.contract is None and candidate.contract_cost is None and not candidate.actionable
+    assert candidate.contract_verification_reason == "Requested/current expiration is not listed by Tradier"
+    assert candidate.contract is None and candidate.contract_cost is None and candidate.midpoint is None
+    assert candidate.spread_percent is None and candidate.entry_low is None and not candidate.actionable
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:

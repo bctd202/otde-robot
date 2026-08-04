@@ -162,7 +162,14 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
         contract, rejection = _eligible_contract(chain, direction, first_target)
         if contract is None:
             chain_status = provider.status()
+            missing_listed_expiration = False
+            if not chain and hasattr(provider, "expirations"):
+                try:
+                    missing_listed_expiration = quote.timestamp.astimezone(quote.timestamp.tzinfo).date() not in provider.expirations(symbol)
+                except (KeyError, TypeError, ValueError):
+                    missing_listed_expiration = False
             reason = ("Option chain unavailable" if chain_status.status == "unavailable" else
+                      "Requested/current expiration is not listed by Tradier" if missing_listed_expiration else
                       "No same-day expiration" if not chain else rejection[0])
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction=direction, signal_status="PASS",
                 score=min(54, 30 + checks * 4), score_label="PASS", underlying_price=quote.price,
