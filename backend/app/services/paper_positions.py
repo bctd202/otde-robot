@@ -166,8 +166,7 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
         last_marked_at=position.last_marked_at, paper_only=True,
         provenance_provider=position.provenance_provider, provenance_data_mode=position.provenance_data_mode,
         verification_status=position.verification_status, verification_reason=position.verification_reason,
-        actionable=position.actionable, original_occ_symbol=position.original_occ_symbol,
-        normalized_option_symbol=position.normalized_option_symbol, bid_timestamp=position.bid_timestamp,
+actionable=bool(position.actionable), original_occ_symbol=position.original_occ_symbol,        normalized_option_symbol=position.normalized_option_symbol, bid_timestamp=position.bid_timestamp,
         ask_timestamp=position.ask_timestamp, quote_timestamp=position.quote_timestamp,
     )
 
