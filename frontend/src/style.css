@@ -1149,6 +1149,8 @@ footer {
   color:#176f61;
 }
 
+.daily-watch{display:grid;grid-template-columns:1.4fr 1fr;gap:1rem;margin:1rem 0 1.5rem;padding:1.15rem 1.3rem;border:1px solid #263348;border-radius:14px;background:#0b1322;color:#f3f7fb}.daily-watch h2{margin:.15rem 0 .35rem}.daily-watch p{margin:.3rem 0;color:#aeb9c8;font-size:.8rem}.daily-watch form{display:grid;align-content:center;gap:.35rem}.daily-watch label,.daily-watch small{color:#aeb9c8;font-size:.68rem}.daily-watch form>div{display:flex;gap:.45rem}.daily-watch input{width:100%;min-width:0;padding:.7rem;border:1px solid #3b4b63;border-radius:8px;background:#111c2e;color:#fff;font-weight:800;text-transform:uppercase}.daily-watch form button,.daily-watch-chips button{border:1px solid #2dd4bf;border-radius:8px;background:#147a58;color:#fff;padding:.65rem .9rem;font-weight:800;cursor:pointer}.daily-watch button:disabled{opacity:.5;cursor:not-allowed}.daily-watch-chips{grid-column:1/-1;display:flex;align-items:center;gap:.5rem;color:#aeb9c8;font-size:.75rem}.daily-watch-chips button{display:flex;gap:.5rem;align-items:center;background:#111c2e}.daily-watch-chips button span{color:#5eead4;font-size:1rem}.daily-watch-message{grid-column:1/-1!important;color:#5eead4!important}
+
 .stale-warning {
   display:flex;
   align-items:center;
@@ -1189,6 +1191,7 @@ footer {
 }
 
 @media(max-width:700px) {
+  .daily-watch{grid-template-columns:1fr}.daily-watch-chips,.daily-watch-message{grid-column:1}
   .parlay-header {
     align-items:flex-start;
     flex-direction:column;

@@ -120,15 +120,16 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             candidate.ranking_position = position
         return output
     quotes = {}
-    # Isolate quote requests so one malformed or unsupported symbol does not
-    # prevent the rest of the universe from being evaluated.
-    for requested_symbol in symbols:
-        try:
-            quotes.update(
-                {quote.symbol: quote for quote in provider.quotes([requested_symbol])}
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
+    # Prefer one batched market-data request. Fall back to isolated calls when
+    # the provider rejects a batch so one malformed flex symbol cannot block it.
+    try:
+        quotes.update({quote.symbol: quote for quote in provider.quotes(symbols)})
+    except (KeyError, TypeError, ValueError):
+        for requested_symbol in symbols:
+            try:
+                quotes.update({quote.symbol: quote for quote in provider.quotes([requested_symbol])})
+            except (KeyError, TypeError, ValueError):
+                continue
     for symbol in symbols:
         quote = quotes.get(symbol)
         if quote is None:

@@ -7,11 +7,14 @@ from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quo
 NY = ZoneInfo("America/New_York")
 BASE = {"SPY": 550.0, "QQQ": 485.0, "IWM": 220.0, "TSLA": 182.0, "NVDA": 138.0,
         "AAPL": 225.0, "AMZN": 198.0, "META": 515.0, "MSFT": 440.0, "GOOGL": 175.0,
-        "AVGO": 168.0, "IBIT": 54.0}
+        "AVGO": 168.0, "IBIT": 54.0, "GLD": 225.0, "SLV": 31.0, "TLT": 92.0,
+        "USO": 78.0, "UNG": 15.0, "AMD": 165.0, "COIN": 250.0, "PLTR": 28.0}
 # Each profile changes market structure, not the scanner's rules.
 PROFILE = {"SPY": "buy_call", "QQQ": "buy_put", "IWM": "watch_call", "TSLA": "watch_put",
            "NVDA": "buy_call", "AAPL": "missed_call", "AMZN": "pass", "META": "pass",
-           "MSFT": "pass", "GOOGL": "pass", "AVGO": "pass", "IBIT": "pass"}
+           "MSFT": "pass", "GOOGL": "pass", "AVGO": "pass", "IBIT": "pass",
+           "GLD": "pass", "SLV": "pass", "TLT": "pass", "USO": "pass",
+           "UNG": "pass", "AMD": "pass", "COIN": "pass", "PLTR": "pass"}
 
 
 class MockMarketDataProvider:

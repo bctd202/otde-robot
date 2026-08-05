@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.db.models import BacktestRun, ParlayPaperPosition, Signal, SignalPerformance, TradeOutcome
+from app.db.models import BacktestRun, DailyWatchSymbol, ParlayPaperPosition, Signal, SignalPerformance, TradeOutcome
 from app.db.session import get_db
 from app.market_data.factory import get_provider
-from app.schemas.market import DashboardOut, ParlayResponse, ScannerHealth
+from app.schemas.market import DashboardOut, DailyWatchCreate, DailyWatchResponse, ParlayResponse, ScannerHealth
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
@@ -20,6 +20,56 @@ from app.services.backtest import run_backtest
 from app.services.performance import link_paper_position, metrics, track_candidates
 
 router = APIRouter()
+
+def _trading_date() -> date:
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/New_York")).date()
+
+def _daily_watch_symbols(db: Session) -> list[str]:
+    return list(db.scalars(select(DailyWatchSymbol.symbol).where(
+        DailyWatchSymbol.trading_date == _trading_date()).order_by(DailyWatchSymbol.id)).all())
+
+@router.get("/daily-watch", response_model=DailyWatchResponse)
+def daily_watch(db: Session = Depends(get_db)):
+    symbols = _daily_watch_symbols(db)
+    limit = get_settings().parlay_flex_limit
+    return DailyWatchResponse(trading_date=_trading_date(), symbols=symbols,
+                              slots_used=len(symbols), slot_limit=limit)
+
+@router.post("/daily-watch", response_model=DailyWatchResponse, status_code=201)
+def daily_watch_add(payload: DailyWatchCreate, db: Session = Depends(get_db)):
+    symbol = payload.symbol.strip().upper()
+    settings = get_settings()
+    if not symbol or len(symbol) > 12 or not symbol.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail="Enter a valid ticker symbol")
+    symbols = _daily_watch_symbols(db)
+    if symbol in settings.parlay_symbol_list:
+        raise HTTPException(status_code=409, detail=f"{symbol} is already in the permanent universe")
+    if symbol not in symbols:
+        if len(symbols) >= settings.parlay_flex_limit:
+            raise HTTPException(status_code=409, detail="Both Watch Today slots are already in use")
+        provider = get_provider()
+        try:
+            if not provider.quotes([symbol]):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"{symbol} was not recognized by the market-data provider")
+        db.add(DailyWatchSymbol(trading_date=_trading_date(), symbol=symbol,
+                                created_at=datetime.now(timezone.utc)))
+        db.commit()
+        symbols = _daily_watch_symbols(db)
+    return DailyWatchResponse(trading_date=_trading_date(), symbols=symbols,
+                              slots_used=len(symbols), slot_limit=settings.parlay_flex_limit)
+
+@router.delete("/daily-watch/{symbol}", response_model=DailyWatchResponse)
+def daily_watch_remove(symbol: str, db: Session = Depends(get_db)):
+    row = db.scalar(select(DailyWatchSymbol).where(
+        DailyWatchSymbol.trading_date == _trading_date(), DailyWatchSymbol.symbol == symbol.upper()))
+    if row is not None:
+        db.delete(row); db.commit()
+    symbols = _daily_watch_symbols(db); limit = get_settings().parlay_flex_limit
+    return DailyWatchResponse(trading_date=_trading_date(), symbols=symbols,
+                              slots_used=len(symbols), slot_limit=limit)
 
 
 @router.post("/paper-positions", response_model=PaperPositionOut, status_code=201)
@@ -70,7 +120,7 @@ def paper_position_exit(position_id: int, payload: PaperPositionExit, db: Sessio
 def parlays(db: Session = Depends(get_db)):
     settings = get_settings()
     provider = get_provider()
-    universe = settings.parlay_symbol_list
+    universe = list(dict.fromkeys(settings.parlay_symbol_list + _daily_watch_symbols(db)))
     candidates = rank_parlays(provider, universe)
     track_candidates(db, candidates, provider)
     return ParlayResponse(

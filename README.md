@@ -77,11 +77,13 @@ Do not set live-provider or brokerage credentials. The container applies Alembic
 
 Tradier is an optional, read-only market-data provider; no order endpoint is implemented. Set
 `MARKET_DATA_PROVIDER=tradier` and provide `TRADIER_API_TOKEN` through the environment. The
-`GET /api/parlays` endpoint scans the configurable `PARLAY_SYMBOLS` universe (at most 12 unique
+`GET /api/parlays` endpoint scans the configurable `PARLAY_SYMBOLS` universe (20 unique symbols
 symbols), filters today's contracts to $20–$100 ask cost, and assigns deterministic `PLAY`,
 `WATCH`, `DEVELOPING`, or `PASS` labels. Missing credentials, upstream errors, missing same-day
 expirations, and incomplete data fail closed and are reported explicitly rather than replaced
 with mock data.
+
+The default universe is `SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT,GLD,SLV,TLT,USO,UNG,AMD,COIN,PLTR`. `PARLAY_SYMBOL_LIMIT` changes the permanent-universe cap. The dashboard also provides two database-backed **Watch Today** slots. Flex symbols are validated against the configured provider, included in the same deterministic scan, and automatically disappear on the next New York trading date.
 
 Every displayed actionable option requires `TRADIER_DATA_MODE=live` only after the configured Tradier entitlement is explicitly verified; the safe default is `unknown`, which can display research data but cannot create actionable contracts. Every displayed actionable option is the exact OCC symbol returned by the successful Tradier chain request. The server independently parses and compares its root, expiration, strike, and call/put identity, then separately enforces current `bid_date` and `ask_date`, positive crossed-safe quotes, spread, volume, open interest, expiration, and strategy liquidity rules. Failed contract verification preserves the underlying setup while reporting **No verified contract available** and suppressing every option field. Paper entry repeats the current Tradier chain lookup and validation on the server; browser-supplied provenance is never trusted. Migration `0006_contract_provenance` records this server-derived audit trail for paper positions and tracked live signals.
 

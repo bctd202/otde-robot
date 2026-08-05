@@ -19,10 +19,10 @@ def alembic(db: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def test_clean_upgrade_through_0006(tmp_path):
+def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0006_contract_provenance" in alembic(db, "current")
+    assert "0007_daily_watch_symbols" in alembic(db, "current")
 
 
 def test_upgrade_from_0005_classifies_ambiguous_live_rows_unknown(tmp_path):
