@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { exitPaperPosition, getAnalytics, getDashboard, getJournal, getPaperPositions, getParlays, paperEnter } from './api/client';
+import { addDailyWatch, exitPaperPosition, getAnalytics, getDailyWatch, getDashboard, getJournal, getPaperPositions, getParlays, paperEnter, removeDailyWatch } from './api/client';
 import { CandlestickChart } from './components/CandlestickChart';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import { Performance } from './components/Performance';
 import { BacktestLab } from './components/BacktestLab';
-import type { Analytics, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
+import { DailyWatch } from './components/DailyWatch';
+import type { Analytics, DailyWatchResponse, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
 import { formatEasternTime } from './lib/dates';
 import './style.css';
 
@@ -39,6 +40,9 @@ export function App() {
   const [journal,setJournal]=useState<JournalSignal[]>([]);
   const [analytics,setAnalytics]=useState<Analytics|null>(null);
   const [parlays,setParlays]=useState<ParlayResponse|null>(null);
+  const [dailyWatch,setDailyWatch]=useState<DailyWatchResponse|null>(null);
+  const [dailyWatchBusy,setDailyWatchBusy]=useState(false);
+  const [dailyWatchMessage,setDailyWatchMessage]=useState('');
   const [parlayStale,setParlayStale]=useState(false);
   const [parlayRefreshing,setParlayRefreshing]=useState(false);
   const [positions,setPositions]=useState<PaperPosition[]>([]);
@@ -48,11 +52,13 @@ export function App() {
   const [lastParlayUpdate,setLastParlayUpdate]=useState<Date|null>(null);
   const parlayRequest=useRef(false);
   const [error,setError]=useState('');
-  useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics()]).then(([d,j,a])=>{setDashboard(d);setJournal(j);setAnalytics(a)}).catch((reason:Error)=>setError(reason.message)); },[]);
+  useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics(),getDailyWatch()]).then(([d,j,a,w])=>{setDashboard(d);setJournal(j);setAnalytics(a);setDailyWatch(w)}).catch((reason:Error)=>setError(reason.message)); },[]);
   const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{const [boardResult,positionsResult]=await Promise.all([getParlays(),getPaperPositions()]);setParlays(previous=>stabilizeCandidateOrder(boardResult,previous));setPositions(positionsResult.positions);setLastParlayUpdate(new Date());setParlayStale(false);setPositionsStale(false)}catch{setParlayStale(true);setPositionsStale(true)}finally{parlayRequest.current=false;setParlayRefreshing(false)}},[]);
   useEffect(()=>{void refreshParlays();const timer=window.setInterval(()=>void refreshParlays(),PARLAY_REFRESH_INTERVAL_MS);return()=>window.clearInterval(timer)},[refreshParlays]);
   const enterPaper=useCallback(async(candidate:ParlayCandidate)=>{if(!parlays)return;setEnteringSymbol(candidate.symbol);setPaperFeedback('');try{await paperEnter(candidate,parlays.provider_status.mode);setPaperFeedback(`${candidate.symbol} paper position recorded at the current ask.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to record paper position')}finally{setEnteringSymbol(null)}},[parlays,refreshParlays]);
   const exitPaper=useCallback(async(position:PaperPosition)=>{if(!window.confirm(`Close the simulated ${position.symbol} position? This does not place an order.`))return;setPaperFeedback('');try{await exitPaperPosition(position.id,'USER CONFIRMED PAPER EXIT');setPaperFeedback(`${position.symbol} paper position closed.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to close paper position')}},[refreshParlays]);
+  const addWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await addDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} added for today.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to add ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
+  const removeWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await removeDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} removed.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to remove ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const chartQuote=dashboard?.quotes.find(quote=>quote.symbol==='SPY'&&Boolean(dashboard.levels[quote.symbol]))
     ?? dashboard?.quotes.find(quote=>Boolean(dashboard.levels[quote.symbol]));
   const chartLevels=chartQuote?dashboard?.levels[chartQuote.symbol]:undefined;
@@ -67,6 +73,7 @@ export function App() {
   return <main>
     <nav className="top-navigation" aria-label="Primary"><a href="#parlay">Trade Board</a><a href="#performance">Performance</a><a href="#backtest-lab">Backtest Lab</a></nav>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
+    <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
     {parlays?<ParlayBoard data={parlays} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol}/>:<ParlaySkeleton/>}
     <nav>{['parlay','context','charts','structured','lottery','journal','analytics'].map(item=><a key={item} href={`#${item}`}>{item}</a>)}</nav>
     {error&&<Card title="Unable to load market context" danger><p>{error}</p><p>The Parlay board will continue retrying independently.</p></Card>}

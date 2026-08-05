@@ -182,3 +182,12 @@ class ParlayResponse(BaseModel):
     candidates: list[ParlayCandidateOut]
     scanner_health: ScannerHealth
     paper_only: bool = True
+
+class DailyWatchCreate(BaseModel):
+    symbol: str
+
+class DailyWatchResponse(BaseModel):
+    trading_date: date
+    symbols: list[str]
+    slots_used: int
+    slot_limit: int

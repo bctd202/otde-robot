@@ -134,6 +134,14 @@ class PaperPosition(Base):
     avg_price: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32))
 
+class DailyWatchSymbol(Base):
+    __tablename__ = "daily_watch_symbols"
+    __table_args__ = (UniqueConstraint("trading_date", "symbol", name="uq_daily_watch_date_symbol"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    symbol: Mapped[str] = mapped_column(String(12))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
 class PositionMark(Base):
     __tablename__ = "position_marks"
     id: Mapped[int] = mapped_column(primary_key=True)

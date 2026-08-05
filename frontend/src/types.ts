@@ -23,6 +23,7 @@ export interface ParlayCandidate {
 }
 export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string }
 export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; scanner_health:ScannerHealth; paper_only:boolean }
+export interface DailyWatchResponse { trading_date:string;symbols:string[];slots_used:number;slot_limit:number }
 export type PaperDecision='HOLD'|'TAKE_PROFIT'|'EXIT'|'DATA_UNAVAILABLE'|'EXPIRED'|'CLOSED';
 export interface PaperPosition {
   id:number; symbol:string; option_symbol:string; direction:'call'|'put'; expiration:string; strike:number;

@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     tradier_api_token: str | None = None
     tradier_base_url: str = "https://api.tradier.com/v1"
     tradier_data_mode: str = "unknown"
-    parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT"
+    parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT,GLD,SLV,TLT,USO,UNG,AMD,COIN,PLTR"
+    parlay_symbol_limit: int = 20
+    parlay_flex_limit: int = 2
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -41,7 +43,7 @@ class Settings(BaseSettings):
         """The bounded, de-duplicated universe used by the Parlay scanner."""
         return list(dict.fromkeys(
             s.strip().upper() for s in self.parlay_symbols.split(",") if s.strip()
-        ))[:12]
+        ))[:max(1, min(self.parlay_symbol_limit, 50))]
 
 
 @lru_cache

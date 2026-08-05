@@ -37,10 +37,10 @@ def board():
 def test_default_mock_board_has_complete_deterministic_variety():
     first, second = board(), board()
     assert [item.model_dump() for item in first] == [item.model_dump() for item in second]
-    assert len(first) == 12
+    assert len(first) == len(get_settings().parlay_symbol_list) == 20
     assert {item.symbol for item in first} == set(get_settings().parlay_symbol_list)
     statuses = [item.signal_status for item in first]
-    assert statuses == ["PASS"] * 12
+    assert statuses == ["PASS"] * len(get_settings().parlay_symbol_list)
     assert {item.direction for item in first} >= {"call", "put"}
     provider = mock_provider()
     for symbol in get_settings().parlay_symbol_list:
@@ -54,7 +54,7 @@ def test_default_mock_board_has_complete_deterministic_variety():
 def test_plans_score_labels_actions_and_sorting():
     results = board()
     order = {"BUY": 0, "WATCH": 1, "MISSED": 2, "PASS": 3, "UNAVAILABLE": 4}
-    assert [item.ranking_position for item in results] == list(range(1, 13))
+    assert [item.ranking_position for item in results] == list(range(1, len(results) + 1))
     assert [(order[item.signal_status], -item.score) for item in results] == sorted(
         (order[item.signal_status], -item.score) for item in results
     )
@@ -154,9 +154,9 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
     assert body["provider_status"]["mode"] == "mock"
     assert body["paper_only"] is True
     assert body["universe"] == get_settings().parlay_symbol_list
-    assert len(body["candidates"]) == 12
+    assert len(body["candidates"]) == len(get_settings().parlay_symbol_list)
     assert body["scanner_health"] == {
-        "candidate_count": 12,
+        "candidate_count": len(get_settings().parlay_symbol_list),
         "unavailable_candidate_count": 0,
         "provider_status": "healthy",
     }
