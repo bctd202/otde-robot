@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.indicators import opening_range, spread_pct, vwap
+from app.services.contracts import annotate_chain
 
 Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
@@ -87,6 +88,9 @@ def _eligible_contract(chain: list[OptionContractOut], direction: Direction, tar
     for contract in chain:
         if contract.right != direction:
             continue
+        if not contract.actionable:
+            rejection.add(contract.verification_reason)
+            continue
         spread = spread_pct(contract.bid, contract.ask)
         reachable = contract.strike <= target if direction == "call" else contract.strike >= target
         if contract.expiration != today:
@@ -131,16 +135,11 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             output.append(_unavailable(symbol, "Quote unavailable", provider_status.latest_timestamp))
             continue
         try:
-            candles, chain = provider.candles(symbol, PRODUCTION_TIMEFRAME), provider.option_chain(symbol)
+            candles = provider.candles(symbol, PRODUCTION_TIMEFRAME)
         except (KeyError, TypeError, ValueError):
-            candles, chain = [], []
+            candles = []
         if len(candles) < 8:
             output.append(_unavailable(symbol, "Candles unavailable", quote.timestamp))
-            continue
-        if not chain:
-            chain_status = provider.status()
-            reason = "Option chain unavailable" if chain_status.status == "unavailable" else "No same-day expiration"
-            output.append(_unavailable(symbol, reason, quote.timestamp))
             continue
         setup = evaluate_underlying_setup(candles, quote.price)
         direction, checks, reasons = setup.direction, setup.checks, setup.reasons
@@ -152,15 +151,34 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
                 primary_action="PASS — TRIGGER NOT CONFIRMED", generated_at=quote.timestamp,
                 data_freshness=f"{provider_status.mode}_current"))
             continue
+        try:
+            raw_chain = provider.option_chain(symbol)
+            chain = annotate_chain(raw_chain, symbol, provider.status().latest_timestamp)
+        except (KeyError, TypeError, ValueError):
+            chain = []
         move = max(abs(trigger - invalidation), quote.price * .002)
         first_target = setup.target
         stretch_target = trigger + move * (2.5 if direction == "call" else -2.5)
         contract, rejection = _eligible_contract(chain, direction, first_target)
         if contract is None:
+            chain_status = provider.status()
+            missing_listed_expiration = False
+            if not chain and hasattr(provider, "expirations"):
+                try:
+                    missing_listed_expiration = quote.timestamp.astimezone(quote.timestamp.tzinfo).date() not in provider.expirations(symbol)
+                except (KeyError, TypeError, ValueError):
+                    missing_listed_expiration = False
+            reason = ("Option chain unavailable" if chain_status.status == "unavailable" else
+                      "Requested/current expiration is not listed by Tradier" if missing_listed_expiration else
+                      "No same-day expiration" if not chain else rejection[0])
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction=direction, signal_status="PASS",
                 score=min(54, 30 + checks * 4), score_label="PASS", underlying_price=quote.price,
-                rejection_reasons=rejection, primary_action=f"PASS — {rejection[0].upper()}",
-                generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current"))
+                underlying_trigger=round(trigger, 2), underlying_invalidation=round(invalidation, 2),
+                first_underlying_target=round(first_target, 2), stretch_underlying_target=round(stretch_target, 2),
+                reasons=reasons[:3], rejection_reasons=rejection or [reason],
+                primary_action="No verified contract available", contract_verification_reason=reason,
+                generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current",
+                demo_mode=provider_status.mode == "mock" and bool(chain)))
             continue
         midpoint = round((contract.bid + contract.ask) / 2, 2)
         preferred_entry = min(midpoint, contract.last) if contract.last > 0 else midpoint
@@ -203,7 +221,9 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             underlying_invalidation=round(invalidation, 2), first_underlying_target=round(first_target, 2),
             stretch_underlying_target=round(stretch_target, 2), first_option_target=round(entry_high * 2, 2),
             stretch_option_target=round(entry_high * 4, 2), reasons=reasons[:3], rejection_reasons=rejection,
-            primary_action=action, generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current"))
+            primary_action=action, generated_at=quote.timestamp, data_freshness=f"{provider_status.mode}_current",
+            contract_verification_status=contract.verification_status,
+            contract_verification_reason=contract.verification_reason, actionable=contract.actionable))
     order = {"BUY": 0, "WATCH": 1, "MISSED": 2, "PASS": 3, "UNAVAILABLE": 4}
     output.sort(key=lambda item: (order[item.signal_status], -item.score, item.symbol))
     for position, candidate in enumerate(output, 1):

@@ -37,7 +37,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 
 Open **http://127.0.0.1:5173**. API docs are at **http://127.0.0.1:8000/docs**. The SQLite database is `./liquidity_hunter.db`; safe local configuration is `./.env`.
 
-To demonstrate a rules-valid NO TRADE dashboard, stop the backend, set `MOCK_SCENARIO=no_trade` in `.env`, and restart it. Restore `MOCK_SCENARIO=active` for seeded qualifying candidates.
+Mock mode provides underlying research data but does not create option contracts. Synthetic contracts require the explicit `ENABLE_DEMO_OPTION_CONTRACTS=true` switch, are labeled **DEMO MODE — MOCK OPTION DATA — DO NOT TRADE**, and can never be entered or included in live Performance metrics. To demonstrate a rules-valid NO TRADE dashboard, set `MOCK_SCENARIO=no_trade` and restart.
 
 ## Verification
 
@@ -82,6 +82,8 @@ symbols), filters today's contracts to $20–$100 ask cost, and assigns determin
 `WATCH`, `DEVELOPING`, or `PASS` labels. Missing credentials, upstream errors, missing same-day
 expirations, and incomplete data fail closed and are reported explicitly rather than replaced
 with mock data.
+
+Every displayed actionable option requires `TRADIER_DATA_MODE=live` only after the configured Tradier entitlement is explicitly verified; the safe default is `unknown`, which can display research data but cannot create actionable contracts. Every displayed actionable option is the exact OCC symbol returned by the successful Tradier chain request. The server independently parses and compares its root, expiration, strike, and call/put identity, then separately enforces current `bid_date` and `ask_date`, positive crossed-safe quotes, spread, volume, open interest, expiration, and strategy liquidity rules. Failed contract verification preserves the underlying setup while reporting **No verified contract available** and suppressing every option field. Paper entry repeats the current Tradier chain lookup and validation on the server; browser-supplied provenance is never trusted. Migration `0006_contract_provenance` records this server-derived audit trail for paper positions and tracked live signals.
 
 The production build log must list `/build/frontend/dist/index.html`, `/build/frontend/dist/favicon.svg`, and generated `/build/frontend/dist/assets/*` files. Container startup must print `Frontend build path: /app/frontend/dist`. If those lines are absent, Railway is not building the repository-root Dockerfile.
 

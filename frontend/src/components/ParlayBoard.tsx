@@ -12,9 +12,11 @@ export function ParlaySkeleton() {
 
 interface ParlayBoardProps { data:ParlayResponse;updated:Date|null;refreshing:boolean;stale:boolean;onRetry:()=>void;positions?:PaperPosition[];positionsStale?:boolean;onPaperEnter?:(candidate:ParlayCandidate)=>void;onPaperExit?:(position:PaperPosition)=>void;enteringSymbol?:string|null }
 
+const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&item.actionable===true&&item.contract?.actionable===true&&item.contract.verification_status==='verified'&&item.contract.provider==='tradier'&&item.contract.data_mode==='live'&&Boolean(item.contract.normalized_symbol)&&Boolean(item.contract.bid_timestamp)&&Boolean(item.contract.ask_timestamp)&&Boolean(item.contract.timestamp);
+
 export function ParlayBoard({data,updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol}:ParlayBoardProps) {
   const groups=useMemo(()=>({
-    ready:data.candidates.filter(item=>item.signal_status==='BUY'),
+    ready:data.candidates.filter(isVerifiedActionable),
     waiting:data.candidates.filter(item=>item.signal_status==='WATCH').sort((a,b)=>a.ranking_position-b.ranking_position),
     noTrade:data.candidates.filter(item=>!['BUY','WATCH'].includes(item.signal_status)),
   }),[data.candidates]);
@@ -28,7 +30,7 @@ export function ParlayBoard({data,updated,refreshing,stale,onRetry,positions=[],
 
     <section className="decision-section waiting-section" aria-labelledby="waiting-title"><div className="decision-section-heading"><div><p className="eyebrow">Approaching a trigger</p><h2 id="waiting-title">Waiting Room</h2></div><span>{groups.waiting.length} WAIT</span></div><p className="section-note">Ordered by the scanner's existing readiness rank.</p>{groups.waiting.length===0?<p className="section-empty">No setups are waiting for a trigger.</p>:<div className="decision-grid">{groups.waiting.map(item=><ParlayTicket key={item.symbol} candidate={item}/>)}</div>}</section>
 
-    <details className="no-trade-section"><summary><span><b>No Trade</b><small>MISSED, PASS, and unavailable setups</small></span><strong>{groups.noTrade.length}</strong></summary><div className="no-trade-list">{groups.noTrade.map(item=><details key={item.symbol} className="no-trade-row"><summary><b>#{item.ranking_position} {item.symbol}</b><SignalBadge status={item.signal_status}/><span>{item.direction==='none'?'No contract':item.direction.toUpperCase()}</span></summary><div><p>{item.primary_action}</p>{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}<p><b>Score:</b> {item.score.toFixed(1)} · {item.score_label}</p><p><b>Data freshness:</b> {item.data_freshness.replaceAll('_',' ')}</p>{item.rejection_reasons.length>0&&<ul>{item.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}</div></details>)}</div></details>
+    <details className="no-trade-section"><summary><span><b>No Trade</b><small>MISSED, PASS, and unavailable setups</small></span><strong>{groups.noTrade.length}</strong></summary><div className="no-trade-list">{groups.noTrade.map(item=><details key={item.symbol} className="no-trade-row"><summary><b>#{item.ranking_position} {item.symbol}</b><SignalBadge status={item.signal_status}/><span>{item.direction==='none'?'No contract':item.direction.toUpperCase()}</span></summary><div><p>{item.primary_action}</p>{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}<p><b>Score:</b> {item.score.toFixed(1)} · {item.score_label}</p><p><b>Data freshness:</b> {item.data_freshness.replaceAll('_',' ')}</p>{item.underlying_trigger!==null&&<p><b>Underlying trigger:</b> {item.underlying_trigger.toFixed(2)}</p>}{item.underlying_invalidation!==null&&<p><b>Underlying invalidation:</b> {item.underlying_invalidation.toFixed(2)}</p>}{item.first_underlying_target!==null&&<p><b>Underlying target:</b> {item.first_underlying_target.toFixed(2)}</p>}{item.contract_verification_reason&&<p><b>Contract:</b> No verified contract available — {item.contract_verification_reason}</p>}{item.rejection_reasons.length>0&&<ul>{item.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}</div></details>)}</div></details>
 
     <PaperPositions positions={positions} stale={positionsStale} onExit={position=>onPaperExit?.(position)}/>
   </section>;

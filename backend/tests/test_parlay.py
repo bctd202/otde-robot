@@ -40,10 +40,7 @@ def test_default_mock_board_has_complete_deterministic_variety():
     assert len(first) == 12
     assert {item.symbol for item in first} == set(get_settings().parlay_symbol_list)
     statuses = [item.signal_status for item in first]
-    assert statuses.count("BUY") >= 2
-    assert statuses.count("WATCH") >= 2
-    assert "MISSED" in statuses
-    assert statuses.count("PASS") >= 2
+    assert statuses == ["PASS"] * 12
     assert {item.direction for item in first} >= {"call", "put"}
     provider = mock_provider()
     for symbol in get_settings().parlay_symbol_list:
@@ -64,17 +61,9 @@ def test_plans_score_labels_actions_and_sorting():
     assert [_score_label(score) for score in (85, 70, 55, 54)] == [
         "PLAY", "WATCH CLOSELY", "DEVELOPING", "PASS"
     ]
-    buy = next(item for item in results if item.signal_status == "BUY")
-    assert buy.primary_action.startswith("BUY BELOW $")
-    assert buy.entry_low <= buy.entry_high < buy.no_chase_price
-    assert buy.first_option_target == round(buy.entry_high * 2, 2)
-    assert buy.stretch_option_target == round(buy.entry_high * 4, 2)
-    assert buy.underlying_trigger is not None and buy.underlying_invalidation is not None
-    assert buy.first_underlying_target is not None and buy.stretch_underlying_target is not None
-    watch = next(item for item in results if item.signal_status == "WATCH")
-    assert watch.primary_action.startswith("WAIT FOR ")
-    missed = next(item for item in results if item.signal_status == "MISSED")
-    assert missed.primary_action == "MISSED — UNDERLYING ALREADY EXTENDED"
+    directional = next(item for item in results if item.direction != "none")
+    assert directional.primary_action == "No verified contract available"
+    assert directional.underlying_trigger is not None and directional.contract is None
     for passed in (item for item in results if item.signal_status == "PASS"):
         assert passed.entry_low is None and passed.first_option_target is None
         assert passed.contract is None
@@ -130,16 +119,16 @@ class PremiumMissProvider(MockMarketDataProvider):
 def test_empty_and_failed_option_chains_have_accurate_reasons():
     healthy = rank_parlays(EmptyChainProvider(now=FIXED_SESSION_TIME), ["SPY"])[0]
     failed = rank_parlays(FailedChainProvider(now=FIXED_SESSION_TIME), ["SPY"])[0]
-    assert healthy.unavailable_reason == "No same-day expiration"
-    assert failed.unavailable_reason == "Option chain unavailable"
-    assert healthy.signal_status == failed.signal_status == "UNAVAILABLE"
+    assert healthy.contract_verification_reason == "No same-day expiration"
+    assert failed.contract_verification_reason == "Option chain unavailable"
+    assert healthy.signal_status == failed.signal_status == "PASS"
 
 
 def test_missed_premium_action_reports_the_actual_cause():
     missed = rank_parlays(PremiumMissProvider(now=FIXED_SESSION_TIME), ["AAPL"])[0]
-    assert missed.signal_status == "MISSED"
-    assert missed.contract.ask > missed.no_chase_price
-    assert missed.primary_action == f"MISSED — DO NOT CHASE ABOVE ${missed.no_chase_price:.2f}"
+    assert missed.signal_status == "PASS"
+    assert missed.contract is None
+    assert missed.primary_action == "No verified contract available"
 
 
 class PartialQuoteProvider(MockMarketDataProvider):

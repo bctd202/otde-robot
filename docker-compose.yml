@@ -8,6 +8,7 @@ services:
       MARKET_DATA_PROVIDER: mock
       DATABASE_URL: sqlite:////data/liquidity_hunter.db
       MOCK_SCENARIO: active
+      ENABLE_DEMO_OPTION_CONTRACTS: "false"
       PAPER_ONLY: "true"
     volumes: ["app-data:/data"]
   frontend:

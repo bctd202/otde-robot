@@ -20,8 +20,10 @@ class MockMarketDataProvider:
         self.now = now or datetime.combine(datetime.now(NY).date(), time(10, 5), tzinfo=NY)
 
     def status(self):
+        demo = get_settings().enable_demo_option_contracts
         return ProviderStatus(provider="mock", mode="mock", status="healthy", delay_seconds=0,
-            latest_timestamp=self.now, message="Deterministic mock data; not live market data.")
+            latest_timestamp=self.now, message=("DEMO MODE — MOCK OPTION DATA — DO NOT TRADE" if demo else
+            "Deterministic mock underlying data; option contracts are disabled."))
 
     def quotes(self, symbols):
         return [Quote(symbol=s, price=self.candles(s)[-1].close, timestamp=self.now) for s in symbols]
@@ -53,6 +55,8 @@ class MockMarketDataProvider:
         return rows
 
     def option_chain(self, symbol):
+        if not get_settings().enable_demo_option_contracts:
+            return []
         today = self.now.date()
         underlying = BASE[symbol] + .25 if PROFILE[symbol].startswith("missed") else self.candles(symbol)[-1].close
         rows = []
@@ -68,5 +72,8 @@ class MockMarketDataProvider:
                     expiration=today, strike=strike, right=right, bid=bid, ask=ask,
                     last=round((bid + ask) / 2, 2), volume=700 + n * 110,
                     open_interest=1200 + n * 180, iv=.24 + n * .01, delta=delta,
-                    gamma=.035 + n * .003, theta=-.08, vega=.02, timestamp=self.now))
+                    gamma=.035 + n * .003, theta=-.08, vega=.02, timestamp=self.now,
+                    bid_timestamp=self.now, ask_timestamp=self.now, provider="mock", data_mode="demo",
+                    verification_status="demo", verification_reason="Synthetic demo contract", actionable=False,
+                    normalized_symbol=f"{symbol}{today:%y%m%d}{right[0].upper()}{int(strike * 1000):08d}"))
         return rows

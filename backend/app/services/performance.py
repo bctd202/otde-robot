@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import LiveWaitCandidate, ParlayPaperPosition, SignalPerformance
+from app.services.contracts import is_verified_actionable_contract
 from app.services.parlay import PRODUCTION_TIMEFRAME
 
 NY = ZoneInfo("America/New_York")
@@ -54,7 +55,9 @@ def evaluate_open_signals(db: Session, provider) -> None:
 def track_candidates(db: Session, candidates: list, provider=None) -> None:
     now = datetime.now(timezone.utc)
     for candidate in candidates:
-        if candidate.signal_status not in {"WATCH", "BUY", "MISSED"} or candidate.direction not in {"call", "put"}:
+        if (candidate.signal_status not in {"WATCH", "BUY", "MISSED"} or
+                candidate.direction not in {"call", "put"} or candidate.actionable is not True or
+                not is_verified_actionable_contract(candidate.contract)):
             continue
         stamp = _utc(candidate.generated_at)
         day = stamp.astimezone(NY).date()
@@ -82,7 +85,18 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 stop_price=candidate.underlying_invalidation, target_price=candidate.first_underlying_target,
                 exit_reason="MISSED" if candidate.signal_status == "MISSED" else "OPEN", result_r=None,
                 mfe_r=0, mae_r=0, score=candidate.score, user_entered=False, option_snapshot=contract,
-                conservative_same_candle=False, created_at=now, updated_at=now, last_evaluated_at=stamp))
+                conservative_same_candle=False, created_at=now, updated_at=now, last_evaluated_at=stamp,
+                provenance_provider=candidate.contract.provider,
+                provenance_data_mode=candidate.contract.data_mode,
+                verification_status=candidate.contract.verification_status,
+                verification_reason=candidate.contract.verification_reason,
+                actionable=candidate.contract.actionable,
+                original_occ_symbol=candidate.contract.option_symbol,
+                normalized_option_symbol=candidate.contract.normalized_symbol,
+                bid_timestamp=candidate.contract.bid_timestamp, ask_timestamp=candidate.contract.ask_timestamp,
+                quote_timestamp=candidate.contract.timestamp,
+                contract_expiration=candidate.contract.expiration, contract_strike=candidate.contract.strike,
+                contract_option_type=candidate.contract.right))
     db.commit()
     if provider is not None:
         evaluate_open_signals(db, provider)

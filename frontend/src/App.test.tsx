@@ -123,3 +123,15 @@ test('keeps prior order for same-status candidates with similar scores',()=>{
   const next={...previous,candidates:[{...qqq,score:80.2,ranking_position:1},{...spy,ranking_position:2}]};
   expect(stabilizeCandidateOrder(next,previous).candidates.map(candidate=>candidate.symbol)).toEqual(['SPY','QQQ']);
 });
+
+test.each([
+  ['live', {provider:'tradier',mode:'live',status:'healthy',delay_seconds:0,message:'Verified live entitlement.'}, 'LIVE MARKET DATA', '0s'],
+  ['delayed mode', {provider:'tradier',mode:'delayed',status:'healthy',delay_seconds:-1,message:'Delayed entitlement.'}, 'DELAYED MARKET DATA', 'Unknown'],
+  ['positive delay', {provider:'tradier',mode:'unknown',status:'healthy',delay_seconds:900,message:'Delayed timestamp.'}, 'DELAYED MARKET DATA', '900s'],
+  ['mock', {provider:'mock',mode:'mock',status:'healthy',delay_seconds:0,message:'Mock data.'}, 'MOCK DATA — NOT LIVE', '0s'],
+  ['unknown', {provider:'tradier',mode:'unknown',status:'healthy',delay_seconds:-1,message:'Entitlement unknown.'}, 'UNKNOWN MARKET DATA', 'Unknown'],
+])('renders honest %s provider banner and delay label',async(_,provider,label,delay)=>{
+  renderDashboard({provider_status:{...provider,latest_timestamp:'2026-07-29T14:00:00-04:00'}});
+  await waitFor(()=>expect(screen.getByText(label)).toBeInTheDocument());
+  expect(screen.getByText('Delay').closest('.metric')).toHaveTextContent(delay);
+});

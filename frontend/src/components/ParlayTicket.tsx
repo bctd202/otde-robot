@@ -5,8 +5,9 @@ import { DirectionBadge } from './DirectionBadge';
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
 
 export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) {
-  const action=candidate.signal_status==='BUY'?'BUY NOW':'WAIT';
   const contract=candidate.contract;
+  const verifiedActionable=candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);
+  const action=candidate.signal_status==='BUY'&&verifiedActionable?'BUY NOW':'WAIT';
   return <article className={`parlay-ticket decision-ticket decision-${candidate.signal_status.toLowerCase()}`}>
     <header className="decision-header">
       <div><span className="ranking">#{candidate.ranking_position}</span><h3>{candidate.symbol}</h3></div>
@@ -23,7 +24,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
 
     <section className="contract-block" aria-label={`${candidate.symbol} exact option contract`}>
       <p>Exact option contract</p>
-      {contract?<>
+      {verifiedActionable&&contract?<>
         <strong className="option-symbol">{contract.option_symbol}</strong>
         <dl>
           <div><dt>Expiration</dt><dd>{formatDateOnly(contract.expiration)}</dd></div>
@@ -33,7 +34,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
           <div><dt>Option ask</dt><dd>{money(contract.ask)}</dd></div>
           <div className="contract-cost"><dt>Estimated contract cost</dt><dd>{money(candidate.contract_cost)}</dd></div>
         </dl>
-      </>:<strong>Contract unavailable — wait for complete data</strong>}
+      </>:<><strong>No verified contract available</strong>{candidate.contract_verification_reason&&<p>{candidate.contract_verification_reason}</p>}</>}
     </section>
 
     <div className="signal-clock">
@@ -54,6 +55,6 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
       {candidate.reasons.length>0&&<ul>{candidate.reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
       {candidate.rejection_reasons.length>0&&<ul className="rejection-list">{candidate.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
     </details>
-    {candidate.signal_status==='BUY'&&contract&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
+    {candidate.signal_status==='BUY'&&verifiedActionable&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
   </article>;
 }

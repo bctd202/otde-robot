@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
 
 NY = ZoneInfo("America/New_York")
@@ -31,6 +32,8 @@ class TradierMarketDataProvider:
         self._trading_date = trading_date
         self._error = "Tradier API token is not configured." if not token else None
         self._latest = datetime.now(NY)
+        mode = get_settings().tradier_data_mode.strip().lower()
+        self._data_mode = mode if mode in {"live", "delayed", "unknown"} else "unknown"
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
         if not self.token:
@@ -52,9 +55,9 @@ class TradierMarketDataProvider:
 
     def status(self) -> ProviderStatus:
         return ProviderStatus(
-            provider="tradier", mode="live", status="unavailable" if self._error else "healthy",
-            delay_seconds=0, latest_timestamp=self._latest,
-            message=self._error or "Live Tradier market data; paper research only.",
+            provider="tradier", mode=self._data_mode, status="unavailable" if self._error else "healthy",
+            delay_seconds=0 if self._data_mode == "live" else -1, latest_timestamp=self._latest,
+            message=self._error or f"Tradier market data mode: {self._data_mode}; paper research only.",
         )
 
     def quotes(self, symbols: list[str]) -> list[Quote]:
@@ -110,7 +113,13 @@ class TradierMarketDataProvider:
         values: Any = (data or {}).get("expirations", {}).get("date", [])
         if isinstance(values, str):
             values = [values]
-        return [parsed for value in values if isinstance(value, str) for parsed in [date.fromisoformat(value)]]
+        result = []
+        for value in values:
+            try:
+                result.append(date.fromisoformat(value))
+            except (TypeError, ValueError):
+                continue
+        return result
 
     def option_chain(self, symbol: str) -> list[OptionContractOut]:
         today = self._trading_date or datetime.now(NY).date()
@@ -121,14 +130,17 @@ class TradierMarketDataProvider:
         for row in _rows(data or {}, "options", "option"):
             greeks = row.get("greeks") or {}
             try:
-                stamp = datetime.fromtimestamp(int(row["trade_date"]) / 1000, NY)
+                bid_stamp = datetime.fromtimestamp(int(row["bid_date"]) / 1000, NY)
+                ask_stamp = datetime.fromtimestamp(int(row["ask_date"]) / 1000, NY)
+                stamp = min(bid_stamp, ask_stamp)
                 result.append(OptionContractOut(symbol=symbol.upper(), option_symbol=str(row["symbol"]),
                     expiration=date.fromisoformat(str(row["expiration_date"])), strike=float(row["strike"]),
                     right=str(row["option_type"]).lower(), bid=float(row.get("bid") or 0),
                     ask=float(row.get("ask") or 0), last=float(row.get("last") or 0),
                     volume=int(row.get("volume") or 0), open_interest=int(row.get("open_interest") or 0),
                     iv=greeks.get("mid_iv"), delta=greeks.get("delta"), gamma=greeks.get("gamma"),
-                    theta=greeks.get("theta"), vega=greeks.get("vega"), timestamp=stamp))
+                    theta=greeks.get("theta"), vega=greeks.get("vega"), timestamp=stamp,
+                    bid_timestamp=bid_stamp, ask_timestamp=ask_stamp, provider="tradier", data_mode=self._data_mode))
                 self._latest = max(self._latest, stamp)
             except (KeyError, TypeError, ValueError, OSError):
                 continue

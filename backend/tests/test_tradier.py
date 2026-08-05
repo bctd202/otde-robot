@@ -27,6 +27,7 @@ def test_tradier_normalizes_quotes_candles_expirations_and_chain():
             "strike": 550, "option_type": "call", "bid": .35, "ask": .40,
             "last": .38, "volume": 900, "open_interest": 2000,
             "trade_date": 1_722_000_000_000,
+            "bid_date": 1_722_000_000_000, "ask_date": 1_722_000_000_000,
             "greeks": {"mid_iv": .2, "delta": .4, "gamma": .03, "theta": -.1, "vega": .02},
         }}})
 

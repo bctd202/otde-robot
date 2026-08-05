@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
+from app.services.contracts import ACCEPTED_ACTIONABLE_DATA_MODES, annotate_chain, is_verified_actionable_contract
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -45,7 +46,17 @@ def management_decision(position: ParlayPaperPosition, option_price: float, unde
     return "HOLD", f"HOLD — SETUP REMAINS {side} INVALIDATION"
 
 
-def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPosition:
+def create_position(db: Session, payload: PaperPositionCreate, provider: Any) -> ParlayPaperPosition:
+    status = provider.status()
+    if status.provider != "tradier" or status.mode not in ACCEPTED_ACTIONABLE_DATA_MODES or status.status != "healthy":
+        raise ValueError("Paper entry requires a verified current Tradier contract")
+    try:
+        chain = annotate_chain(provider.option_chain(payload.symbol.upper()), payload.symbol.upper(), status.latest_timestamp)
+    except (KeyError, TypeError, ValueError):
+        chain = []
+    contract = next((item for item in chain if item.option_symbol == payload.option_symbol and is_verified_actionable_contract(item)), None)
+    if contract is None:
+        raise ValueError("No verified actionable Tradier contract is currently available")
     duplicate = db.scalar(select(ParlayPaperPosition).where(
         ParlayPaperPosition.option_symbol == payload.option_symbol,
         ParlayPaperPosition.lifecycle_status == "ACTIVE",
@@ -54,12 +65,22 @@ def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPos
         raise ValueError("An active paper position already exists for this option symbol")
     if payload.signal_status != "BUY":
         raise ValueError("Only qualified BUY candidates can be paper entered")
-    fill = payload.option_ask  # New simulated entries always pay the displayed ask.
+    if (contract.expiration != payload.expiration or contract.strike != payload.strike or
+            contract.right != payload.direction):
+        raise ValueError("Paper entry contract identity does not match the current Tradier chain")
+    try:
+        quote = next((item for item in provider.quotes([payload.symbol.upper()]) if item.symbol == payload.symbol.upper()), None)
+    except (KeyError, TypeError, ValueError):
+        quote = None
+    if quote is None:
+        raise ValueError("Paper entry requires a current server-derived underlying quote")
+    server_now = datetime.now(timezone.utc)
+    fill = contract.ask  # Server-derived current ask; never trust the browser snapshot.
     position = ParlayPaperPosition(
-        symbol=payload.symbol.upper(), option_symbol=payload.option_symbol,
-        direction=payload.direction, expiration=payload.expiration, strike=payload.strike,
+        symbol=contract.symbol.upper(), option_symbol=contract.option_symbol,
+        direction=contract.right, expiration=contract.expiration, strike=contract.strike,
         quantity=1, entry_option_price=fill,
-        entry_underlying_price=payload.underlying_entry_price,
+        entry_underlying_price=quote.price,
         total_debit=round(fill * 100, 2), underlying_trigger=payload.underlying_trigger,
         underlying_invalidation=payload.underlying_invalidation,
         first_underlying_target=payload.first_underlying_target,
@@ -67,10 +88,15 @@ def create_position(db: Session, payload: PaperPositionCreate) -> ParlayPaperPos
         first_option_target=payload.first_option_target,
         stretch_option_target=payload.stretch_option_target, score=payload.score,
         score_label=payload.score_label, entry_reasons=payload.reasons,
-        provider_mode=payload.provider_mode, opened_at=payload.entry_timestamp,
+        provider_mode=status.mode, opened_at=server_now,
         lifecycle_status="ACTIVE", last_option_price=fill,
-        last_underlying_price=payload.underlying_entry_price,
-        last_marked_at=payload.entry_timestamp, data_freshness="entry_snapshot",
+        last_underlying_price=quote.price,
+        last_marked_at=server_now, data_freshness="entry_snapshot",
+        provenance_provider=contract.provider, provenance_data_mode=contract.data_mode,
+        verification_status=contract.verification_status, verification_reason=contract.verification_reason,
+        actionable=contract.actionable, original_occ_symbol=contract.option_symbol,
+        normalized_option_symbol=contract.normalized_symbol, bid_timestamp=contract.bid_timestamp,
+        ask_timestamp=contract.ask_timestamp, quote_timestamp=contract.timestamp,
     )
     db.add(position)
     db.commit()
@@ -138,6 +164,11 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
         decision_status=cast(Literal["HOLD", "TAKE_PROFIT", "EXIT", "DATA_UNAVAILABLE", "EXPIRED", "CLOSED"], decision),
         data_freshness=freshness or position.data_freshness, next_action=action,
         last_marked_at=position.last_marked_at, paper_only=True,
+        provenance_provider=position.provenance_provider, provenance_data_mode=position.provenance_data_mode,
+        verification_status=position.verification_status, verification_reason=position.verification_reason,
+        actionable=position.actionable, original_occ_symbol=position.original_occ_symbol,
+        normalized_option_symbol=position.normalized_option_symbol, bid_timestamp=position.bid_timestamp,
+        ask_timestamp=position.ask_timestamp, quote_timestamp=position.quote_timestamp,
     )
 
 
