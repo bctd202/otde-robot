@@ -4,9 +4,9 @@ Local-first, deterministic research dashboard for SPY, QQQ, and IWM same-day opt
 
 ## Phase 1 status
 
-Implemented: FastAPI APIs, mock quotes/candles/options, basic liquidity calculations, structured and lottery filters, SQLite persistence and seed data, journal/analytics reads, WebSocket heartbeat, React command center, risk labeling, Docker configuration, and automated tests.
+Implemented: FastAPI APIs, mock and read-only Tradier market data, liquidity calculations, structured and lottery filters, an always-on completed-candle signal engine, durable signal lifecycle and alert history, SQLite persistence, paper positions, live performance tracking, chronological backtests, React command center, risk labeling, Docker configuration, and automated tests.
 
-Placeholders: live data, economic calendar, interactive production charts, alerts, scheduler, full option scenario pricing, realistic fills, replay, and production-grade analytics. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
+Placeholders: economic calendar, external push delivery when the browser is closed, full option scenario pricing, realistic fill modeling, and production-grade grouped analytics. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
 ## Native macOS setup
 
@@ -77,15 +77,17 @@ Do not set live-provider or brokerage credentials. The container applies Alembic
 
 Tradier is an optional, read-only market-data provider; no order endpoint is implemented. Set
 `MARKET_DATA_PROVIDER=tradier` and provide `TRADIER_API_TOKEN` through the environment. The
-`GET /api/parlays` endpoint scans the configurable `PARLAY_SYMBOLS` universe (20 unique symbols
-symbols), filters today's contracts to $20–$100 ask cost, and assigns deterministic `PLAY`,
+The server scans the configurable `PARLAY_SYMBOLS` universe (20 unique symbols) after each
+completed one-minute candle, filters today's contracts to $20–$100 ask cost, and assigns deterministic `PLAY`,
 `WATCH`, `DEVELOPING`, or `PASS` labels. Missing credentials, upstream errors, missing same-day
 expirations, and incomplete data fail closed and are reported explicitly rather than replaced
 with mock data.
 
+The browser reads the latest persisted scan every 15 seconds; it no longer initiates market-data work. Signal state survives restarts and follows `WATCH → BUY → ENTERED / EXPIRED / MISSED / INVALIDATED`. BUY cards include their last verification and next-evaluation deadline. The server records lifecycle, entry-window, target, and stop events under `/api/signal-alerts`; the dashboard keeps the history and can show browser notifications while the page is open. The scheduler continues scanning with the page closed.
+
 The default universe is `SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT,GLD,SLV,TLT,USO,UNG,AMD,COIN,PLTR`. `PARLAY_SYMBOL_LIMIT` changes the permanent-universe cap. The dashboard also provides two database-backed **Watch Today** slots. Flex symbols are validated against the configured provider, included in the same deterministic scan, and automatically disappear on the next New York trading date.
 
-Every displayed actionable option requires `TRADIER_DATA_MODE=live` only after the configured Tradier entitlement is explicitly verified; the safe default is `unknown`, which can display research data but cannot create actionable contracts. Every displayed actionable option is the exact OCC symbol returned by the successful Tradier chain request. The server independently parses and compares its root, expiration, strike, and call/put identity, then separately enforces current `bid_date` and `ask_date`, positive crossed-safe quotes, spread, volume, open interest, expiration, and strategy liquidity rules. Failed contract verification preserves the underlying setup while reporting **No verified contract available** and suppressing every option field. Paper entry repeats the current Tradier chain lookup and validation on the server; browser-supplied provenance is never trusted. Migration `0006_contract_provenance` records this server-derived audit trail for paper positions and tracked live signals.
+Every displayed actionable option requires `TRADIER_DATA_MODE=live` only after the configured Tradier entitlement is explicitly verified; the safe default is `unknown`, which can display research data but cannot create actionable contracts. Every displayed actionable option is the exact OCC symbol returned by the successful Tradier chain request. The server independently parses and compares its root, expiration, strike, and call/put identity, then separately enforces current `bid_date` and `ask_date`, positive crossed-safe quotes, spread, volume, open interest, expiration, and strategy liquidity rules. Failed contract verification preserves the underlying setup while reporting **No verified contract available** and suppressing every option field. Paper entry reruns the complete underlying setup, no-chase test, selected contract, and current Tradier verification on the server; a stale browser BUY is rejected. Browser-supplied provenance, prices, levels, and score are never trusted. Migration `0006_contract_provenance` records the contract audit trail, and `0008_signal_engine` adds durable scan, lifecycle, alert, and engine-health state.
 
 The production build log must list `/build/frontend/dist/index.html`, `/build/frontend/dist/favicon.svg`, and generated `/build/frontend/dist/assets/*` files. Container startup must print `Frontend build path: /app/frontend/dist`. If those lines are absent, Railway is not building the repository-root Dockerfile.
 

@@ -155,11 +155,13 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
     assert body["paper_only"] is True
     assert body["universe"] == get_settings().parlay_symbol_list
     assert len(body["candidates"]) == len(get_settings().parlay_symbol_list)
-    assert body["scanner_health"] == {
+    expected_health = {
         "candidate_count": len(get_settings().parlay_symbol_list),
         "unavailable_candidate_count": 0,
         "provider_status": "healthy",
+        "engine_status": "healthy",
     }
+    assert {key: body["scanner_health"][key] for key in expected_health} == expected_health
 
 
 def test_live_and_replay_share_identical_completed_candle_evaluation():

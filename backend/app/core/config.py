@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT,GLD,SLV,TLT,USO,UNG,AMD,COIN,PLTR"
     parlay_symbol_limit: int = 20
     parlay_flex_limit: int = 2
+    parlay_background_scanner_enabled: bool = True
+    parlay_scan_poll_seconds: int = 15
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

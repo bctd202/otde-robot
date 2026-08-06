@@ -4,20 +4,27 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyWatchSymbol, ParlayPaperPosition, Signal, SignalPerformance, TradeOutcome
+from app.db.models import (BacktestRun, DailyWatchSymbol, ParlayPaperPosition,
+                           ScannerRuntime, Signal, SignalAlert,
+                           SignalPerformance, TradeOutcome)
 from app.db.session import get_db
 from app.market_data.factory import get_provider
-from app.schemas.market import DashboardOut, DailyWatchCreate, DailyWatchResponse, ParlayResponse, ScannerHealth
+from app.schemas.market import (DashboardOut, DailyWatchCreate,
+                                DailyWatchResponse, ParlayResponse,
+                                ScannerHealth, SignalAlertOut,
+                                SignalAlertsResponse)
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
-from app.services.parlay import rank_parlays
 from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
-from app.services.performance import link_paper_position, metrics, track_candidates
+from app.services.performance import link_paper_position, metrics
+from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
+                                        latest_scan, mark_lifecycle_entered,
+                                        run_signal_scan)
 
 router = APIRouter()
 
@@ -79,6 +86,7 @@ def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(ge
     except ValueError as exc:
         raise HTTPException(status_code=409 if "already exists" in str(exc) else 422, detail=str(exc)) from exc
     link_paper_position(db, position)
+    mark_lifecycle_entered(db, position)
     return serialize(position, option_price=position.entry_option_price,
                      underlying_price=position.entry_underlying_price,
                      freshness="entry_snapshot")
@@ -121,18 +129,37 @@ def parlays(db: Session = Depends(get_db)):
     settings = get_settings()
     provider = get_provider()
     universe = list(dict.fromkeys(settings.parlay_symbol_list + _daily_watch_symbols(db)))
-    candidates = rank_parlays(provider, universe)
-    track_candidates(db, candidates, provider)
+    scan = latest_scan(db)
+    if scan is None or scan.universe != universe:
+        scan = run_signal_scan(db, provider, universe, force=True)
+    candidates = cached_candidates(scan, db) if scan is not None else []
+    runtime = db.get(ScannerRuntime, ENGINE_KEY)
+    status = provider.status()
     return ParlayResponse(
-        provider_status=provider.status(),
+        provider_status=status,
         universe=universe,
         candidates=candidates,
         scanner_health=ScannerHealth(
             candidate_count=len(candidates),
             unavailable_candidate_count=sum(candidate.signal_status == "UNAVAILABLE" for candidate in candidates),
-            provider_status=provider.status().status,
+            provider_status=status.status,
+            engine_status=runtime.status if runtime else "starting",
+            last_completed_scan_at=runtime.last_scan_completed_at if runtime else None,
+            evaluation_candle_at=runtime.last_evaluation_candle_at if runtime else None,
+            next_evaluation_at=runtime.next_evaluation_at if runtime else None,
+            last_error=runtime.last_error if runtime else None,
         ),
     )
+
+
+@router.get("/signal-alerts", response_model=SignalAlertsResponse)
+def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    bounded_limit = max(1, min(limit, 200))
+    rows = list(db.scalars(select(SignalAlert).where(SignalAlert.id > max(0, after_id))
+        .order_by(SignalAlert.id.desc()).limit(bounded_limit)).all())
+    alerts = [SignalAlertOut.model_validate({column.name: getattr(row, column.name)
+        for column in row.__table__.columns}) for row in reversed(rows)]
+    return SignalAlertsResponse(alerts=alerts, latest_id=max((row.id for row in rows), default=after_id))
 
 
 def _ledger(row: SignalPerformance) -> dict:

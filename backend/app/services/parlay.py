@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -110,7 +110,15 @@ def _eligible_contract(chain: list[OptionContractOut], direction: Direction, tar
     return max(eligible, key=lambda c: (c.volume + c.open_interest / 2, -spread_pct(c.bid, c.ask))), []
 
 
-def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
+def _utc(value: datetime) -> datetime:
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def latest_completed_candle_at(latest: datetime) -> datetime:
+    return _utc(latest).replace(second=0, microsecond=0) - timedelta(minutes=1)
+
+
+def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | None = None) -> list[ParlayCandidateOut]:
     """Build complete, deterministic paper-research plans without predicting outcomes."""
     provider_status = provider.status()
     output: list[ParlayCandidateOut] = []
@@ -139,6 +147,8 @@ def rank_parlays(provider: Any, symbols: list[str]) -> list[ParlayCandidateOut]:
             candles = provider.candles(symbol, PRODUCTION_TIMEFRAME)
         except (KeyError, TypeError, ValueError):
             candles = []
+        if completed_at is not None:
+            candles = [candle for candle in candles if _utc(candle.timestamp) <= _utc(completed_at)]
         if len(candles) < 8:
             output.append(_unavailable(symbol, "Candles unavailable", quote.timestamp))
             continue

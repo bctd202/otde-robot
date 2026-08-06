@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { addDailyWatch, exitPaperPosition, getAnalytics, getDailyWatch, getDashboard, getJournal, getPaperPositions, getParlays, paperEnter, removeDailyWatch } from './api/client';
+import { addDailyWatch, exitPaperPosition, getAnalytics, getDailyWatch, getDashboard, getJournal, getPaperPositions, getParlays, getSignalAlerts, paperEnter, removeDailyWatch } from './api/client';
 import { CandlestickChart } from './components/CandlestickChart';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import { Performance } from './components/Performance';
 import { BacktestLab } from './components/BacktestLab';
 import { DailyWatch } from './components/DailyWatch';
-import type { Analytics, DailyWatchResponse, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse } from './types';
+import { SignalAlerts } from './components/SignalAlerts';
+import type { Analytics, DailyWatchResponse, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert } from './types';
 import { formatEasternTime } from './lib/dates';
 import './style.css';
 
-export const PARLAY_REFRESH_INTERVAL_MS = 120_000;
+export const PARLAY_REFRESH_INTERVAL_MS = 15_000;
 
 const statusOrder:Record<ParlayCandidate['signal_status'],number>={BUY:0,WATCH:1,MISSED:2,PASS:3,UNAVAILABLE:4};
 
@@ -49,11 +50,25 @@ export function App() {
   const [positionsStale,setPositionsStale]=useState(false);
   const [enteringSymbol,setEnteringSymbol]=useState<string|null>(null);
   const [paperFeedback,setPaperFeedback]=useState('');
+  const [signalAlerts,setSignalAlerts]=useState<SignalAlert[]>([]);
   const [lastParlayUpdate,setLastParlayUpdate]=useState<Date|null>(null);
   const parlayRequest=useRef(false);
+  const latestAlertId=useRef(0);
+  const alertsInitialized=useRef(false);
   const [error,setError]=useState('');
   useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics(),getDailyWatch()]).then(([d,j,a,w])=>{setDashboard(d);setJournal(j);setAnalytics(a);setDailyWatch(w)}).catch((reason:Error)=>setError(reason.message)); },[]);
-  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{const [boardResult,positionsResult]=await Promise.all([getParlays(),getPaperPositions()]);setParlays(previous=>stabilizeCandidateOrder(boardResult,previous));setPositions(positionsResult.positions);setLastParlayUpdate(new Date());setParlayStale(false);setPositionsStale(false)}catch{setParlayStale(true);setPositionsStale(true)}finally{parlayRequest.current=false;setParlayRefreshing(false)}},[]);
+  const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{
+    const [boardResult,positionsResult,alertsResult]=await Promise.allSettled([getParlays(),getPaperPositions(),getSignalAlerts()]);
+    if(boardResult.status==='fulfilled'){setParlays(previous=>stabilizeCandidateOrder(boardResult.value,previous));setLastParlayUpdate(boardResult.value.scanner_health?.last_completed_scan_at?new Date(boardResult.value.scanner_health.last_completed_scan_at):new Date());setParlayStale(false)}else setParlayStale(true);
+    if(positionsResult.status==='fulfilled'){setPositions(positionsResult.value.positions);setPositionsStale(false)}else setPositionsStale(true);
+    if(alertsResult.status==='fulfilled'&&Array.isArray(alertsResult.value.alerts)){
+      const incoming=alertsResult.value.alerts.filter(alert=>alert.id>latestAlertId.current);
+      setSignalAlerts(alertsResult.value.alerts);
+      if(alertsInitialized.current&&typeof Notification!=='undefined'&&Notification.permission==='granted')incoming.forEach(alert=>new Notification(`${alert.symbol} · ${alert.event_type.replaceAll('_',' ')}`,{body:alert.message,tag:`parlay-${alert.id}`}));
+      latestAlertId.current=Math.max(latestAlertId.current,Number(alertsResult.value.latest_id)||0);
+      alertsInitialized.current=true;
+    }
+  }finally{parlayRequest.current=false;setParlayRefreshing(false)}},[]);
   useEffect(()=>{void refreshParlays();const timer=window.setInterval(()=>void refreshParlays(),PARLAY_REFRESH_INTERVAL_MS);return()=>window.clearInterval(timer)},[refreshParlays]);
   const enterPaper=useCallback(async(candidate:ParlayCandidate)=>{if(!parlays)return;setEnteringSymbol(candidate.symbol);setPaperFeedback('');try{await paperEnter(candidate,parlays.provider_status.mode);setPaperFeedback(`${candidate.symbol} paper position recorded at the current ask.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to record paper position')}finally{setEnteringSymbol(null)}},[parlays,refreshParlays]);
   const exitPaper=useCallback(async(position:PaperPosition)=>{if(!window.confirm(`Close the simulated ${position.symbol} position? This does not place an order.`))return;setPaperFeedback('');try{await exitPaperPosition(position.id,'USER CONFIRMED PAPER EXIT');setPaperFeedback(`${position.symbol} paper position closed.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to close paper position')}},[refreshParlays]);
@@ -74,6 +89,7 @@ export function App() {
     <nav className="top-navigation" aria-label="Primary"><a href="#parlay">Trade Board</a><a href="#performance">Performance</a><a href="#backtest-lab">Backtest Lab</a></nav>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
     <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
+    <SignalAlerts alerts={signalAlerts}/>
     {parlays?<ParlayBoard data={parlays} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol}/>:<ParlaySkeleton/>}
     <nav>{['parlay','context','charts','structured','lottery','journal','analytics'].map(item=><a key={item} href={`#${item}`}>{item}</a>)}</nav>
     {error&&<Card title="Unable to load market context" danger><p>{error}</p><p>The Parlay board will continue retrying independently.</p></Card>}

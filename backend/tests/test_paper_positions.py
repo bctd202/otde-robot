@@ -10,8 +10,9 @@ from app.api import routes
 from app.db.models import ParlayPaperPosition
 from app.db.session import Base, get_db
 from app.main import app
-from app.schemas.market import OptionContractOut, ProviderStatus, Quote
+from app.schemas.market import OptionContractOut, ParlayCandidateOut, ProviderStatus, Quote
 from app.services import paper_positions as paper_position_service
+from app.services.contracts import annotate_chain
 
 
 NOW = datetime(2026, 7, 29, 14, 30, tzinfo=timezone.utc)
@@ -21,6 +22,8 @@ class Provider:
     def __init__(self, underlying: float = 101, bid: float = 0.7, available: bool = True):
         self.underlying, self.bid, self.available = underlying, bid, available
         self.option_chain_calls = 0
+        self.direction = "call"
+        self.setup_valid = True
 
     def status(self):
         return ProviderStatus(provider="tradier", mode="live", status="healthy" if self.available else "unavailable",
@@ -54,6 +57,27 @@ def client(monkeypatch):
     app.dependency_overrides[get_db] = db_override
     monkeypatch.setattr(routes, "get_provider", lambda: provider)
     monkeypatch.setattr(paper_position_service, "eastern_trading_date", lambda: date(2026, 7, 29))
+    def requalify(_provider, symbols, **_kwargs):
+        if not provider.setup_valid:
+            return [ParlayCandidateOut(symbol="SPY", rank="PASS", direction="none", signal_status="PASS",
+                score=30, score_label="PASS", underlying_price=provider.underlying,
+                rejection_reasons=["Trigger not confirmed"], primary_action="PASS — TRIGGER NOT CONFIRMED",
+                generated_at=NOW, data_freshness="live_current")]
+        contract = next(item for item in annotate_chain(provider.option_chain("SPY"), "SPY", NOW)
+                        if item.right == provider.direction)
+        return [ParlayCandidateOut(symbol="SPY", rank="PLAY", direction=provider.direction,
+            signal_status="BUY", score=91, score_label="PLAY", underlying_price=provider.underlying,
+            contract=contract, contract_cost=contract.ask*100, midpoint=(contract.bid+contract.ask)/2,
+            spread_percent=7, entry_low=contract.bid, entry_high=contract.ask,
+            no_chase_price=contract.ask*1.25, underlying_trigger=100,
+            underlying_invalidation=99 if provider.direction == "call" else 103,
+            first_underlying_target=102 if provider.direction == "call" else 100,
+            stretch_underlying_target=104 if provider.direction == "call" else 98,
+            first_option_target=1.5, stretch_option_target=3, reasons=["VWAP reclaimed"],
+            primary_action=f"BUY BELOW ${contract.ask:.2f}", generated_at=NOW,
+            data_freshness="live_current", contract_verification_status=contract.verification_status,
+            contract_verification_reason=contract.verification_reason, actionable=True)]
+    monkeypatch.setattr(paper_position_service, "rank_parlays", requalify)
     with TestClient(app) as test_client:
         yield test_client, local, provider
     app.dependency_overrides.clear()
@@ -102,6 +126,7 @@ def test_call_management_states(client, underlying, bid, expected):
 
 
 def test_put_invalidation_is_direction_aware(client):
+    client[2].direction = "put"
     put = payload(direction="put")
     put["option_symbol"] = "SPY260729P00101000"
     response = client[0].post("/api/paper-positions", json=put)
@@ -111,6 +136,13 @@ def test_put_invalidation_is_direction_aware(client):
         row = db.get(ParlayPaperPosition, position_id)
         assert row is not None
         assert routes.serialize(row, option_price=.7, underlying_price=104).decision_status == "EXIT"
+
+
+def test_entry_rechecks_the_complete_setup_and_rejects_a_stale_buy(client):
+    client[2].setup_valid = False
+    response = client[0].post("/api/paper-positions", json=payload())
+    assert response.status_code == 422
+    assert "expired or invalidated" in response.json()["detail"]
 
 
 def test_missing_market_data_preserves_active_position(client):
