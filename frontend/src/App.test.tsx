@@ -75,11 +75,11 @@ test('uses the first quoted symbol with liquidity levels when SPY has none',asyn
   expect(screen.getByText('Market Context')).toBeInTheDocument();
 });
 
-test('schedules automatic Parlay scans every 120 seconds',()=>{
+test('polls the server-owned Parlay cache every 15 seconds',()=>{
   const interval=vi.spyOn(window,'setInterval');
   renderDashboard({});
-  expect(PARLAY_REFRESH_INTERVAL_MS).toBe(120_000);
-  expect(interval).toHaveBeenCalledWith(expect.any(Function),120_000);
+  expect(PARLAY_REFRESH_INTERVAL_MS).toBe(15_000);
+  expect(interval).toHaveBeenCalledWith(expect.any(Function),15_000);
 });
 
 test('manual refresh retains the board, prevents overlap, and marks a failed scan stale',async()=>{

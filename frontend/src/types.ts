@@ -20,9 +20,14 @@ export interface ParlayCandidate {
   first_option_target:number|null; stretch_option_target:number|null; reasons:string[]; rejection_reasons:string[];
   unavailable_reason:string|null; primary_action:string; generated_at:string; data_freshness:string;
   contract_verification_status?:string; contract_verification_reason?:string|null; actionable?:boolean; demo_mode?:boolean;
+  lifecycle_id?:string|null; lifecycle_status?:'WATCH'|'BUY'|'ENTERED'|'EXPIRED'|'MISSED'|'INVALIDATED'|null;
+  first_seen_at?:string|null; triggered_at?:string|null; last_verified_at?:string|null; valid_until?:string|null;
+  validity_reason?:string|null;
 }
-export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string }
+export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string;engine_status?:string;last_completed_scan_at?:string|null;evaluation_candle_at?:string|null;next_evaluation_at?:string|null;last_error?:string|null }
 export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; scanner_health:ScannerHealth; paper_only:boolean }
+export interface SignalAlert {id:number;lifecycle_id:string|null;symbol:string;event_type:string;message:string;created_at:string;payload:Record<string,unknown>;acknowledged:boolean}
+export interface SignalAlertsResponse {alerts:SignalAlert[];latest_id:number;paper_only:boolean}
 export interface DailyWatchResponse { trading_date:string;symbols:string[];slots_used:number;slot_limit:number }
 export type PaperDecision='HOLD'|'TAKE_PROFIT'|'EXIT'|'DATA_UNAVAILABLE'|'EXPIRED'|'CLOSED';
 export interface PaperPosition {

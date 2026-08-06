@@ -142,6 +142,61 @@ class DailyWatchSymbol(Base):
     symbol: Mapped[str] = mapped_column(String(12))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+
+class SignalScan(Base):
+    __tablename__ = "signal_scans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    evaluation_candle_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    provider_status: Mapped[dict] = mapped_column(JSON)
+    universe: Mapped[list] = mapped_column(JSON)
+    candidates: Mapped[list] = mapped_column(JSON)
+
+
+class SignalLifecycle(Base):
+    __tablename__ = "signal_lifecycles"
+    __table_args__ = (Index("ix_signal_lifecycle_active", "trading_date", "symbol", "status"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(12), index=True)
+    direction: Mapped[str] = mapped_column(String(8))
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evaluation_candle_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(255))
+    candidate_snapshot: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SignalAlert(Base):
+    __tablename__ = "signal_alerts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dedupe_key: Mapped[str] = mapped_column(String(180), unique=True)
+    lifecycle_id: Mapped[str | None] = mapped_column(ForeignKey("signal_lifecycles.id"), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(12), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    message: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ScannerRuntime(Base):
+    __tablename__ = "scanner_runtime"
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32))
+    last_scan_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_scan_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_evaluation_candle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_evaluation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
 class PositionMark(Base):
     __tablename__ = "position_marks"
     id: Mapped[int] = mapped_column(primary_key=True)

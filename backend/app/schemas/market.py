@@ -169,11 +169,23 @@ class ParlayCandidateOut(BaseModel):
     contract_verification_reason: str | None = None
     actionable: bool = False
     demo_mode: bool = False
+    lifecycle_id: str | None = None
+    lifecycle_status: Literal["WATCH", "BUY", "ENTERED", "EXPIRED", "MISSED", "INVALIDATED"] | None = None
+    first_seen_at: datetime | None = None
+    triggered_at: datetime | None = None
+    last_verified_at: datetime | None = None
+    valid_until: datetime | None = None
+    validity_reason: str | None = None
 
 class ScannerHealth(BaseModel):
     candidate_count: int
     unavailable_candidate_count: int
     provider_status: str
+    engine_status: str = "unknown"
+    last_completed_scan_at: datetime | None = None
+    evaluation_candle_at: datetime | None = None
+    next_evaluation_at: datetime | None = None
+    last_error: str | None = None
 
 
 class ParlayResponse(BaseModel):
@@ -191,3 +203,20 @@ class DailyWatchResponse(BaseModel):
     symbols: list[str]
     slots_used: int
     slot_limit: int
+
+
+class SignalAlertOut(BaseModel):
+    id: int
+    lifecycle_id: str | None = None
+    symbol: str
+    event_type: str
+    message: str
+    created_at: datetime
+    payload: dict = Field(default_factory=dict)
+    acknowledged: bool = False
+
+
+class SignalAlertsResponse(BaseModel):
+    alerts: list[SignalAlertOut]
+    latest_id: int = 0
+    paper_only: bool = True

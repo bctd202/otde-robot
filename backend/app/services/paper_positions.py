@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
-from app.services.contracts import ACCEPTED_ACTIONABLE_DATA_MODES, annotate_chain, is_verified_actionable_contract
+from app.services.contracts import ACCEPTED_ACTIONABLE_DATA_MODES, is_verified_actionable_contract
+from app.services.parlay import latest_completed_candle_at, rank_parlays
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -47,32 +48,32 @@ def management_decision(position: ParlayPaperPosition, option_price: float, unde
 
 
 def create_position(db: Session, payload: PaperPositionCreate, provider: Any) -> ParlayPaperPosition:
+    if payload.signal_status != "BUY":
+        raise ValueError("Only qualified BUY candidates can be paper entered")
     status = provider.status()
     if status.provider != "tradier" or status.mode not in ACCEPTED_ACTIONABLE_DATA_MODES or status.status != "healthy":
         raise ValueError("Paper entry requires a verified current Tradier contract")
-    try:
-        chain = annotate_chain(provider.option_chain(payload.symbol.upper()), payload.symbol.upper(), status.latest_timestamp)
-    except (KeyError, TypeError, ValueError):
-        chain = []
-    contract = next((item for item in chain if item.option_symbol == payload.option_symbol and is_verified_actionable_contract(item)), None)
-    if contract is None:
-        raise ValueError("No verified actionable Tradier contract is currently available")
+    symbol = payload.symbol.upper()
+    # Never trust a BUY card that was rendered earlier. Re-run the complete
+    # underlying setup and contract selection at click time on the server.
+    candidate = next((item for item in rank_parlays(provider, [symbol],
+        completed_at=latest_completed_candle_at(status.latest_timestamp)) if item.symbol == symbol), None)
+    if (candidate is None or candidate.signal_status != "BUY" or candidate.actionable is not True or
+            candidate.contract is None or not is_verified_actionable_contract(candidate.contract)):
+        raise ValueError("Setup expired or invalidated; refresh and wait for a new verified BUY")
+    contract = candidate.contract
+    if contract.option_symbol != payload.option_symbol:
+        raise ValueError("The previously displayed option contract is no longer the verified selection")
     duplicate = db.scalar(select(ParlayPaperPosition).where(
         ParlayPaperPosition.option_symbol == payload.option_symbol,
         ParlayPaperPosition.lifecycle_status == "ACTIVE",
     ))
     if duplicate:
         raise ValueError("An active paper position already exists for this option symbol")
-    if payload.signal_status != "BUY":
-        raise ValueError("Only qualified BUY candidates can be paper entered")
     if (contract.expiration != payload.expiration or contract.strike != payload.strike or
             contract.right != payload.direction):
         raise ValueError("Paper entry contract identity does not match the current Tradier chain")
-    try:
-        quote = next((item for item in provider.quotes([payload.symbol.upper()]) if item.symbol == payload.symbol.upper()), None)
-    except (KeyError, TypeError, ValueError):
-        quote = None
-    if quote is None:
+    if candidate.underlying_price is None:
         raise ValueError("Paper entry requires a current server-derived underlying quote")
     server_now = datetime.now(timezone.utc)
     fill = contract.ask  # Server-derived current ask; never trust the browser snapshot.
@@ -80,17 +81,17 @@ def create_position(db: Session, payload: PaperPositionCreate, provider: Any) ->
         symbol=contract.symbol.upper(), option_symbol=contract.option_symbol,
         direction=contract.right, expiration=contract.expiration, strike=contract.strike,
         quantity=1, entry_option_price=fill,
-        entry_underlying_price=quote.price,
-        total_debit=round(fill * 100, 2), underlying_trigger=payload.underlying_trigger,
-        underlying_invalidation=payload.underlying_invalidation,
-        first_underlying_target=payload.first_underlying_target,
-        stretch_underlying_target=payload.stretch_underlying_target,
-        first_option_target=payload.first_option_target,
-        stretch_option_target=payload.stretch_option_target, score=payload.score,
-        score_label=payload.score_label, entry_reasons=payload.reasons,
+        entry_underlying_price=candidate.underlying_price,
+        total_debit=round(fill * 100, 2), underlying_trigger=candidate.underlying_trigger,
+        underlying_invalidation=candidate.underlying_invalidation,
+        first_underlying_target=candidate.first_underlying_target,
+        stretch_underlying_target=candidate.stretch_underlying_target,
+        first_option_target=candidate.first_option_target,
+        stretch_option_target=candidate.stretch_option_target, score=candidate.score,
+        score_label=candidate.score_label, entry_reasons=candidate.reasons,
         provider_mode=status.mode, opened_at=server_now,
         lifecycle_status="ACTIVE", last_option_price=fill,
-        last_underlying_price=quote.price,
+        last_underlying_price=candidate.underlying_price,
         last_marked_at=server_now, data_freshness="entry_snapshot",
         provenance_provider=contract.provider, provenance_data_mode=contract.data_mode,
         verification_status=contract.verification_status, verification_reason=contract.verification_reason,

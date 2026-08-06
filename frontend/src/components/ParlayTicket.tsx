@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ParlayCandidate } from '../types';
 import { formatDateOnly, formatEasternTime } from '../lib/dates';
 import { DirectionBadge } from './DirectionBadge';
@@ -5,8 +6,13 @@ import { DirectionBadge } from './DirectionBadge';
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
 
 export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) {
+  const [now,setNow]=useState(()=>Date.now());
+  useEffect(()=>{const timer=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(timer)},[]);
   const contract=candidate.contract;
-  const verifiedActionable=candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);
+  const validUntil=candidate.valid_until?Date.parse(candidate.valid_until):null;
+  const secondsRemaining=validUntil==null?null:Math.max(0,Math.ceil((validUntil-now)/1000));
+  const lifecycleCurrent=candidate.lifecycle_status==null||(candidate.lifecycle_status==='BUY'&&secondsRemaining!==null&&secondsRemaining>0);
+  const verifiedActionable=lifecycleCurrent&&candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);
   const action=candidate.signal_status==='BUY'&&verifiedActionable?'BUY NOW':'WAIT';
   return <article className={`parlay-ticket decision-ticket decision-${candidate.signal_status.toLowerCase()}`}>
     <header className="decision-header">
@@ -38,8 +44,10 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
     </section>
 
     <div className="signal-clock">
-      <span><b>Signal timing</b> Intraday setup generated {formatEasternTime(candidate.generated_at)}</span>
-      <span><b>Last updated</b> {formatEasternTime(contract?.timestamp||candidate.generated_at)}</span>
+      <span><b>Signal timing</b> {candidate.triggered_at?`Triggered ${formatEasternTime(candidate.triggered_at)}`:`Intraday setup generated ${formatEasternTime(candidate.generated_at)}`}</span>
+      <span><b>Last verified</b> {formatEasternTime(candidate.last_verified_at||contract?.timestamp||candidate.generated_at)}</span>
+      {secondsRemaining!==null&&<span className={secondsRemaining===0?'signal-expired':''}><b>Valid for</b> {secondsRemaining>0?`${Math.floor(secondsRemaining/60)}:${String(secondsRemaining%60).padStart(2,'0')}`:'Expired — awaiting server recheck'}</span>}
+      {candidate.validity_reason&&<span><b>Lifecycle</b> {candidate.lifecycle_status} · {candidate.validity_reason}</span>}
     </div>
 
     <details className="setup-explanation">

@@ -2,8 +2,11 @@ import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -11,10 +14,33 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.core.config import get_settings
+from app.services.signal_engine import background_scan_once
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-app = FastAPI(title=settings.app_name)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    scanner_scheduler = None
+    if settings.parlay_background_scanner_enabled:
+        interval = max(5, min(settings.parlay_scan_poll_seconds, 60))
+        scanner_scheduler = AsyncIOScheduler(timezone=settings.timezone)
+        scanner_scheduler.add_job(background_scan_once, "interval", seconds=interval,
+            id="parlay-signal-engine", replace_existing=True, max_instances=1, coalesce=True,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=interval))
+        scanner_scheduler.start()
+        application.state.scanner_scheduler = scanner_scheduler
+        logger.info("Parlay background signal engine started; poll interval=%ss", interval)
+    try:
+        yield
+    finally:
+        if scanner_scheduler is not None and scanner_scheduler.running:
+            scanner_scheduler.shutdown(wait=False)
+        application.state.scanner_scheduler = None
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
