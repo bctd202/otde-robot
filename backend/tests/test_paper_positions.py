@@ -121,7 +121,7 @@ def test_duplicate_active_position_is_rejected(client):
 def test_call_management_states(client, underlying, bid, expected):
     client[0].post("/api/paper-positions", json=payload())
     client[2].underlying, client[2].bid = underlying, bid
-    body = client[0].get("/api/paper-positions").json()["positions"][0]
+    body = client[0].get("/api/paper-positions?refresh=true").json()["positions"][0]
     assert body["decision_status"] == expected
 
 
@@ -148,7 +148,7 @@ def test_entry_rechecks_the_complete_setup_and_rejects_a_stale_buy(client):
 def test_missing_market_data_preserves_active_position(client):
     created = client[0].post("/api/paper-positions", json=payload()).json()
     client[2].available = False
-    body = client[0].get("/api/paper-positions").json()["positions"][0]
+    body = client[0].get("/api/paper-positions?refresh=true").json()["positions"][0]
     assert body["id"] == created["id"] and body["lifecycle_status"] == "ACTIVE"
     assert body["decision_status"] == "DATA_UNAVAILABLE"
     assert body["next_action"] == "DATA UNAVAILABLE — RETAINING LAST KNOWN POSITION STATE"
@@ -159,6 +159,17 @@ def test_missing_market_data_preserves_active_position(client):
     assert body["pnl_percent"] == 0
     assert body["data_freshness"] == "data_unavailable"
     assert body["closed_at"] is None and body["exit_option_price"] is None
+
+
+def test_default_position_poll_reads_server_mark_without_provider_requests(client):
+    created = client[0].post("/api/paper-positions", json=payload()).json()
+    calls_before = client[2].option_chain_calls
+    client[2].underlying, client[2].bid = 105, 2
+    body = client[0].get("/api/paper-positions").json()["positions"][0]
+    assert body["id"] == created["id"]
+    assert body["current_underlying_price"] == created["entry_underlying_price"]
+    assert body["current_option_price"] == created["entry_option_price"]
+    assert client[2].option_chain_calls == calls_before
 
 
 def test_unavailable_provider_cannot_exit_at_stale_mark(client):

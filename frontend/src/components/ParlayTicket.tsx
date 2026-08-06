@@ -15,6 +15,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
   const verifiedActionable=lifecycleCurrent&&candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);
   const action=candidate.signal_status==='BUY'&&verifiedActionable?'BUY NOW':'WAIT';
   return <article className={`parlay-ticket decision-ticket decision-${candidate.signal_status.toLowerCase()}`}>
+    <div className={`strategy-pill ${candidate.strategy_mode==='STRUCTURED_INTRADAY'?'structured':'fast'}`}><b>{candidate.strategy_mode==='STRUCTURED_INTRADAY'?'Structured Intraday':'1-Min / 0DTE'}</b><span>{candidate.timeframe_context} · {candidate.target_dte} · {candidate.strategy_version}</span></div>
     <header className="decision-header">
       <div><span className="ranking">#{candidate.ranking_position}</span><h3>{candidate.symbol}</h3></div>
       <DirectionBadge direction={candidate.direction}/>

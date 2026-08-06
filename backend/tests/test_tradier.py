@@ -2,6 +2,7 @@ from datetime import date
 
 import httpx
 
+from app.core.config import get_settings
 from app.market_data.tradier import TradierMarketDataProvider
 
 
@@ -51,3 +52,27 @@ def test_tradier_fails_closed_without_token_or_on_http_error():
     failing = TradierMarketDataProvider("secret", "https://example.test/v1", client)
     assert failing.option_chain("SPY") == []
     assert "unavailable" in failing.status().message.lower()
+
+
+def test_tradier_hard_budget_stops_upstream_calls_before_documented_limit(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "tradier_request_budget_per_minute", 2)
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        symbol = request.url.params.get("symbols", "SPY")
+        return httpx.Response(200, headers={"X-Ratelimit-Allowed": "120",
+            "X-Ratelimit-Used": str(requests), "X-Ratelimit-Available": str(120 - requests)},
+            json={"quotes": {"quote": {"symbol": symbol, "last": 100,
+                  "trade_date": 1_722_000_000_000}}})
+
+    provider = TradierMarketDataProvider("secret", "https://example.test/v1",
+        httpx.Client(transport=httpx.MockTransport(handler)))
+    assert provider.quotes(["SPY"])
+    assert provider.quotes(["QQQ"])
+    assert provider.quotes(["IWM"]) == []
+    budget = provider.budget_status()
+    assert requests == 2
+    assert budget["safety_limit"] == 2 and budget["remaining"] == 0 and budget["paused"] is True

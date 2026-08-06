@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
@@ -57,10 +57,13 @@ class MockMarketDataProvider:
                 volume=100_000 + i * 8_000 + (30_000 if i == (36 // step) - 1 else 0)))
         return rows
 
-    def option_chain(self, symbol):
+    def expirations(self, symbol):
+        return [self.now.date() + timedelta(days=offset) for offset in range(0, 15)]
+
+    def option_chain(self, symbol, expiration: date | None = None):
         if not get_settings().enable_demo_option_contracts:
             return []
-        today = self.now.date()
+        today = expiration or self.now.date()
         underlying = BASE[symbol] + .25 if PROFILE[symbol].startswith("missed") else self.candles(symbol)[-1].close
         rows = []
         for right in ["call", "put"]:

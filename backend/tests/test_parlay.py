@@ -3,8 +3,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
+from app.db.session import Base, get_db
 from app.main import app
 from app.market_data.mock import MockMarketDataProvider
 from app.schemas.market import ProviderStatus
@@ -147,16 +151,31 @@ def test_one_bad_quote_does_not_block_other_symbols():
 
 
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def db_override():
+        with local() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = db_override
     monkeypatch.setattr("app.api.routes.get_provider", mock_provider)
-    response = TestClient(app).get("/api/parlays")
+    try:
+        response = TestClient(app).get("/api/parlays")
+    finally:
+        app.dependency_overrides.clear()
     assert response.status_code == 200
     body = response.json()
     assert body["provider_status"]["mode"] == "mock"
     assert body["paper_only"] is True
     assert body["universe"] == get_settings().parlay_symbol_list
-    assert len(body["candidates"]) == len(get_settings().parlay_symbol_list)
+    assert len(body["candidates"]) == len(get_settings().parlay_symbol_list) * 2
+    assert {item["strategy_mode"] for item in body["candidates"]} == {
+        "ONE_MIN_0DTE", "STRUCTURED_INTRADAY"
+    }
     expected_health = {
-        "candidate_count": len(get_settings().parlay_symbol_list),
+        "candidate_count": len(get_settings().parlay_symbol_list) * 2,
         "unavailable_candidate_count": 0,
         "provider_status": "healthy",
         "engine_status": "healthy",

@@ -8,6 +8,8 @@ export interface Dashboard { provider_status:ProviderStatus; quotes:Quote[]; mar
 export interface JournalSignal { id:number; symbol:string; signal_type:string; status:string; generated_at:string; payload:Record<string,unknown> }
 export interface Analytics { minimum_sample_size:number; sample_size:number; statistically_promising:boolean; win_rate:number; profit_factor:number|null; average_winner:number; average_loser:number; expectancy:number; message:string }
 export type SignalStatus='BUY'|'WATCH'|'MISSED'|'PASS'|'UNAVAILABLE';
+export type StrategyMode='ONE_MIN_0DTE'|'STRUCTURED_INTRADAY';
+export type StrategyView='ALL'|StrategyMode;
 export type ParlayDirection='call'|'put'|'none';
 export type ScoreLabel='PLAY'|'WATCH CLOSELY'|'DEVELOPING'|'PASS';
 export interface ParlayContract extends Contract { symbol:string; expiration:string; strike:number; right:string; last:number; iv:number|null; theta:number|null; vega:number|null; timestamp:string; bid_timestamp?:string|null; ask_timestamp?:string|null; provider?:string; data_mode?:string; verification_status?:string; verification_reason?:string; actionable?:boolean; normalized_symbol?:string|null }
@@ -23,8 +25,10 @@ export interface ParlayCandidate {
   lifecycle_id?:string|null; lifecycle_status?:'WATCH'|'BUY'|'ENTERED'|'EXPIRED'|'MISSED'|'INVALIDATED'|null;
   first_seen_at?:string|null; triggered_at?:string|null; last_verified_at?:string|null; valid_until?:string|null;
   validity_reason?:string|null;
+  strategy_mode:StrategyMode;strategy_version:string;timeframe_context:string;target_dte:string;
 }
-export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string;engine_status?:string;last_completed_scan_at?:string|null;evaluation_candle_at?:string|null;next_evaluation_at?:string|null;last_error?:string|null }
+export interface ApiBudget {safety_limit:number|null;used_last_minute:number|null;remaining:number|null;provider_allowed:number|null;provider_used:number|null;provider_available:number|null;resets_at:string|null;paused:boolean}
+export interface ScannerHealth { candidate_count:number; unavailable_candidate_count:number; provider_status:string;engine_status?:string;last_completed_scan_at?:string|null;evaluation_candle_at?:string|null;next_evaluation_at?:string|null;last_error?:string|null;api_budget?:ApiBudget }
 export interface ParlayResponse { provider_status:ProviderStatus; universe:string[]; candidates:ParlayCandidate[]; scanner_health:ScannerHealth; paper_only:boolean }
 export interface SignalAlert {id:number;lifecycle_id:string|null;symbol:string;event_type:string;message:string;created_at:string;payload:Record<string,unknown>;acknowledged:boolean}
 export interface SignalAlertsResponse {alerts:SignalAlert[];latest_id:number;paper_only:boolean}
@@ -32,6 +36,7 @@ export interface DailyWatchResponse { trading_date:string;symbols:string[];slots
 export type PaperDecision='HOLD'|'TAKE_PROFIT'|'EXIT'|'DATA_UNAVAILABLE'|'EXPIRED'|'CLOSED';
 export interface PaperPosition {
   id:number; symbol:string; option_symbol:string; direction:'call'|'put'; expiration:string; strike:number;
+  strategy_mode:StrategyMode;strategy_version:string;
   quantity:number; entry_option_price:number; entry_underlying_price:number; total_debit:number;
   underlying_trigger:number; underlying_invalidation:number; first_underlying_target:number;
   stretch_underlying_target:number; first_option_target:number; stretch_option_target:number;
@@ -42,7 +47,7 @@ export interface PaperPosition {
   data_freshness:string; next_action:string; last_marked_at:string|null; paper_only:boolean;
 }
 export interface PaperPositionsResponse { positions:PaperPosition[]; paper_only:boolean }
-export interface PerformanceMetrics { total_triggered_signals:number;open_signals:number;targets_hit:number;stops_hit:number;timed_exits:number;invalidated_missed:number;win_rate:number;average_r:number;cumulative_r:number;profit_factor:number|null;maximum_drawdown_r:number;average_duration:number;average_mfe:number;average_mae:number }
-export interface PerformanceSignal { signal_id:string;source:'LIVE'|'BACKTEST'|'UNKNOWN'|'LEGACY';ticker:string;direction:'CALL'|'PUT';setup_type:string;trading_date:string;triggered_at:string;entry_price:number;stop_price:number;target_price:number;exit_reason:string;result_r:number|null;duration_minutes:number|null;score:number;mfe_r:number;mae_r:number;user_entered:boolean;option_snapshot:Record<string,unknown>|null;strategy_snapshot:Record<string,unknown>;condition_snapshot:Record<string,unknown>;conservative_same_candle:boolean }
+export interface PerformanceMetrics { total_triggered_signals:number;open_signals:number;targets_hit:number;stops_hit:number;timed_exits:number;invalidated_missed:number;win_rate:number;average_r:number;cumulative_r:number;profit_factor:number|null;maximum_drawdown_r:number;average_duration:number;average_mfe:number;average_mae:number;average_return_pct?:number;cumulative_return_pct?:number;maximum_drawdown_pct?:number }
+export interface PerformanceSignal { signal_id:string;source:'LIVE'|'BACKTEST'|'UNKNOWN'|'LEGACY';ticker:string;direction:'CALL'|'PUT';setup_type:string;strategy_mode:StrategyMode;strategy_version:string;trading_date:string;triggered_at:string;entry_price:number;stop_price:number;target_price:number;exit_reason:string;result_r:number|null;result_return_pct:number|null;initial_risk_points:number;initial_risk_pct:number;mfe_return_pct:number;mae_return_pct:number;duration_minutes:number|null;score:number;mfe_r:number;mae_r:number;user_entered:boolean;option_snapshot:Record<string,unknown>|null;strategy_snapshot:Record<string,unknown>;condition_snapshot:Record<string,unknown>;conservative_same_candle:boolean }
 export interface PerformanceResponse {metrics:PerformanceMetrics;signals:PerformanceSignal[];timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}

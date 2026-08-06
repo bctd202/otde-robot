@@ -1,6 +1,12 @@
 from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.db.models import SignalPerformance
-from app.services.performance import metrics, update_outcome
+from app.db.session import Base
+from app.schemas.market import CandleOut, ParlayCandidateOut, ProviderStatus
+from app.services.performance import evaluate_open_signals, metrics, track_candidates, update_outcome
 
 def row(direction="CALL"):
     now=datetime(2026,8,3,14,30,tzinfo=timezone.utc)
@@ -17,13 +23,6 @@ def test_timed_exit_excursions_duration_and_open_metric_exclusion():
     summary=metrics([closed,opened])
     assert closed.result_r==0.2 and closed.mfe_r==0.8 and closed.mae_r==0.4 and closed.duration_minutes==15
     assert summary["open_signals"]==1 and summary["average_r"]==0.2 and summary["win_rate"]==100
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-from app.db.session import Base
-from app.schemas.market import CandleOut, ProviderStatus
-from app.services.performance import evaluate_open_signals
 
 class CandleProvider:
     def __init__(self, candles, latest): self.rows,self.latest=candles,latest
@@ -68,3 +67,32 @@ def test_session_cutoff_uses_completed_candle_close():
         trade=row();trade.triggered_at=start;trade.last_evaluated_at=start;db.add(trade);db.commit()
         evaluate_open_signals(db,CandleProvider([cutoff],start+timedelta(minutes=3)))
         assert trade.exit_reason=="TIMED_EXIT" and trade.exit_price==100.25 and trade.result_r==.25
+
+
+class LiveTradierProvider:
+    def status(self):
+        return ProviderStatus(provider="tradier", mode="live", status="healthy", delay_seconds=0,
+            latest_timestamp=datetime(2026, 8, 3, 15, tzinfo=timezone.utc), message="test")
+
+    def candles(self, ticker, timeframe="1m"):
+        return []
+
+
+def structured_missed(lifecycle_id: str, minute: int) -> ParlayCandidateOut:
+    return ParlayCandidateOut(symbol="SPY", rank="PLAY", direction="call", signal_status="MISSED",
+        score=88, score_label="PLAY", underlying_price=103, underlying_trigger=101,
+        underlying_invalidation=99, first_underlying_target=105,
+        primary_action="MISSED", generated_at=datetime(2026, 8, 3, 14, minute, tzinfo=timezone.utc),
+        data_freshness="live_current", lifecycle_id=lifecycle_id,
+        strategy_mode="STRUCTURED_INTRADAY", strategy_version="structured-intraday-v1")
+
+
+def test_distinct_same_day_lifecycles_each_get_a_performance_row():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        provider = LiveTradierProvider()
+        track_candidates(db, [structured_missed("setup-1", 30)], provider)
+        track_candidates(db, [structured_missed("setup-2", 45)], provider)
+        rows = list(db.scalars(select(SignalPerformance).order_by(SignalPerformance.triggered_at)).all())
+        assert [item.dedupe_key.rsplit(":", 1)[-1] for item in rows] == ["setup-1", "setup-2"]

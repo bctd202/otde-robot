@@ -156,10 +156,16 @@ class SignalScan(Base):
 
 class SignalLifecycle(Base):
     __tablename__ = "signal_lifecycles"
-    __table_args__ = (Index("ix_signal_lifecycle_active", "trading_date", "symbol", "status"),)
+    __table_args__ = (Index("ix_signal_lifecycle_active", "trading_date", "symbol", "status"),
+                      Index("ix_signal_lifecycle_strategy_active", "trading_date", "symbol",
+                            "strategy_mode", "status"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     symbol: Mapped[str] = mapped_column(String(12), index=True)
     direction: Mapped[str] = mapped_column(String(8))
+    strategy_mode: Mapped[str] = mapped_column(String(32), default="ONE_MIN_0DTE",
+                                               server_default="ONE_MIN_0DTE", index=True)
+    strategy_version: Mapped[str] = mapped_column(String(40), default="parlay-v1",
+                                                  server_default="parlay-v1")
     trading_date: Mapped[date] = mapped_column(Date, index=True)
     status: Mapped[str] = mapped_column(String(16), index=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -210,6 +216,10 @@ class ParlayPaperPosition(Base):
     symbol: Mapped[str] = mapped_column(String(12), index=True)
     option_symbol: Mapped[str] = mapped_column(String(64), index=True)
     direction: Mapped[Literal["call", "put"]] = mapped_column(String(8))
+    strategy_mode: Mapped[str] = mapped_column(String(32), default="ONE_MIN_0DTE",
+                                               server_default="ONE_MIN_0DTE", index=True)
+    strategy_version: Mapped[str] = mapped_column(String(40), default="parlay-v1",
+                                                  server_default="parlay-v1")
     expiration: Mapped[date] = mapped_column(Date)
     strike: Mapped[float] = mapped_column(Float)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
@@ -270,6 +280,10 @@ class LiveWaitCandidate(Base):
     key: Mapped[str] = mapped_column(String(160), primary_key=True)
     ticker: Mapped[str] = mapped_column(String(12), index=True)
     direction: Mapped[str] = mapped_column(String(4))
+    strategy_mode: Mapped[str] = mapped_column(String(32), default="ONE_MIN_0DTE",
+                                               server_default="ONE_MIN_0DTE", index=True)
+    strategy_version: Mapped[str] = mapped_column(String(40), default="parlay-v1",
+                                                  server_default="parlay-v1")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     condition_snapshot: Mapped[dict] = mapped_column(JSON)
 
@@ -286,6 +300,8 @@ class SignalPerformance(Base):
     direction: Mapped[str] = mapped_column(String(4))
     backend_status: Mapped[str] = mapped_column(String(16))
     setup_type: Mapped[str] = mapped_column(String(64), index=True)
+    strategy_mode: Mapped[str] = mapped_column(String(32), default="ONE_MIN_0DTE",
+                                               server_default="ONE_MIN_0DTE", index=True)
     strategy_version: Mapped[str] = mapped_column(String(32))
     strategy_snapshot: Mapped[dict] = mapped_column(JSON)
     condition_snapshot: Mapped[dict] = mapped_column(JSON)
@@ -299,6 +315,7 @@ class SignalPerformance(Base):
     exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     exit_reason: Mapped[str] = mapped_column(String(16), default="OPEN", index=True)
     result_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    result_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     mfe_r: Mapped[float] = mapped_column(Float, default=0)
     mae_r: Mapped[float] = mapped_column(Float, default=0)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)

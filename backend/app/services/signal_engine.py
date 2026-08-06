@@ -19,6 +19,7 @@ from app.services.market_calendar import market_session
 from app.services.paper_positions import refresh_position
 from app.services.parlay import latest_completed_candle_at, rank_parlays
 from app.services.performance import track_candidates
+from app.services.structured_intraday import rank_structured_intraday
 
 logger = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -26,6 +27,10 @@ ENGINE_KEY = "parlay"
 ACTIVE_STATES = ("WATCH", "BUY")
 SCAN_LOCK = Lock()
 _BACKGROUND_PROVIDER = None
+
+
+def _strategy_label(mode: str) -> str:
+    return "Structured Intraday" if mode == "STRUCTURED_INTRADAY" else "1-Min / 0DTE"
 
 
 def _utc(value: datetime) -> datetime:
@@ -47,15 +52,21 @@ def _alert(db: Session, *, lifecycle: SignalLifecycle | None, symbol: str,
     key = dedupe_key or f"{lifecycle.id if lifecycle else symbol}:{event_type}"
     if db.scalar(select(SignalAlert.id).where(SignalAlert.dedupe_key == key)) is not None:
         return
+    details = dict(payload or {})
+    if lifecycle is not None:
+        details.setdefault("strategy_mode", lifecycle.strategy_mode)
+        details.setdefault("strategy_version", lifecycle.strategy_version)
     db.add(SignalAlert(dedupe_key=key, lifecycle_id=lifecycle.id if lifecycle else None,
         symbol=symbol, event_type=event_type, message=message,
-        created_at=datetime.now(timezone.utc), payload=payload or {}, acknowledged=False))
+        created_at=datetime.now(timezone.utc), payload=details, acknowledged=False))
 
 
-def _active_lifecycle(db: Session, symbol: str, trading_day: date) -> SignalLifecycle | None:
+def _active_lifecycle(db: Session, symbol: str, trading_day: date,
+                      strategy_mode: str) -> SignalLifecycle | None:
     return db.scalar(select(SignalLifecycle).where(
         SignalLifecycle.symbol == symbol,
         SignalLifecycle.trading_date == trading_day,
+        SignalLifecycle.strategy_mode == strategy_mode,
         SignalLifecycle.status.in_(ACTIVE_STATES),
     ).order_by(SignalLifecycle.updated_at.desc()))
 
@@ -91,7 +102,9 @@ def _new_lifecycle(db: Session, candidate: ParlayCandidateOut, trading_day: date
     state = candidate.signal_status
     reason = candidate.primary_action
     row = SignalLifecycle(id=str(uuid4()), symbol=candidate.symbol,
-        direction=candidate.direction, trading_date=trading_day, status=state,
+        direction=candidate.direction, strategy_mode=candidate.strategy_mode,
+        strategy_version=candidate.strategy_version,
+        trading_date=trading_day, status=state,
         first_seen_at=verified_at, triggered_at=verified_at if state == "BUY" else None,
         last_verified_at=verified_at, valid_until=valid_until if state in ACTIVE_STATES else None,
         ended_at=verified_at if state == "MISSED" else None,
@@ -99,12 +112,15 @@ def _new_lifecycle(db: Session, candidate: ParlayCandidateOut, trading_day: date
         candidate_snapshot=candidate.model_dump(mode="json"),
         updated_at=datetime.now(timezone.utc))
     db.add(row)
+    label = _strategy_label(candidate.strategy_mode)
     event = "NEW_WATCH" if state == "WATCH" else state
-    message = (f"{candidate.symbol} entered the waiting room" if state == "WATCH" else
-               f"{candidate.symbol} is a verified BUY" if state == "BUY" else
-               f"{candidate.symbol} setup was missed; do not chase")
+    message = (f"{candidate.symbol} {label} entered the waiting room" if state == "WATCH" else
+               f"{candidate.symbol} is a verified {label} BUY" if state == "BUY" else
+               f"{candidate.symbol} {label} setup was missed; do not chase")
     _alert(db, lifecycle=row, symbol=candidate.symbol, event_type=event, message=message,
-           payload={"direction": candidate.direction, "action": candidate.primary_action})
+           payload={"direction": candidate.direction, "action": candidate.primary_action,
+                    "strategy_mode": candidate.strategy_mode,
+                    "strategy_version": candidate.strategy_version})
     return row
 
 
@@ -114,7 +130,7 @@ def apply_lifecycle(db: Session, candidates: list[ParlayCandidateOut],
     valid_until = evaluation_at + timedelta(minutes=2)
     trading_day = verified_at.astimezone(NY).date()
     for candidate in candidates:
-        active = _active_lifecycle(db, candidate.symbol, trading_day)
+        active = _active_lifecycle(db, candidate.symbol, trading_day, candidate.strategy_mode)
         current = candidate.signal_status
         if active is not None and (candidate.direction not in {active.direction, "none"}):
             state, reason = _terminal_state(active, candidate)
@@ -130,8 +146,9 @@ def apply_lifecycle(db: Session, candidates: list[ParlayCandidateOut],
                 active.triggered_at = verified_at
                 active.reason = candidate.primary_action
                 _alert(db, lifecycle=active, symbol=candidate.symbol, event_type="BUY",
-                       message=f"{candidate.symbol} moved from WATCH to verified BUY",
-                       payload={"direction": candidate.direction, "action": candidate.primary_action})
+                       message=f"{candidate.symbol} {_strategy_label(candidate.strategy_mode)} moved from WATCH to verified BUY",
+                       payload={"direction": candidate.direction, "action": candidate.primary_action,
+                                "strategy_mode": candidate.strategy_mode})
             elif active.status == "BUY" and current == "WATCH":
                 _end_lifecycle(db, active, "EXPIRED",
                     f"{candidate.symbol} BUY expired because the trigger no longer qualifies",
@@ -180,11 +197,13 @@ def _position_alerts(db: Session, provider) -> None:
         if result.decision_status == "TAKE_PROFIT":
             _alert(db, lifecycle=None, symbol=position.symbol, event_type="TARGET_HIT",
                    message=f"{position.symbol} paper position reached its first target",
-                   payload={"position_id": position.id}, dedupe_key=f"position:{position.id}:target")
+                   payload={"position_id": position.id, "strategy_mode": position.strategy_mode},
+                   dedupe_key=f"position:{position.id}:target")
         elif result.decision_status == "EXIT":
             _alert(db, lifecycle=None, symbol=position.symbol, event_type="STOP_HIT",
                    message=f"{position.symbol} paper position reached an exit condition",
-                   payload={"position_id": position.id, "action": result.next_action},
+                   payload={"position_id": position.id, "action": result.next_action,
+                            "strategy_mode": position.strategy_mode},
                    dedupe_key=f"position:{position.id}:exit")
 
 
@@ -198,7 +217,8 @@ def _performance_alerts(db: Session) -> None:
         event = "TARGET_HIT" if row.exit_reason == "TARGET" else "STOP_HIT"
         _alert(db, lifecycle=None, symbol=row.ticker, event_type=event,
                message=f"{row.ticker} research signal reached {row.exit_reason.lower()}",
-               payload={"signal_id": row.signal_id, "result_r": row.result_r},
+               payload={"signal_id": row.signal_id, "result_r": row.result_r,
+                        "strategy_mode": row.strategy_mode},
                dedupe_key=f"performance:{row.signal_id}:{row.exit_reason}")
 
 
@@ -220,11 +240,21 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
     runtime.last_error = None
     db.commit()
     try:
-        candidates = rank_parlays(provider, universe, completed_at=evaluation_at)
+        one_minute = rank_parlays(provider, universe, completed_at=evaluation_at)
+        structured = rank_structured_intraday(provider, universe, completed_at=evaluation_at)
+        candidates = one_minute + structured
         apply_lifecycle(db, candidates, evaluation_at)
         track_candidates(db, candidates, provider)
         _position_alerts(db, provider)
         _performance_alerts(db)
+        if hasattr(provider, "budget_status"):
+            budget = provider.budget_status()
+            remaining = budget.get("remaining")
+            if remaining is not None and remaining <= 20:
+                minute = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+                _alert(db, lifecycle=None, symbol="SYSTEM", event_type="API_BUDGET_LOW",
+                       message=f"Tradier request capacity is low: {remaining} safe requests remain",
+                       payload=budget, dedupe_key=f"api-budget:{minute}")
         final_status = provider.status()
         completed = datetime.now(timezone.utc)
         scan = SignalScan(trading_date=(evaluation_at + timedelta(minutes=1)).astimezone(NY).date(),
@@ -282,6 +312,7 @@ def mark_lifecycle_entered(db: Session, position: ParlayPaperPosition) -> None:
     row = db.scalar(select(SignalLifecycle).where(
         SignalLifecycle.symbol == position.symbol,
         SignalLifecycle.direction == position.direction,
+        SignalLifecycle.strategy_mode == position.strategy_mode,
         SignalLifecycle.trading_date == trading_day,
         SignalLifecycle.status == "BUY",
     ).order_by(SignalLifecycle.updated_at.desc()))
