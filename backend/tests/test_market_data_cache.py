@@ -19,7 +19,7 @@ class CountingProvider:
 
     def candles(self, symbol, timeframe="1m"):
         self.calls["candles"] += 1
-        return [CandleOut(symbol=symbol, timeframe="1m", timestamp=self.now + timedelta(minutes=index),
+        return [CandleOut(symbol=symbol, timeframe="1m", timestamp=self.now - timedelta(minutes=15-index),
             open=100, high=101, low=99, close=100.5, volume=1000) for index in range(15)]
 
     def expirations(self, symbol):
@@ -45,3 +45,16 @@ def test_cache_shares_quotes_candles_expirations_and_chains_across_consumers():
     expiration = date(2026, 8, 12)
     assert provider.option_chain("SPY", expiration) == provider.option_chain("SPY", expiration)
     assert upstream.calls == {"quotes": 1, "candles": 1, "expirations": 1, "chains": 1}
+
+
+def test_cache_never_promotes_a_forming_candle_to_completed():
+    upstream = CountingProvider()
+    forming = CandleOut(symbol="SPY", timeframe="1m", timestamp=upstream.now.replace(second=0),
+        open=100, high=110, low=90, close=109, volume=1000)
+    upstream.candles = lambda symbol, timeframe="1m": [forming]
+    provider = CachedMarketDataProvider(upstream)
+
+    assert provider.candles("SPY") == []
+    upstream.now += timedelta(minutes=1)
+    # The partial row was never cached, so it cannot silently become completed.
+    assert provider.candles("SPY") == []

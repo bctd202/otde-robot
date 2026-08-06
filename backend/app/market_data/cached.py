@@ -36,6 +36,14 @@ def aggregate_candles(candles: list[CandleOut], minutes: int) -> list[CandleOut]
     return output
 
 
+def _completed_one_minute_candles(candles: list[CandleOut], as_of: datetime) -> list[CandleOut]:
+    """Exclude the provider's forming minute so it can never age inside the cache."""
+    boundary = as_of.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return [candle for candle in candles
+            if (candle.timestamp.astimezone(timezone.utc) if candle.timestamp.tzinfo
+                else candle.timestamp.replace(tzinfo=timezone.utc)) + timedelta(minutes=1) <= boundary]
+
+
 class CachedMarketDataProvider:
     """Process-wide read-through cache that shares one upstream snapshot across consumers."""
 
@@ -73,7 +81,8 @@ class CachedMarketDataProvider:
         with self._lock:
             entry = self._candles.get(symbol)
             if not self._fresh(entry, ttl):
-                rows = self.provider.candles(symbol, "1m")
+                rows = _completed_one_minute_candles(
+                    self.provider.candles(symbol, "1m"), self.status().latest_timestamp)
                 entry = _CacheEntry(rows, datetime.now(timezone.utc))
                 self._candles[symbol] = entry
             assert entry is not None

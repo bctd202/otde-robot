@@ -85,15 +85,18 @@ def evaluate_structured_setup(candles: list[CandleOut], underlying_price: float,
 
     sweep = bars_15[sweep_index]
     reasons.append(f"15M {'sell-side' if direction == 'call' else 'buy-side'} liquidity swept and reclaimed")
-    bars_before = [bar for bar in bars_5 if bar.timestamp < sweep.timestamp][-3:]
-    bars_after = [bar for bar in bars_5 if bar.timestamp >= sweep.timestamp]
+    sweep_completed_at = _utc(sweep.timestamp) + timedelta(minutes=15)
+    bars_before = [bar for bar in bars_5 if _utc(bar.timestamp) < _utc(sweep.timestamp)][-3:]
+    # A 5M close cannot confirm structure until the reclaiming 15M sweep has
+    # completed. Bars inside that 15M candle are therefore pre-sweep context.
+    bars_after = [bar for bar in bars_5 if _utc(bar.timestamp) >= sweep_completed_at]
     if len(bars_before) < 2 or not bars_after:
         return StructuredEvaluation(direction, "WATCH", 72, 0, sweep.low if direction == "call" else sweep.high,
                                     0, 0, 0, reasons, ["Waiting for a completed 5M structure shift"])
     trigger = (max(bar.high for bar in bars_before) if direction == "call"
                else min(bar.low for bar in bars_before))
-    shifted = any(bar.close > trigger for bar in bars_after) if direction == "call" else any(
-        bar.close < trigger for bar in bars_after)
+    shift_index = next((index for index, bar in enumerate(bars_after)
+        if (bar.close > trigger if direction == "call" else bar.close < trigger)), None)
     stop = sweep.low if direction == "call" else sweep.high
     risk = abs(trigger - stop)
     if risk <= 0:
@@ -103,16 +106,21 @@ def evaluate_structured_setup(candles: list[CandleOut], underlying_price: float,
     stretch = trigger + (3 * risk if direction == "call" else -3 * risk)
     extension = ((underlying_price - trigger) if direction == "call" else
                  (trigger - underlying_price)) / risk
-    if not shifted:
+    if shift_index is None:
         return StructuredEvaluation(direction, "WATCH", 76, trigger, stop, target, stretch,
                                     extension, reasons, ["Waiting for 5M market-structure shift"])
     reasons.append("5M market-structure shift confirmed")
-    retest = 0 <= extension <= .75
+    # The breakout bar is not its own retest. Require a later completed 5M bar
+    # to touch the broken level from the new side while respecting invalidation.
+    post_shift = bars_after[shift_index + 1:]
+    retest_bar = next((bar for bar in post_shift if (
+        bar.low <= trigger and bar.close > stop if direction == "call"
+        else bar.high >= trigger and bar.close < stop)), None)
     if extension > 1.25:
         return StructuredEvaluation(direction, "MISSED", 88, trigger, stop, target, stretch,
                                     extension, reasons, ["Move extended beyond the no-chase window"])
-    if retest:
-        reasons.append("Price remains inside the controlled retest window")
+    if retest_bar is not None and 0 <= extension <= .75:
+        reasons.append("A later 5M candle retested the break and held invalidation")
         return StructuredEvaluation(direction, "BUY", 92, trigger, stop, target, stretch,
                                     extension, reasons, [])
     return StructuredEvaluation(direction, "WATCH", 84, trigger, stop, target, stretch,

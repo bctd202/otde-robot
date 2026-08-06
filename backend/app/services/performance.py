@@ -68,7 +68,10 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
             continue
         stamp = _utc(candidate.generated_at)
         day = stamp.astimezone(NY).date()
-        dedupe_key = f"{candidate.strategy_mode}:{candidate.symbol}:{candidate.direction}:{day.isoformat()}"
+        # Lifecycle ids represent distinct setup occurrences. Repeated scans of
+        # one setup share an id, while a later same-symbol setup gets a new row.
+        occurrence = candidate.lifecycle_id or stamp.isoformat()
+        dedupe_key = f"{candidate.strategy_mode}:{candidate.symbol}:{candidate.direction}:{occurrence}"
         existing = db.scalar(select(SignalPerformance).where(
             SignalPerformance.source == "LIVE", SignalPerformance.dedupe_key == dedupe_key
         ))
