@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ParlayCandidate } from '../types';
-import { formatDateOnly, formatEasternTime } from '../lib/dates';
+import { formatDateOnly, formatEasternTime, parseApiTimestamp } from '../lib/dates';
 import { DirectionBadge } from './DirectionBadge';
 
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
@@ -9,7 +9,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
   const [now,setNow]=useState(()=>Date.now());
   useEffect(()=>{const timer=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(timer)},[]);
   const contract=candidate.contract;
-  const validUntil=candidate.valid_until?Date.parse(candidate.valid_until):null;
+  const validUntil=parseApiTimestamp(candidate.valid_until)?.getTime()??null;
   const secondsRemaining=validUntil==null?null:Math.max(0,Math.ceil((validUntil-now)/1000));
   const lifecycleCurrent=candidate.lifecycle_status==null||(candidate.lifecycle_status==='BUY'&&secondsRemaining!==null&&secondsRemaining>0);
   const verifiedActionable=lifecycleCurrent&&candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);

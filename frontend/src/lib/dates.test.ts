@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { formatDateOnly, formatEasternDateTime, formatEasternTime } from './dates';
+import { formatDateOnly, formatEasternDateTime, formatEasternTime, parseApiTimestamp } from './dates';
 
 afterEach(()=>vi.unstubAllEnvs());
 
@@ -12,7 +12,13 @@ describe.each(['America/New_York','America/Los_Angeles','Asia/Tokyo'])('browser 
 
 test('formats actual timestamps in Eastern Time',()=>{
   expect(formatEasternTime('2026-08-03T14:30:00Z')).toBe('10:30 AM EDT');
+  expect(formatEasternTime('2026-08-03T14:30:00')).toBe('10:30 AM EDT');
   expect(formatEasternDateTime('2026-08-03T14:30:00Z')).toBe('Aug 3, 2026, 10:30 AM EDT');
+});
+
+test('treats timezone-less API datetimes as UTC',()=>{
+  expect(parseApiTimestamp('2026-08-03T14:30:00')?.toISOString()).toBe('2026-08-03T14:30:00.000Z');
+  expect(parseApiTimestamp('2026-08-03T14:30:00.123456')?.toISOString()).toBe('2026-08-03T14:30:00.123Z');
 });
 
 test('leaves malformed or non-date-only values visible for diagnosis',()=>{

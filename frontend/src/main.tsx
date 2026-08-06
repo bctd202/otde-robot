@@ -9,7 +9,7 @@ import { DailyWatch } from './components/DailyWatch';
 import { SignalAlerts } from './components/SignalAlerts';
 import { StrategyControls } from './components/StrategyControls';
 import type { Analytics, DailyWatchResponse, Dashboard, JournalSignal, LiquidityLevels, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert, StrategyMode, StrategyView } from './types';
-import { formatEasternTime } from './lib/dates';
+import { formatEasternTime, parseApiTimestamp } from './lib/dates';
 import './style.css';
 
 export const PARLAY_REFRESH_INTERVAL_MS = 15_000;
@@ -64,7 +64,7 @@ export function App() {
   useEffect(()=>{ Promise.all([getDashboard(),getJournal(),getAnalytics(),getDailyWatch()]).then(([d,j,a,w])=>{setDashboard(d);setJournal(j);setAnalytics(a);setDailyWatch(w)}).catch((reason:Error)=>setError(reason.message)); },[]);
   const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{
     const [boardResult,positionsResult,alertsResult]=await Promise.allSettled([getParlays(),getPaperPositions(),getSignalAlerts()]);
-    if(boardResult.status==='fulfilled'){setParlays(previous=>stabilizeCandidateOrder(boardResult.value,previous));setLastParlayUpdate(boardResult.value.scanner_health?.last_completed_scan_at?new Date(boardResult.value.scanner_health.last_completed_scan_at):new Date());setParlayStale(false)}else setParlayStale(true);
+    if(boardResult.status==='fulfilled'){setParlays(previous=>stabilizeCandidateOrder(boardResult.value,previous));setLastParlayUpdate(parseApiTimestamp(boardResult.value.scanner_health?.last_completed_scan_at)??new Date());setParlayStale(false)}else setParlayStale(true);
     if(positionsResult.status==='fulfilled'){setPositions(positionsResult.value.positions);setPositionsStale(false)}else setPositionsStale(true);
     if(alertsResult.status==='fulfilled'&&Array.isArray(alertsResult.value.alerts)){
       const incoming=alertsResult.value.alerts.filter(alert=>alert.id>latestAlertId.current);

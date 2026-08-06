@@ -168,6 +168,10 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
 
 def _ledger(row: SignalPerformance) -> dict:
     payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    for key in ("triggered_at", "exit_at", "created_at", "updated_at", "last_evaluated_at"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=timezone.utc)
     risk = abs(row.entry_price - row.stop_price)
     risk_pct = risk / row.entry_price * 100 if row.entry_price else 0
     if payload.get("result_return_pct") is None and row.exit_price is not None and row.entry_price:

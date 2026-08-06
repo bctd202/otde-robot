@@ -1,6 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class ProviderStatus(BaseModel):
     provider: str
@@ -191,6 +191,14 @@ class ScannerHealth(BaseModel):
     next_evaluation_at: datetime | None = None
     last_error: str | None = None
     api_budget: dict = Field(default_factory=dict)
+
+    @field_validator("last_completed_scan_at", "evaluation_candle_at", "next_evaluation_at")
+    @classmethod
+    def restore_sqlite_utc(cls, value: datetime | None) -> datetime | None:
+        """SQLite drops offsets from UTC DateTime columns; restore the stored timezone at the API edge."""
+        if value is None:
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 class ParlayResponse(BaseModel):
