@@ -18,6 +18,7 @@ from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
 from app.services.market_calendar import market_session
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.paper_positions import (create_position, market_mark,
+                                          cached_position,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
@@ -93,12 +94,14 @@ def paper_position_create(payload: PaperPositionCreate, db: Session = Depends(ge
 
 
 @router.get("/paper-positions", response_model=PaperPositionsResponse)
-def paper_positions(db: Session = Depends(get_db)):
+def paper_positions(refresh: bool = False, db: Session = Depends(get_db)):
     rows = db.scalars(select(ParlayPaperPosition).order_by(ParlayPaperPosition.opened_at.desc()).limit(50)).all()
-    provider = get_provider()
-    output = [refresh_position(db, row, provider) if row.lifecycle_status == "ACTIVE" else
-              serialize(row, option_price=row.last_option_price, underlying_price=row.last_underlying_price)
-              for row in rows]
+    provider = get_provider() if refresh else None
+    output = []
+    for row in rows:
+        expire_if_past_expiration(db, row)
+        output.append(refresh_position(db, row, provider) if provider is not None and row.lifecycle_status == "ACTIVE"
+                      else cached_position(row))
     return PaperPositionsResponse(positions=output)
 
 
@@ -148,6 +151,7 @@ def parlays(db: Session = Depends(get_db)):
             evaluation_candle_at=runtime.last_evaluation_candle_at if runtime else None,
             next_evaluation_at=runtime.next_evaluation_at if runtime else None,
             last_error=runtime.last_error if runtime else None,
+            api_budget=provider.budget_status() if hasattr(provider, "budget_status") else {},
         ),
     )
 
@@ -163,12 +167,23 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
 
 
 def _ledger(row: SignalPerformance) -> dict:
-    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    risk = abs(row.entry_price - row.stop_price)
+    risk_pct = risk / row.entry_price * 100 if row.entry_price else 0
+    if payload.get("result_return_pct") is None and row.exit_price is not None and row.entry_price:
+        signed = row.exit_price - row.entry_price if row.direction == "CALL" else row.entry_price - row.exit_price
+        payload["result_return_pct"] = round(signed / row.entry_price * 100, 4)
+    payload["initial_risk_points"] = round(risk, 4)
+    payload["initial_risk_pct"] = round(risk_pct, 4)
+    payload["mfe_return_pct"] = round(row.mfe_r * risk_pct, 4)
+    payload["mae_return_pct"] = round(row.mae_r * risk_pct, 4)
+    return payload
 
 
 @router.get("/performance")
 def performance(source: str | None = None, ticker: str | None = None, direction: str | None = None,
-                setup_type: str | None = None, exit_reason: str | None = None, user_entered: bool | None = None,
+                setup_type: str | None = None, strategy_mode: str | None = None,
+                exit_reason: str | None = None, user_entered: bool | None = None,
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
                 max_score: float | None = None, db: Session = Depends(get_db)):
     query = select(SignalPerformance).order_by(SignalPerformance.triggered_at.desc())
@@ -176,6 +191,7 @@ def performance(source: str | None = None, ticker: str | None = None, direction:
         SignalPerformance.ticker == ticker.upper() if ticker else None,
         SignalPerformance.direction == direction.upper() if direction else None,
         SignalPerformance.setup_type == setup_type if setup_type else None,
+        SignalPerformance.strategy_mode == strategy_mode if strategy_mode else None,
         SignalPerformance.exit_reason == exit_reason if exit_reason else None,
         SignalPerformance.user_entered == user_entered if user_entered is not None else None,
         SignalPerformance.trading_date >= start if start else None, SignalPerformance.trading_date <= end if end else None,

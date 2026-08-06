@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     tradier_api_token: str | None = None
     tradier_base_url: str = "https://api.tradier.com/v1"
     tradier_data_mode: str = "unknown"
+    tradier_request_budget_per_minute: int = 100
+    market_quote_cache_seconds: int = 10
+    market_candle_cache_seconds: int = 45
+    market_chain_cache_seconds: int = 20
     parlay_symbols: str = "SPY,QQQ,IWM,TSLA,NVDA,AAPL,AMZN,META,MSFT,GOOGL,AVGO,IBIT,GLD,SLV,TLT,USO,UNG,AMD,COIN,PLTR"
     parlay_symbol_limit: int = 20
     parlay_flex_limit: int = 2

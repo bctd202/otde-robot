@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from datetime import date
+
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
 
 class MarketDataProvider(ABC):
@@ -12,4 +14,4 @@ class MarketDataProvider(ABC):
         """Historical data is explicitly unsupported unless a provider implements it."""
         return []
     @abstractmethod
-    def option_chain(self, symbol: str) -> list[OptionContractOut]: ...
+    def option_chain(self, symbol: str, expiration: date | None = None) -> list[OptionContractOut]: ...

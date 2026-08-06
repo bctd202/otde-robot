@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -9,6 +9,7 @@ from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
 from app.services.contracts import ACCEPTED_ACTIONABLE_DATA_MODES, is_verified_actionable_contract
 from app.services.parlay import latest_completed_candle_at, rank_parlays
+from app.services.structured_intraday import rank_structured_intraday
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -56,8 +57,12 @@ def create_position(db: Session, payload: PaperPositionCreate, provider: Any) ->
     symbol = payload.symbol.upper()
     # Never trust a BUY card that was rendered earlier. Re-run the complete
     # underlying setup and contract selection at click time on the server.
-    candidate = next((item for item in rank_parlays(provider, [symbol],
-        completed_at=latest_completed_candle_at(status.latest_timestamp)) if item.symbol == symbol), None)
+    completed_at = latest_completed_candle_at(status.latest_timestamp)
+    ranked = (rank_structured_intraday(provider, [symbol], completed_at=completed_at)
+              if payload.strategy_mode == "STRUCTURED_INTRADAY" else
+              rank_parlays(provider, [symbol], completed_at=completed_at))
+    candidate = next((item for item in ranked if item.symbol == symbol and
+                      item.strategy_mode == payload.strategy_mode), None)
     if (candidate is None or candidate.signal_status != "BUY" or candidate.actionable is not True or
             candidate.contract is None or not is_verified_actionable_contract(candidate.contract)):
         raise ValueError("Setup expired or invalidated; refresh and wait for a new verified BUY")
@@ -79,7 +84,9 @@ def create_position(db: Session, payload: PaperPositionCreate, provider: Any) ->
     fill = contract.ask  # Server-derived current ask; never trust the browser snapshot.
     position = ParlayPaperPosition(
         symbol=contract.symbol.upper(), option_symbol=contract.option_symbol,
-        direction=contract.right, expiration=contract.expiration, strike=contract.strike,
+        direction=contract.right, strategy_mode=candidate.strategy_mode,
+        strategy_version=candidate.strategy_version,
+        expiration=contract.expiration, strike=contract.strike,
         quantity=1, entry_option_price=fill,
         entry_underlying_price=candidate.underlying_price,
         total_debit=round(fill * 100, 2), underlying_trigger=candidate.underlying_trigger,
@@ -111,8 +118,11 @@ def market_mark(position: ParlayPaperPosition, provider: Any) -> tuple[float | N
         return None, None, "data_unavailable"
     try:
         quote = next((item for item in provider.quotes([position.symbol]) if item.symbol == position.symbol), None)
-        contract = next((item for item in provider.option_chain(position.symbol)
-                         if item.option_symbol == position.option_symbol), None)
+        try:
+            chain = provider.option_chain(position.symbol, position.expiration)
+        except TypeError:
+            chain = provider.option_chain(position.symbol)
+        contract = next((item for item in chain if item.option_symbol == position.option_symbol), None)
     except (KeyError, TypeError, ValueError):
         return None, None, "data_unavailable"
     if quote is None or contract is None:
@@ -145,7 +155,10 @@ def serialize(position: ParlayPaperPosition, *, option_price: float | None = Non
     pnl_percent = None if pnl_price is None else round((pnl_price - position.entry_option_price) / position.entry_option_price * 100, 2)
     return PaperPositionOut(
         id=position.id, symbol=position.symbol, option_symbol=position.option_symbol,
-        direction=position.direction, expiration=position.expiration, strike=position.strike,
+        direction=position.direction,
+        strategy_mode=cast(Literal["ONE_MIN_0DTE", "STRUCTURED_INTRADAY"], position.strategy_mode),
+        strategy_version=position.strategy_version,
+        expiration=position.expiration, strike=position.strike,
         quantity=position.quantity, entry_option_price=position.entry_option_price,
         entry_underlying_price=position.entry_underlying_price, total_debit=position.total_debit,
         underlying_trigger=position.underlying_trigger,
@@ -191,3 +204,20 @@ def refresh_position(db: Session, position: ParlayPaperPosition, provider: Any) 
     return serialize(position, option_price=position.last_option_price,
                      underlying_price=position.last_underlying_price,
                      freshness=freshness, market_data_available=False)
+
+
+def cached_position(position: ParlayPaperPosition, *, now: datetime | None = None) -> PaperPositionOut:
+    """Serialize the server-owned mark without letting browser polling wake the provider."""
+    if position.lifecycle_status != "ACTIVE":
+        return serialize(position, option_price=position.last_option_price,
+                         underlying_price=position.last_underlying_price)
+    now = now or datetime.now(timezone.utc)
+    marked = position.last_marked_at
+    if marked is not None and marked.tzinfo is None:
+        marked = marked.replace(tzinfo=timezone.utc)
+    current = bool(marked and now - marked.astimezone(timezone.utc) <= timedelta(minutes=2)
+                   and position.last_option_price is not None and position.last_underlying_price is not None)
+    return serialize(position, option_price=position.last_option_price,
+        underlying_price=position.last_underlying_price,
+        freshness=position.data_freshness if current else "cached_stale",
+        market_data_available=current)

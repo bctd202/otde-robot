@@ -18,7 +18,8 @@ class ContractDecision:
 
 
 def validate_contract(contract: OptionContractOut, underlying: str, *, now: datetime | None = None,
-                      max_spread: float = 20, min_volume: int = 250, min_open_interest: int = 500) -> ContractDecision:
+                      max_spread: float = 20, min_volume: int = 250, min_open_interest: int = 500,
+                      min_dte: int = 0, max_dte: int = 0) -> ContractDecision:
     """Independently parse OCC identity, compare the chain row, then apply liquidity policy."""
     match = OCC.fullmatch(contract.option_symbol.strip().upper())
     if not match:
@@ -41,8 +42,11 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     if contract.data_mode not in ACCEPTED_ACTIONABLE_DATA_MODES:
         return ContractDecision(True, False, "Provider data mode is not explicitly accepted for trading")
     now = now or datetime.now(timezone.utc)
-    if contract.expiration != now.astimezone(contract.timestamp.tzinfo).date():
-        return ContractDecision(True, False, "No valid same-day expiration")
+    trading_date = now.astimezone(contract.timestamp.tzinfo).date()
+    dte = (contract.expiration - trading_date).days
+    if not min_dte <= dte <= max_dte:
+        required_window = "same-day" if min_dte == max_dte == 0 else f"{min_dte}–{max_dte} DTE"
+        return ContractDecision(True, False, f"Contract is outside the required {required_window} window")
     if contract.bid <= 0 or contract.ask <= 0 or contract.ask < contract.bid:
         return ContractDecision(True, False, "Invalid bid/ask")
     if contract.bid_timestamp is None or contract.ask_timestamp is None:
@@ -58,9 +62,14 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     return ContractDecision(True, True, "Verified against exact Tradier chain response")
 
 
-def annotate_chain(chain: list[OptionContractOut], underlying: str, now: datetime) -> list[OptionContractOut]:
+def annotate_chain(chain: list[OptionContractOut], underlying: str, now: datetime, *,
+                   max_spread: float = 20, min_volume: int = 250,
+                   min_open_interest: int = 500, min_dte: int = 0,
+                   max_dte: int = 0) -> list[OptionContractOut]:
     for contract in chain:
-        decision = validate_contract(contract, underlying, now=now)
+        decision = validate_contract(contract, underlying, now=now, max_spread=max_spread,
+            min_volume=min_volume, min_open_interest=min_open_interest,
+            min_dte=min_dte, max_dte=max_dte)
         contract.verification_status = "verified" if decision.authentic else "unverified"
         contract.verification_reason = decision.reason
         contract.actionable = decision.actionable

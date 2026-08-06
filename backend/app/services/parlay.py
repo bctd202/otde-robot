@@ -11,6 +11,8 @@ Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
 NY = ZoneInfo("America/New_York")
 PRODUCTION_TIMEFRAME = "1m"
+STRATEGY_MODE: Literal["ONE_MIN_0DTE"] = "ONE_MIN_0DTE"
+STRATEGY_VERSION = "parlay-v1"
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,9 @@ def _score_label(score: float) -> Literal["PLAY", "WATCH CLOSELY", "DEVELOPING",
 def _unavailable(symbol: str, reason: str, generated_at: Any) -> ParlayCandidateOut:
     return ParlayCandidateOut(symbol=symbol, rank="PASS", direction="none", signal_status="UNAVAILABLE",
         score=0, score_label="PASS", unavailable_reason=reason,
-        primary_action=f"UNAVAILABLE — {reason.upper()}", generated_at=generated_at, data_freshness="unavailable")
+        primary_action=f"UNAVAILABLE — {reason.upper()}", generated_at=generated_at, data_freshness="unavailable",
+        strategy_mode=STRATEGY_MODE, strategy_version=STRATEGY_VERSION,
+        timeframe_context="1M", target_dte="0DTE")
 
 
 def _directional_plan(candles: list[CandleOut]) -> tuple[Direction | None, int, list[str], float, float, bool]:

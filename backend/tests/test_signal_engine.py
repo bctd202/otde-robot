@@ -50,6 +50,21 @@ def test_watch_buy_invalidated_lifecycle_and_alert_history():
         ]
 
 
+def test_same_symbol_can_hold_independent_active_lifecycles_for_both_strategies():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        fast = candidate("WATCH")
+        structured = candidate("WATCH")
+        structured.strategy_mode = "STRUCTURED_INTRADAY"
+        structured.strategy_version = "structured-intraday-v1"
+        signal_engine.apply_lifecycle(db, [fast, structured], NOW)
+        db.commit()
+        rows = list(db.scalars(select(SignalLifecycle).where(SignalLifecycle.symbol == "SPY")).all())
+        assert {row.strategy_mode for row in rows} == {"ONE_MIN_0DTE", "STRUCTURED_INTRADAY"}
+        assert len({row.id for row in rows}) == 2
+
+
 class Provider:
     def status(self):
         return ProviderStatus(provider="tradier", mode="live", status="healthy", delay_seconds=0,
@@ -68,6 +83,7 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
         return [candidate("PASS") for _ in symbols]
 
     monkeypatch.setattr(signal_engine, "rank_parlays", rank)
+    monkeypatch.setattr(signal_engine, "rank_structured_intraday", lambda *args, **kwargs: [])
     monkeypatch.setattr(signal_engine, "track_candidates", lambda *args, **kwargs: None)
     with Session(engine) as db:
         first = signal_engine.run_signal_scan(db, Provider(), ["SPY"])

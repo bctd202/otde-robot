@@ -176,6 +176,10 @@ class ParlayCandidateOut(BaseModel):
     last_verified_at: datetime | None = None
     valid_until: datetime | None = None
     validity_reason: str | None = None
+    strategy_mode: Literal["ONE_MIN_0DTE", "STRUCTURED_INTRADAY"] = "ONE_MIN_0DTE"
+    strategy_version: str = "parlay-v1"
+    timeframe_context: str = "1M"
+    target_dte: str = "0DTE"
 
 class ScannerHealth(BaseModel):
     candidate_count: int
@@ -186,6 +190,7 @@ class ScannerHealth(BaseModel):
     evaluation_candle_at: datetime | None = None
     next_evaluation_at: datetime | None = None
     last_error: str | None = None
+    api_budget: dict = Field(default_factory=dict)
 
 
 class ParlayResponse(BaseModel):

@@ -45,6 +45,15 @@ def test_authenticity_is_separate_from_quote_and_liquidity_eligibility():
         assert result.authentic and not result.actionable and result.reason == reason
 
 
+def test_strategy_specific_dte_window_preserves_authenticity_and_controls_actionability():
+    future = contract(option_symbol="IWN260812C00250000", expiration=date(2026, 8, 12))
+    same_day_policy = validate_contract(future, "IWN", now=NOW)
+    structured_policy = validate_contract(future, "IWN", now=NOW, min_dte=5, max_dte=14)
+    assert same_day_policy.authentic and not same_day_policy.actionable
+    assert "same-day" in same_day_policy.reason
+    assert structured_policy.authentic and structured_policy.actionable
+
+
 class IwnTradierMissingExpiration:
     def __init__(self):
         self.now = NOW

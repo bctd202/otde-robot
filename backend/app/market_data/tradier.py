@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from collections import deque
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -32,18 +33,32 @@ class TradierMarketDataProvider:
         self._trading_date = trading_date
         self._error = "Tradier API token is not configured." if not token else None
         self._latest = datetime.now(NY)
+        self._request_times: deque[datetime] = deque()
+        self._rate_allowed: int | None = None
+        self._rate_used: int | None = None
+        self._rate_available: int | None = None
+        self._rate_expires_at: datetime | None = None
         mode = get_settings().tradier_data_mode.strip().lower()
         self._data_mode = mode if mode in {"live", "delayed", "unknown"} else "unknown"
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
         if not self.token:
             return None
+        now = datetime.now(timezone.utc)
+        while self._request_times and now - self._request_times[0] >= timedelta(minutes=1):
+            self._request_times.popleft()
+        budget = max(1, min(get_settings().tradier_request_budget_per_minute, 120))
+        if len(self._request_times) >= budget:
+            self._error = f"Tradier request safety budget reached ({budget}/minute); waiting for capacity."
+            return None
+        self._request_times.append(now)
         try:
             response = self.client.get(
                 f"{self.base_url}{path}", params=params,
                 headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
             )
             response.raise_for_status()
+            self._capture_rate_headers(response)
             data = response.json()
             if not isinstance(data, dict):
                 raise ValueError("response is not an object")
@@ -53,9 +68,54 @@ class TradierMarketDataProvider:
             self._error = f"Tradier data unavailable: {type(exc).__name__}."
             return None
 
+    def _capture_rate_headers(self, response: httpx.Response) -> None:
+        def integer(name: str) -> int | None:
+            value = response.headers.get(name)
+            try:
+                return int(value) if value is not None else None
+            except ValueError:
+                return None
+
+        self._rate_allowed = integer("X-Ratelimit-Allowed") or self._rate_allowed
+        self._rate_used = integer("X-Ratelimit-Used") or self._rate_used
+        self._rate_available = integer("X-Ratelimit-Available")
+        expiry = integer("X-Ratelimit-Expiry")
+        if expiry is not None:
+            try:
+                self._rate_expires_at = datetime.fromtimestamp(expiry, timezone.utc)
+            except (OSError, ValueError):
+                self._rate_expires_at = None
+
+    def budget_status(self) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        while self._request_times and now - self._request_times[0] >= timedelta(minutes=1):
+            self._request_times.popleft()
+        safety_limit = max(1, min(get_settings().tradier_request_budget_per_minute, 120))
+        local_used = len(self._request_times)
+        local_remaining = max(0, safety_limit - local_used)
+        remaining = min(local_remaining, self._rate_available) if self._rate_available is not None else local_remaining
+        return {
+            "safety_limit": safety_limit,
+            "used_last_minute": local_used,
+            "remaining": max(0, remaining),
+            "provider_allowed": self._rate_allowed,
+            "provider_used": self._rate_used,
+            "provider_available": self._rate_available,
+            "resets_at": self._rate_expires_at,
+            "paused": remaining <= 0,
+        }
+
     def status(self) -> ProviderStatus:
+        if not self.token:
+            health = "unavailable"
+        elif self._error and "request safety budget" in self._error:
+            health = "rate_limited"
+        elif self._error:
+            health = "degraded"
+        else:
+            health = "healthy"
         return ProviderStatus(
-            provider="tradier", mode=self._data_mode, status="unavailable" if self._error else "healthy",
+            provider="tradier", mode=self._data_mode, status=health,
             delay_seconds=0 if self._data_mode == "live" else -1, latest_timestamp=self._latest,
             message=self._error or f"Tradier market data mode: {self._data_mode}; paper research only.",
         )
@@ -121,11 +181,11 @@ class TradierMarketDataProvider:
                 continue
         return result
 
-    def option_chain(self, symbol: str) -> list[OptionContractOut]:
-        today = self._trading_date or datetime.now(NY).date()
-        if today not in self.expirations(symbol):
+    def option_chain(self, symbol: str, expiration: date | None = None) -> list[OptionContractOut]:
+        selected = expiration or self._trading_date or datetime.now(NY).date()
+        if expiration is None and selected not in self.expirations(symbol):
             return []
-        data = self._get("/markets/options/chains", {"symbol": symbol, "expiration": today.isoformat(), "greeks": "true"})
+        data = self._get("/markets/options/chains", {"symbol": symbol, "expiration": selected.isoformat(), "greeks": "true"})
         result = []
         for row in _rows(data or {}, "options", "option"):
             greeks = row.get("greeks") or {}

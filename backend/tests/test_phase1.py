@@ -6,6 +6,7 @@ from app.db.seed import seed
 from app.db.session import Base, engine
 from app.main import app
 from app.market_data.mock import MockMarketDataProvider
+from app.market_data.factory import get_provider
 from app.services.indicators import opening_range, spread_pct, swings, vwap
 from app.services.market_calendar import is_market_day, market_session
 from app.services.setup_engine import lottery_candidates, structured_setups
@@ -48,6 +49,7 @@ def test_dashboard_has_all_symbols_and_candidates():
 def test_no_trade_scenario():
     settings=get_settings(); original=settings.mock_scenario
     settings.mock_scenario='no_trade'
+    get_provider().clear()
     try:
         data=client.get('/api/dashboard').json()
         assert data['no_trade'] is True
@@ -55,6 +57,7 @@ def test_no_trade_scenario():
         assert data['lottery_setups'] == []
     finally:
         settings.mock_scenario=original
+        get_provider().clear()
 
 def test_seeded_journal_and_analytics():
     Base.metadata.create_all(bind=engine)

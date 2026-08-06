@@ -8,6 +8,8 @@ class PaperPositionCreate(BaseModel):
     symbol: str
     option_symbol: str
     direction: Literal["call", "put"]
+    strategy_mode: Literal["ONE_MIN_0DTE", "STRUCTURED_INTRADAY"] = "ONE_MIN_0DTE"
+    strategy_version: str = "parlay-v1"
     expiration: date
     strike: float
     quantity: Literal[1] = 1
@@ -38,6 +40,8 @@ class PaperPositionOut(BaseModel):
     symbol: str
     option_symbol: str
     direction: Literal["call", "put"]
+    strategy_mode: Literal["ONE_MIN_0DTE", "STRUCTURED_INTRADAY"]
+    strategy_version: str
     expiration: date
     strike: float
     quantity: int
