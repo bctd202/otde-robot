@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { PaperPosition, ParlayCandidate, ParlayResponse, StrategyView } from '../types';
+import { parseApiTimestamp } from '../lib/dates';
 import { PaperPositions } from './PaperPositions';
 import { ParlayTicket } from './ParlayTicket';
 import { ProviderStatus } from './ProviderStatus';
@@ -12,7 +13,7 @@ export function ParlaySkeleton() {
 
 interface ParlayBoardProps { data:ParlayResponse;selectedStrategy?:StrategyView;updated:Date|null;refreshing:boolean;stale:boolean;onRetry:()=>void;positions?:PaperPosition[];positionsStale?:boolean;onPaperEnter?:(candidate:ParlayCandidate)=>void;onPaperExit?:(position:PaperPosition)=>void;enteringSymbol?:string|null }
 
-const lifecycleIsCurrent=(item:ParlayCandidate)=>item.lifecycle_status==null||(['BUY','WATCH'].includes(item.lifecycle_status)&&item.lifecycle_status===item.signal_status&&Boolean(item.valid_until)&&Date.parse(item.valid_until!)>Date.now());
+const lifecycleIsCurrent=(item:ParlayCandidate)=>item.lifecycle_status==null||(['BUY','WATCH'].includes(item.lifecycle_status)&&item.lifecycle_status===item.signal_status&&(parseApiTimestamp(item.valid_until)?.getTime()??0)>Date.now());
 const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&lifecycleIsCurrent(item)&&item.actionable===true&&item.contract?.actionable===true&&item.contract.verification_status==='verified'&&item.contract.provider==='tradier'&&item.contract.data_mode==='live'&&Boolean(item.contract.normalized_symbol)&&Boolean(item.contract.bid_timestamp)&&Boolean(item.contract.ask_timestamp)&&Boolean(item.contract.timestamp);
 
 export function ParlayBoard({data,selectedStrategy='ALL',updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol}:ParlayBoardProps) {
