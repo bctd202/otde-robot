@@ -166,7 +166,7 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
     return SignalAlertsResponse(alerts=alerts, latest_id=max((row.id for row in rows), default=after_id))
 
 
-def _ledger(row: SignalPerformance) -> dict:
+def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None = None) -> dict:
     payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
     for key in ("triggered_at", "exit_at", "created_at", "updated_at", "last_evaluated_at"):
         value = payload.get(key)
@@ -177,6 +177,18 @@ def _ledger(row: SignalPerformance) -> dict:
     if payload.get("result_return_pct") is None and row.exit_price is not None and row.entry_price:
         signed = row.exit_price - row.entry_price if row.direction == "CALL" else row.entry_price - row.exit_price
         payload["result_return_pct"] = round(signed / row.entry_price * 100, 4)
+    if (paper_position is not None and paper_position.lifecycle_status == "CLOSED" and
+            paper_position.exit_option_price is not None and paper_position.entry_option_price):
+        payload["result_return_pct"] = round(
+            (paper_position.exit_option_price - paper_position.entry_option_price)
+            / paper_position.entry_option_price * 100, 4)
+        payload["return_basis"] = "PAPER_OPTION"
+        payload["paper_entry_option_price"] = paper_position.entry_option_price
+        payload["paper_exit_option_price"] = paper_position.exit_option_price
+    else:
+        payload["return_basis"] = "UNDERLYING"
+        payload["paper_entry_option_price"] = None
+        payload["paper_exit_option_price"] = None
     payload["initial_risk_points"] = round(risk, 4)
     payload["initial_risk_pct"] = round(risk_pct, 4)
     payload["mfe_return_pct"] = round(row.mfe_r * risk_pct, 4)
@@ -203,8 +215,21 @@ def performance(source: str | None = None, ticker: str | None = None, direction:
         SignalPerformance.score <= max_score if max_score is not None else None):
         if condition is not None: query = query.where(condition)
     rows = list(db.scalars(query).all())
-    return {"metrics": metrics(rows), "signals": [_ledger(row) for row in rows], "timezone": "America/New_York",
-        "underlying_only": True, "paper_only": True}
+    paper_ids = {row.paper_position_id for row in rows if row.paper_position_id is not None}
+    paper_positions = ({position.id: position for position in db.scalars(
+        select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
+        if paper_ids else {})
+    return {"metrics": metrics(rows),
+        "signals": [
+            _ledger(
+                row,
+                paper_positions.get(row.paper_position_id)
+                if row.paper_position_id is not None
+                else None,
+            )
+            for row in rows
+        ],
+        "timezone": "America/New_York", "underlying_only": False, "paper_only": True}
 
 
 @router.get("/backtests")

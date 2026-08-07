@@ -154,6 +154,7 @@ def update_outcome(row: SignalPerformance, high: float, low: float, close: float
 def link_paper_position(db: Session, position: ParlayPaperPosition) -> None:
     row = db.scalar(select(SignalPerformance).where(SignalPerformance.source == "LIVE",
         SignalPerformance.ticker == position.symbol,
+        SignalPerformance.direction == position.direction.upper(),
         SignalPerformance.strategy_mode == position.strategy_mode,
         SignalPerformance.exit_reason == "OPEN")
         .order_by(SignalPerformance.triggered_at.desc()))
