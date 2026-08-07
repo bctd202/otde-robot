@@ -220,7 +220,15 @@ def performance(source: str | None = None, ticker: str | None = None, direction:
         select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
         if paper_ids else {})
     return {"metrics": metrics(rows),
-        "signals": [_ledger(row, paper_positions.get(row.paper_position_id)) for row in rows],
+        "signals": [
+            _ledger(
+                row,
+                paper_positions.get(row.paper_position_id)
+                if row.paper_position_id is not None
+                else None,
+            )
+            for row in rows
+        ],
         "timezone": "America/New_York", "underlying_only": False, "paper_only": True}
 
 
