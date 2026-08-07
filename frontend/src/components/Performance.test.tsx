@@ -25,3 +25,12 @@ test('LIVE metrics ignore migrated UNKNOWN audit rows',async()=>{
   fireEvent.click(screen.getByRole('button',{name:'AUDIT'}));
   expect(screen.getByText('IWN')).toBeInTheDocument();
 });
+
+test('shows paper option return and timezone-less UTC trigger in Eastern time',async()=>{
+  const data:PerformanceResponse={timezone:'America/New_York',underlying_only:false,paper_only:true,metrics:{total_triggered_signals:1,open_signals:0,targets_hit:0,stops_hit:0,timed_exits:1,invalidated_missed:0,win_rate:100,average_r:.1,cumulative_r:.1,profit_factor:null,maximum_drawdown_r:0,average_duration:25,average_mfe:.2,average_mae:.1},signals:[signal({triggered_at:'2026-08-06T13:39:00',exit_reason:'TIMED_EXIT',result_return_pct:165.2174,user_entered:true,return_basis:'PAPER_OPTION',paper_entry_option_price:.23,paper_exit_option_price:.61})]};
+  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}}));
+  render(<Performance/>);
+  await waitFor(()=>expect(screen.getByText(/165\.22%/)).toBeInTheDocument());
+  expect(screen.getByText(/Aug 6, 2026, 9:39 AM EDT/)).toBeInTheDocument();
+  expect(screen.getByText(/PAPER · OPTION/)).toBeInTheDocument();
+});
