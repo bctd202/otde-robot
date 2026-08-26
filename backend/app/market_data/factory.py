@@ -13,5 +13,6 @@ def get_provider():
         return CachedMarketDataProvider(MockMarketDataProvider())
     if settings.market_data_provider == "tradier":
         return CachedMarketDataProvider(TradierMarketDataProvider(
-            settings.tradier_api_token, settings.tradier_base_url))
+            settings.tradier_api_token, settings.tradier_base_url,
+            data_mode=settings.tradier_data_mode))
     return CachedMarketDataProvider(LiveProviderPlaceholder())

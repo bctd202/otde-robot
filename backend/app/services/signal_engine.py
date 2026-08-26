@@ -262,11 +262,19 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
             provider_status=final_status.model_dump(mode="json"), universe=universe,
             candidates=[candidate.model_dump(mode="json") for candidate in candidates])
         db.add(scan)
-        runtime.status = "healthy"
+        runtime.status = "healthy" if final_status.status == "healthy" else "degraded"
         runtime.last_scan_completed_at = completed
         runtime.last_evaluation_candle_at = evaluation_at
         runtime.next_evaluation_at = evaluation_at + timedelta(minutes=2)
         runtime.heartbeat_at = completed
+        configuration_only = (
+            final_status.provider == "tradier" and final_status.mode == "unknown"
+            and final_status.message.startswith("Tradier data mode is unknown.")
+        )
+        runtime.last_error = (
+            None if final_status.status == "healthy" or configuration_only
+            else final_status.message[:500]
+        )
         db.commit()
         db.refresh(scan)
         return scan

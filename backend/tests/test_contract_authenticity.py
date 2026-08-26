@@ -45,6 +45,15 @@ def test_authenticity_is_separate_from_quote_and_liquidity_eligibility():
         assert result.authentic and not result.actionable and result.reason == reason
 
 
+def test_unknown_and_delayed_data_modes_are_explicitly_non_actionable():
+    unknown = validate_contract(contract(data_mode="unknown"), "IWN", now=NOW)
+    delayed = validate_contract(contract(data_mode="delayed"), "IWN", now=NOW)
+    assert unknown.authentic and not unknown.actionable
+    assert "TRADIER_DATA_MODE" in unknown.reason and "not actionable" in unknown.reason
+    assert delayed.authentic and not delayed.actionable
+    assert delayed.reason == "Delayed Tradier data is research-only and not actionable"
+
+
 def test_strategy_specific_dte_window_preserves_authenticity_and_controls_actionability():
     future = contract(option_symbol="IWN260812C00250000", expiration=date(2026, 8, 12))
     same_day_policy = validate_contract(future, "IWN", now=NOW)

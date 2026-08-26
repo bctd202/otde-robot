@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     parlay_symbol_limit: int = 20
     parlay_flex_limit: int = 2
     parlay_background_scanner_enabled: bool = True
-    parlay_scan_poll_seconds: int = 15
+    parlay_scan_second: int = 5
+    parlay_scan_misfire_grace_seconds: int = 30
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -37,6 +37,20 @@ def _daily_watch_symbols(db: Session) -> list[str]:
     return list(db.scalars(select(DailyWatchSymbol.symbol).where(
         DailyWatchSymbol.trading_date == _trading_date()).order_by(DailyWatchSymbol.id)).all())
 
+
+def _runtime_duration_ms(runtime: ScannerRuntime | None) -> int | None:
+    if runtime is None or runtime.last_scan_started_at is None:
+        return None
+    started = runtime.last_scan_started_at
+    started = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+    completed = runtime.last_scan_completed_at
+    if completed is not None:
+        completed = completed if completed.tzinfo else completed.replace(tzinfo=timezone.utc)
+    heartbeat = runtime.heartbeat_at
+    heartbeat = heartbeat if heartbeat.tzinfo else heartbeat.replace(tzinfo=timezone.utc)
+    ended = completed if completed is not None and completed >= started else heartbeat
+    return max(0, round((ended - started).total_seconds() * 1000))
+
 @router.get("/daily-watch", response_model=DailyWatchResponse)
 def daily_watch(db: Session = Depends(get_db)):
     symbols = _daily_watch_symbols(db)
@@ -147,10 +161,15 @@ def parlays(db: Session = Depends(get_db)):
             unavailable_candidate_count=sum(candidate.signal_status == "UNAVAILABLE" for candidate in candidates),
             provider_status=status.status,
             engine_status=runtime.status if runtime else "starting",
+            heartbeat_at=runtime.heartbeat_at if runtime else None,
+            last_scan_started_at=runtime.last_scan_started_at if runtime else None,
             last_completed_scan_at=runtime.last_scan_completed_at if runtime else None,
+            last_successful_completion_at=runtime.last_scan_completed_at if runtime else None,
             evaluation_candle_at=runtime.last_evaluation_candle_at if runtime else None,
             next_evaluation_at=runtime.next_evaluation_at if runtime else None,
             last_error=runtime.last_error if runtime else None,
+            last_failure=runtime.last_error if runtime else None,
+            runtime_duration_ms=_runtime_duration_ms(runtime),
             api_budget=provider.budget_status() if hasattr(provider, "budget_status") else {},
         ),
     )
