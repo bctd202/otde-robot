@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, datetime, timezone
 import logging
 
 import httpx
 
 from app.core.config import get_settings
-from app.market_data.tradier import TradierMarketDataProvider
+from app.market_data.tradier import TradierMarketDataProvider, _latest_available_market_date
 
 
 def test_tradier_normalizes_quotes_candles_expirations_and_chain():
@@ -18,6 +18,7 @@ def test_tradier_normalizes_quotes_candles_expirations_and_chain():
                 "symbol": "SPY", "last": 550.25, "trade_date": 1_722_000_000_000,
             }}})
         if path.endswith("/timesales"):
+            assert request.url.params["start"] == f"{expiration_text} 09:30"
             return httpx.Response(200, json={"series": {"data": [{
                 "time": f"{expiration_text}T09:30:00", "open": 550, "high": 551,
                 "low": 549.5, "close": 550.5, "volume": 1000,
@@ -44,6 +45,19 @@ def test_tradier_normalizes_quotes_candles_expirations_and_chain():
     assert contract.right == "call"
     assert contract.delta == .4
     assert provider.status().status == "healthy"
+
+
+def test_latest_available_market_date_uses_new_york_session_calendar():
+    utc_rollover = datetime(2026, 8, 28, 2, 12, tzinfo=timezone.utc)
+    assert _latest_available_market_date(now=utc_rollover) == date(2026, 8, 27)
+
+    premarket = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
+    assert _latest_available_market_date(now=premarket) == date(2026, 8, 28)
+
+    july_fourth_weekend = datetime(2026, 7, 4, 14, 0, tzinfo=timezone.utc)
+    assert _latest_available_market_date(now=july_fourth_weekend) == date(2026, 7, 2)
+
+    assert _latest_available_market_date(date(2026, 7, 3)) == date(2026, 7, 2)
 
 
 def test_tradier_fails_closed_without_token_or_on_http_error():
