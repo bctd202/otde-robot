@@ -39,6 +39,13 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
         return ContractDecision(contract.data_mode == "demo", False, "Only Tradier contracts can be actionable")
     if contract.data_mode == "demo":
         return ContractDecision(True, False, "Demo contracts are never actionable")
+    if contract.data_mode == "unknown":
+        return ContractDecision(
+            True, False,
+            "TRADIER_DATA_MODE must be explicitly set to live or delayed; unknown data is not actionable",
+        )
+    if contract.data_mode == "delayed":
+        return ContractDecision(True, False, "Delayed Tradier data is research-only and not actionable")
     if contract.data_mode not in ACCEPTED_ACTIONABLE_DATA_MODES:
         return ContractDecision(True, False, "Provider data mode is not explicitly accepted for trading")
     now = now or datetime.now(timezone.utc)

@@ -181,6 +181,12 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
         "engine_status": "healthy",
     }
     assert {key: body["scanner_health"][key] for key in expected_health} == expected_health
+    health = body["scanner_health"]
+    assert health["heartbeat_at"] is not None
+    assert health["last_scan_started_at"] is not None
+    assert health["last_successful_completion_at"] == health["last_completed_scan_at"]
+    assert isinstance(health["runtime_duration_ms"], int)
+    assert health["last_failure"] is None
 
 
 def test_live_and_replay_share_identical_completed_candle_evaluation():

@@ -1,5 +1,6 @@
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
+import logging
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,7 @@ from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
 
 NY = ZoneInfo("America/New_York")
+logger = logging.getLogger(__name__)
 
 
 def _rows(payload: dict[str, Any], *path: str) -> list[dict[str, Any]]:
@@ -26,7 +28,7 @@ class TradierMarketDataProvider:
     """Read-only Tradier adapter. Every upstream failure returns no fabricated data."""
 
     def __init__(self, token: str | None, base_url: str, client: httpx.Client | None = None,
-                 trading_date: date | None = None):
+                 trading_date: date | None = None, data_mode: str | None = None):
         self.token = token
         self.base_url = base_url.rstrip("/")
         self.client = client or httpx.Client(timeout=10.0)
@@ -38,8 +40,14 @@ class TradierMarketDataProvider:
         self._rate_used: int | None = None
         self._rate_available: int | None = None
         self._rate_expires_at: datetime | None = None
-        mode = get_settings().tradier_data_mode.strip().lower()
+        self._last_http_status: int | None = None
+        mode = (data_mode if data_mode is not None else get_settings().tradier_data_mode).strip().lower()
         self._data_mode = mode if mode in {"live", "delayed", "unknown"} else "unknown"
+        if token and self._data_mode == "unknown":
+            logger.warning(
+                "Tradier data mode is unknown; set TRADIER_DATA_MODE explicitly to live or delayed. "
+                "Candidates remain non-actionable."
+            )
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
         if not self.token:
@@ -57,15 +65,37 @@ class TradierMarketDataProvider:
                 f"{self.base_url}{path}", params=params,
                 headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
             )
-            response.raise_for_status()
             self._capture_rate_headers(response)
+            response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):
                 raise ValueError("response is not an object")
+            expected_root = {
+                "/markets/quotes": "quotes",
+                "/markets/timesales": "series",
+                "/markets/options/expirations": "expirations",
+                "/markets/options/chains": "options",
+            }.get(path)
+            if expected_root is not None and not isinstance(data.get(expected_root), dict):
+                raise ValueError(f"missing {expected_root} response object")
             self._error = None
+            self._last_http_status = None
             return data
-        except (httpx.HTTPError, ValueError) as exc:
+        except httpx.HTTPStatusError as exc:
+            self._capture_rate_headers(exc.response)
+            self._last_http_status = exc.response.status_code
+            self._error = f"Tradier data unavailable: HTTP {exc.response.status_code}."
+            logger.warning("Tradier request failed endpoint=%s status=%s", path, exc.response.status_code)
+            return None
+        except httpx.RequestError as exc:
+            self._last_http_status = None
             self._error = f"Tradier data unavailable: {type(exc).__name__}."
+            logger.warning("Tradier request failed endpoint=%s error=%s", path, type(exc).__name__)
+            return None
+        except (TypeError, ValueError):
+            self._last_http_status = None
+            self._error = "Tradier returned an invalid response."
+            logger.warning("Tradier returned an invalid response endpoint=%s", path)
             return None
 
     def _capture_rate_headers(self, response: httpx.Response) -> None:
@@ -108,16 +138,27 @@ class TradierMarketDataProvider:
     def status(self) -> ProviderStatus:
         if not self.token:
             health = "unavailable"
-        elif self._error and "request safety budget" in self._error:
+        elif self._last_http_status == 429 or (self._error and "request safety budget" in self._error):
             health = "rate_limited"
         elif self._error:
             health = "degraded"
+        elif self._data_mode == "unknown":
+            health = "degraded"
         else:
             health = "healthy"
+        if self._error:
+            message = self._error
+        elif self._data_mode == "unknown":
+            message = (
+                "Tradier data mode is unknown. Set TRADIER_DATA_MODE explicitly to live or delayed; "
+                "candidates cannot be actionable until configured."
+            )
+        else:
+            message = f"Tradier market data mode: {self._data_mode}; paper research only."
         return ProviderStatus(
             provider="tradier", mode=self._data_mode, status=health,
-            delay_seconds=0 if self._data_mode == "live" else -1, latest_timestamp=self._latest,
-            message=self._error or f"Tradier market data mode: {self._data_mode}; paper research only.",
+            delay_seconds=0 if self._data_mode == "live" else 900 if self._data_mode == "delayed" else -1,
+            latest_timestamp=self._latest, message=message,
         )
 
     def quotes(self, symbols: list[str]) -> list[Quote]:

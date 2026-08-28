@@ -1,6 +1,6 @@
 # Known Limitations
 
-- Mock data remains the safe default; live Tradier use requires an explicitly configured read-only token and verified data mode.
+- Mock data remains the safe default; Tradier use requires an explicitly configured read-only token and `TRADIER_DATA_MODE=live` or `delayed` selected from the account's actual entitlement. `unknown` is deliberately non-actionable.
 - Browser notifications require an open page. The server still scans and stores history while the page is closed, but email/SMS/Slack delivery is not configured.
 - Analytics does not label any setup statistically promising until enough real journal samples exist.
 - Option-return estimates in Phase 1 are simple thresholds, not full Black-Scholes scenario grids.

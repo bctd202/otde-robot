@@ -186,13 +186,19 @@ class ScannerHealth(BaseModel):
     unavailable_candidate_count: int
     provider_status: str
     engine_status: str = "unknown"
+    heartbeat_at: datetime | None = None
+    last_scan_started_at: datetime | None = None
     last_completed_scan_at: datetime | None = None
+    last_successful_completion_at: datetime | None = None
     evaluation_candle_at: datetime | None = None
     next_evaluation_at: datetime | None = None
     last_error: str | None = None
+    last_failure: str | None = None
+    runtime_duration_ms: int | None = None
     api_budget: dict = Field(default_factory=dict)
 
-    @field_validator("last_completed_scan_at", "evaluation_candle_at", "next_evaluation_at")
+    @field_validator("heartbeat_at", "last_scan_started_at", "last_completed_scan_at",
+                     "last_successful_completion_at", "evaluation_candle_at", "next_evaluation_at")
     @classmethod
     def restore_sqlite_utc(cls, value: datetime | None) -> datetime | None:
         """SQLite drops offsets from UTC DateTime columns; restore the stored timezone at the API edge."""

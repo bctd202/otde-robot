@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.db.models import SignalAlert, SignalLifecycle
+from app.db.models import ScannerRuntime, SignalAlert, SignalLifecycle
 from app.db.session import Base
 from app.schemas.market import ParlayCandidateOut, ProviderStatus
 from app.services import signal_engine
@@ -91,3 +91,22 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
         assert first is not None and second is not None and first.id == second.id
         assert calls == 1
         assert signal_engine.cached_candidates(second)[0].symbol == "SPY"
+
+
+def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    local = lambda: Session(engine)  # noqa: E731
+    monkeypatch.setattr(signal_engine, "SessionLocal", local)
+    monkeypatch.setattr(signal_engine, "market_session", lambda _now: "closed")
+    monkeypatch.setattr(signal_engine, "run_signal_scan",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")))
+
+    signal_engine.background_scan_once()
+
+    with Session(engine) as db:
+        runtime = db.get(ScannerRuntime, signal_engine.ENGINE_KEY)
+        assert runtime is not None
+        assert runtime.status == "idle_market_closed"
+        assert runtime.heartbeat_at is not None
+        assert runtime.last_error is None
