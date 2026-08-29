@@ -8,9 +8,26 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
+from app.services.market_calendar import is_market_day
 
 NY = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
+
+
+def _latest_available_market_date(
+    trading_date: date | None = None, now: datetime | None = None,
+) -> date:
+    """Return the latest regular session whose 09:30 open is not in the future."""
+    if trading_date is not None:
+        candidate = trading_date
+    else:
+        local_now = (now or datetime.now(NY)).astimezone(NY)
+        candidate = local_now.date()
+        if (local_now.hour, local_now.minute) < (9, 30):
+            candidate -= timedelta(days=1)
+    while not is_market_day(candidate):
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 def _rows(payload: dict[str, Any], *path: str) -> list[dict[str, Any]]:
@@ -176,9 +193,10 @@ class TradierMarketDataProvider:
     def candles(self, symbol: str, timeframe: str = "1m") -> list[CandleOut]:
         if timeframe not in {"1m", "5m"}:
             return []
+        session_date = _latest_available_market_date(self._trading_date)
         data = self._get("/markets/timesales", {
             "symbol": symbol, "interval": "1min" if timeframe == "1m" else "5min",
-            "start": f"{date.today():%Y-%m-%d} 09:30", "session_filter": "open",
+            "start": f"{session_date:%Y-%m-%d} 09:30", "session_filter": "open",
         })
         result = []
         for row in _rows(data or {}, "series", "data"):
