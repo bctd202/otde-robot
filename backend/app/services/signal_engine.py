@@ -353,14 +353,15 @@ def expire_stale_lifecycles(db: Session, now: datetime) -> None:
                payload={"direction": row.direction, "status": "EXPIRED"})
 
 
-def background_scan_once() -> None:
+def background_scan_once(*, now: datetime | None = None) -> None:
     """Scheduler entrypoint. The server, not an open browser, owns scanning."""
     global _BACKGROUND_PROVIDER
+    scan_now = now or datetime.now(timezone.utc)
     with SessionLocal() as db:
         runtime = _runtime(db)
-        runtime.heartbeat_at = datetime.now(timezone.utc)
-        if market_session(datetime.now(timezone.utc)) != "regular":
-            expire_stale_lifecycles(db, datetime.now(timezone.utc))
+        runtime.heartbeat_at = scan_now
+        if market_session(scan_now) != "regular":
+            expire_stale_lifecycles(db, scan_now)
             runtime.status = "idle_market_closed"
             runtime.last_error = None
             db.commit()
@@ -368,18 +369,14 @@ def background_scan_once() -> None:
         if _BACKGROUND_PROVIDER is None:
             _BACKGROUND_PROVIDER = get_provider()
         provider = _BACKGROUND_PROVIDER
-        status = provider.status()
-        if market_session(status.latest_timestamp) != "regular":
-            runtime.status = "idle_market_closed"
-            runtime.last_error = None
-            db.commit()
-            return
-        trading_day = status.latest_timestamp.astimezone(NY).date()
+        # Provider timestamps can remain at an after-hours startup value until the first request.
+        # Use the scheduler clock for session ownership so the next market day cannot stay idle.
+        trading_day = scan_now.astimezone(NY).date()
         flex = list(db.scalars(select(DailyWatchSymbol.symbol).where(
             DailyWatchSymbol.trading_date == trading_day).order_by(DailyWatchSymbol.id)).all())
         universe = list(dict.fromkeys(get_settings().parlay_symbol_list + flex))
         try:
             run_signal_scan(db, provider, universe,
-                evaluation_at=latest_completed_candle_at(datetime.now(timezone.utc)))
+                evaluation_at=latest_completed_candle_at(scan_now))
         except Exception:
             logger.exception("Background Parlay signal scan failed")
