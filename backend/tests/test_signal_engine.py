@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ScannerRuntime, SignalAlert, SignalLifecycle
+from app.db.models import DailyWatchSymbol, ScannerRuntime, SignalAlert, SignalLifecycle
 from app.db.session import Base
 from app.schemas.market import ParlayCandidateOut, ProviderStatus
 from app.services import signal_engine
@@ -110,3 +110,42 @@ def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch)
         assert runtime.status == "idle_market_closed"
         assert runtime.heartbeat_at is not None
         assert runtime.last_error is None
+
+
+def test_background_scanner_uses_current_session_after_after_hours_startup(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    local = lambda: Session(engine)  # noqa: E731
+    market_now = datetime(2026, 8, 31, 14, 1, 5, tzinfo=timezone.utc)
+    stale_after_hours = datetime(2026, 8, 28, 22, 0, tzinfo=timezone.utc)
+
+    class StaleProvider:
+        def status(self):
+            return ProviderStatus(provider="tradier", mode="live", status="healthy",
+                delay_seconds=0, latest_timestamp=stale_after_hours, message="test")
+
+    provider = StaleProvider()
+    calls = []
+    with Session(engine) as db:
+        db.add_all([
+            DailyWatchSymbol(trading_date=market_now.date(), symbol="NEWX", created_at=market_now),
+            DailyWatchSymbol(trading_date=stale_after_hours.date(), symbol="OLDX",
+                             created_at=stale_after_hours),
+        ])
+        db.commit()
+
+    def scan(_db, used_provider, universe, *, evaluation_at):
+        calls.append((used_provider, universe, evaluation_at))
+
+    monkeypatch.setattr(signal_engine, "SessionLocal", local)
+    monkeypatch.setattr(signal_engine, "_BACKGROUND_PROVIDER", provider)
+    monkeypatch.setattr(signal_engine, "run_signal_scan", scan)
+
+    signal_engine.background_scan_once(now=market_now)
+
+    assert len(calls) == 1
+    used_provider, universe, evaluation_at = calls[0]
+    assert used_provider is provider
+    assert "NEWX" in universe
+    assert "OLDX" not in universe
+    assert evaluation_at == datetime(2026, 8, 31, 14, 0, tzinfo=timezone.utc)
