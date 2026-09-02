@@ -13,7 +13,10 @@ from app.schemas.market import (DashboardOut, DailyWatchCreate,
                                 DailyWatchResponse, ParlayResponse,
                                 ScannerHealth, SignalAlertOut,
                                 SignalAlertsResponse)
-from app.schemas.lottery_tracker import LotteryTrackerDetailOut, LotteryTrackerListOut
+from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
+                                         LotteryTrackerListOut,
+                                         LotteryTrackerPointOut,
+                                         LotteryTrackerSummaryOut)
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
@@ -197,7 +200,10 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
     ).order_by(LotteryTracker.first_seen_at.desc()).limit(bounded_limit)).all())
     return LotteryTrackerListOut(
         trading_date=selected_date,
-        trackers=[serialize_tracker(row, tracker_points(db, row.id)) for row in rows],
+        trackers=[
+            LotteryTrackerSummaryOut.model_validate(serialize_tracker(row, tracker_points(db, row.id)))
+            for row in rows
+        ],
     )
 
 
@@ -208,8 +214,8 @@ def lottery_tracker_detail(tracker_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Lottery tracker not found")
     points = tracker_points(db, row.id)
     return LotteryTrackerDetailOut(
-        tracker=serialize_tracker(row, points),
-        points=[serialize_point(point) for point in points],
+        tracker=LotteryTrackerSummaryOut.model_validate(serialize_tracker(row, points)),
+        points=[LotteryTrackerPointOut.model_validate(serialize_point(point)) for point in points],
     )
 
 
