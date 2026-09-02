@@ -154,6 +154,77 @@ class SignalScan(Base):
     candidates: Mapped[list] = mapped_column(JSON)
 
 
+class LotteryTracker(Base):
+    __tablename__ = "lottery_trackers"
+    __table_args__ = (
+        UniqueConstraint("trading_date", "option_symbol", name="uq_lottery_tracker_date_contract"),
+        Index("ix_lottery_trackers_date_status", "trading_date", "status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    symbol: Mapped[str] = mapped_column(String(12), index=True)
+    option_symbol: Mapped[str] = mapped_column(String(64), index=True)
+    normalized_option_symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expiration: Mapped[date] = mapped_column(Date)
+    right: Mapped[str] = mapped_column(String(8))
+    strike: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_qualified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_quote_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_ask: Mapped[float] = mapped_column(Float)
+    entry_bid: Mapped[float] = mapped_column(Float)
+    entry_underlying_price: Mapped[float] = mapped_column(Float)
+    setup_score: Mapped[float] = mapped_column(Float)
+    initial_snapshot: Mapped[dict] = mapped_column(JSON)
+    provider: Mapped[str] = mapped_column(String(32))
+    data_mode: Mapped[str] = mapped_column(String(32))
+    verification_status: Mapped[str] = mapped_column(String(32))
+    verification_reason: Mapped[str] = mapped_column(String(255))
+    actionable: Mapped[bool] = mapped_column(Boolean, default=False)
+    latest_bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latest_ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latest_midpoint: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latest_last: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latest_underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    peak_bid: Mapped[float] = mapped_column(Float, default=0)
+    peak_bid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hit_2x_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hit_5x_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hit_10x_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LotteryQuoteSnapshot(Base):
+    __tablename__ = "lottery_quote_snapshots"
+    __table_args__ = (
+        UniqueConstraint("tracker_id", "observed_at", name="uq_lottery_snapshot_tracker_observed"),
+        Index("ix_lottery_quote_tracker_observed", "tracker_id", "observed_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tracker_id: Mapped[str] = mapped_column(ForeignKey("lottery_trackers.id"), index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    quote_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ask_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bid: Mapped[float] = mapped_column(Float)
+    ask: Mapped[float] = mapped_column(Float)
+    midpoint: Mapped[float] = mapped_column(Float)
+    last: Mapped[float] = mapped_column(Float)
+    underlying_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_percent: Mapped[float] = mapped_column(Float)
+    volume: Mapped[int] = mapped_column(Integer)
+    open_interest: Mapped[int] = mapped_column(Integer)
+    delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gamma: Mapped[float | None] = mapped_column(Float, nullable=True)
+    theta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_qualified: Mapped[bool] = mapped_column(Boolean, default=False)
+    setup_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class SignalLifecycle(Base):
     __tablename__ = "signal_lifecycles"
     __table_args__ = (Index("ix_signal_lifecycle_active", "trading_date", "symbol", "status"),
