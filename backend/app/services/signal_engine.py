@@ -16,6 +16,7 @@ from app.db.session import SessionLocal
 from app.market_data.factory import get_provider
 from app.schemas.market import ParlayCandidateOut
 from app.services.market_calendar import market_session
+from app.services.lottery_tracker import close_lottery_trackers, track_lottery_scan
 from app.services.paper_positions import refresh_position
 from app.services.parlay import latest_completed_candle_at, rank_parlays
 from app.services.performance import track_candidates
@@ -245,6 +246,7 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         candidates = one_minute + structured
         apply_lifecycle(db, candidates, evaluation_at)
         track_candidates(db, candidates, provider)
+        track_lottery_scan(db, provider, get_settings().symbol_list, evaluation_at)
         _position_alerts(db, provider)
         _performance_alerts(db)
         if hasattr(provider, "budget_status"):
@@ -362,6 +364,7 @@ def background_scan_once(*, now: datetime | None = None) -> None:
         runtime.heartbeat_at = scan_now
         if market_session(scan_now) != "regular":
             expire_stale_lifecycles(db, scan_now)
+            close_lottery_trackers(db, scan_now)
             runtime.status = "idle_market_closed"
             runtime.last_error = None
             db.commit()

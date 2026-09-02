@@ -22,7 +22,7 @@ def alembic(db: Path, *args: str) -> str:
 def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0009_trading_modes" in alembic(db, "current")
+    assert "0010_lottery_tracker" in alembic(db, "current")
 
 
 def test_upgrade_from_0005_classifies_ambiguous_live_rows_unknown(tmp_path):

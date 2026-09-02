@@ -85,6 +85,7 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
     monkeypatch.setattr(signal_engine, "rank_parlays", rank)
     monkeypatch.setattr(signal_engine, "rank_structured_intraday", lambda *args, **kwargs: [])
     monkeypatch.setattr(signal_engine, "track_candidates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(signal_engine, "track_lottery_scan", lambda *args, **kwargs: [])
     with Session(engine) as db:
         first = signal_engine.run_signal_scan(db, Provider(), ["SPY"])
         second = signal_engine.run_signal_scan(db, Provider(), ["SPY"])

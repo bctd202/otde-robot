@@ -3,6 +3,27 @@ export interface Quote { symbol:string; price:number; timestamp:string }
 export interface Contract { option_symbol:string; bid:number; ask:number; volume:number; open_interest:number; delta:number|null; gamma:number|null; normalized_symbol?:string|null; provider?:string; data_mode?:string; verification_status?:string; verification_reason?:string; bid_timestamp?:string|null; ask_timestamp?:string|null; timestamp?:string; actionable?:boolean; expiration?:string; strike?:number; right?:string }
 export interface Setup { symbol:string; name:string; direction:string; grade:string; score:number; entry_trigger:number; invalidation:number; target1:number; target2:number; reward_risk:number; contract:Contract|null; confluences:string[] }
 export interface Lottery { symbol:string; option_symbol:string; normalized_symbol:string|null; provider:string; data_mode:string; verification_status:string; verification_reason:string; bid_timestamp:string; ask_timestamp:string; quote_timestamp:string; actionable:boolean; right:string; strike:number; expiration:string; bid:number; ask:number; midpoint:number; total_debit:number; spread_percent:number; delta:number|null; gamma:number|null; underlying_trigger:number; underlying_invalidation:number; break_even:number; estimated_2x_underlying:number; estimated_5x_underlying:number; estimated_10x_underlying:number; setup_score:number; explanation:string; worthless_reasons:string[] }
+export interface LotteryTrackerSummary {
+  id:string;trading_date:string;symbol:string;option_symbol:string;expiration:string;right:string;strike:number;
+  status:'ACTIVE'|'CLOSED';first_seen_at:string;last_qualified_at:string;last_quote_at:string|null;closed_at:string|null;
+  entry_ask:number;entry_bid:number;entry_cost:number;entry_underlying_price:number;setup_score:number;
+  latest_bid:number|null;latest_ask:number|null;latest_sellable_value:number|null;latest_multiple:number|null;
+  latest_return_percent:number|null;peak_bid:number;peak_sellable_value:number;peak_multiple:number;
+  peak_return_percent:number;peak_bid_at:string|null;hit_2x_at:string|null;hit_5x_at:string|null;hit_10x_at:string|null;
+  point_count:number;currently_qualified:boolean;provider:string;data_mode:string;verification_status:string;
+  verification_reason:string;actionable:boolean;
+}
+export interface LotteryTrackerPoint {
+  observed_at:string;quote_timestamp:string;bid_timestamp:string|null;ask_timestamp:string|null;
+  bid:number;ask:number;midpoint:number;last:number;bid_value:number;ask_value:number;
+  underlying_price:number|null;spread_percent:number;is_qualified:boolean;setup_score:number|null;
+}
+export interface LotteryTrackerList {
+  trading_date:string;trackers:LotteryTrackerSummary[];entry_basis:string;performance_basis:string;paper_only:boolean;
+}
+export interface LotteryTrackerDetail {
+  tracker:LotteryTrackerSummary;points:LotteryTrackerPoint[];entry_basis:string;performance_basis:string;paper_only:boolean;
+}
 export interface LiquidityLevels { previous_day_high:number; previous_day_low:number; opening_range_high:number; opening_range_low:number; session_high:number; session_low:number; vwap:number; equal_highs:number[]; equal_lows:number[] }
 export interface Dashboard { provider_status:ProviderStatus; quotes:Quote[]; market_session:string; volatility_proxy:number|null; levels:Record<string,LiquidityLevels>; directional_bias:Record<string,string>; news_warning:string; normal_setups:Setup[]; lottery_setups:Lottery[]; no_trade:boolean; paper_account:Record<string,string|number|boolean> }
 export interface JournalSignal { id:number; symbol:string; signal_type:string; status:string; generated_at:string; payload:Record<string,unknown> }

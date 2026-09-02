@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.db.models import (BacktestRun, DailyWatchSymbol, ParlayPaperPosition,
+from app.db.models import (BacktestRun, DailyWatchSymbol, LotteryTracker, ParlayPaperPosition,
                            ScannerRuntime, Signal, SignalAlert,
                            SignalPerformance, TradeOutcome)
 from app.db.session import get_db
@@ -13,9 +13,14 @@ from app.schemas.market import (DashboardOut, DailyWatchCreate,
                                 DailyWatchResponse, ParlayResponse,
                                 ScannerHealth, SignalAlertOut,
                                 SignalAlertsResponse)
+from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
+                                         LotteryTrackerListOut,
+                                         LotteryTrackerPointOut,
+                                         LotteryTrackerSummaryOut)
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session
+from app.services.lottery_tracker import serialize_point, serialize_tracker, tracker_points
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.paper_positions import (create_position, market_mark,
                                           cached_position,
@@ -183,6 +188,35 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
     alerts = [SignalAlertOut.model_validate({column.name: getattr(row, column.name)
         for column in row.__table__.columns}) for row in reversed(rows)]
     return SignalAlertsResponse(alerts=alerts, latest_id=max((row.id for row in rows), default=after_id))
+
+
+@router.get("/lottery-trackers", response_model=LotteryTrackerListOut)
+def lottery_trackers(trading_date: date | None = None, limit: int = 50,
+                     db: Session = Depends(get_db)):
+    selected_date = trading_date or _trading_date()
+    bounded_limit = max(1, min(limit, 200))
+    rows = list(db.scalars(select(LotteryTracker).where(
+        LotteryTracker.trading_date == selected_date,
+    ).order_by(LotteryTracker.first_seen_at.desc()).limit(bounded_limit)).all())
+    return LotteryTrackerListOut(
+        trading_date=selected_date,
+        trackers=[
+            LotteryTrackerSummaryOut.model_validate(serialize_tracker(row, tracker_points(db, row.id)))
+            for row in rows
+        ],
+    )
+
+
+@router.get("/lottery-trackers/{tracker_id}", response_model=LotteryTrackerDetailOut)
+def lottery_tracker_detail(tracker_id: str, db: Session = Depends(get_db)):
+    row = db.get(LotteryTracker, tracker_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Lottery tracker not found")
+    points = tracker_points(db, row.id)
+    return LotteryTrackerDetailOut(
+        tracker=LotteryTrackerSummaryOut.model_validate(serialize_tracker(row, points)),
+        points=[LotteryTrackerPointOut.model_validate(serialize_point(point)) for point in points],
+    )
 
 
 def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None = None) -> dict:
