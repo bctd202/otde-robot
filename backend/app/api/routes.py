@@ -27,7 +27,9 @@ from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
-from app.services.performance import link_paper_position, metrics
+from app.services.performance import (analytics_exclusion_reason,
+                                      deduplicate_positions,
+                                      link_paper_position, metrics)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         latest_scan, mark_lifecycle_entered,
                                         run_signal_scan)
@@ -246,33 +248,40 @@ def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None =
     payload["initial_risk_pct"] = round(risk_pct, 4)
     payload["mfe_return_pct"] = round(row.mfe_r * risk_pct, 4)
     payload["mae_return_pct"] = round(row.mae_r * risk_pct, 4)
+    exclusion = analytics_exclusion_reason(row)
+    payload["analytics_eligible"] = exclusion is None
+    payload["analytics_exclusion_reason"] = exclusion
     return payload
 
 
 @router.get("/performance")
-def performance(source: str | None = None, ticker: str | None = None, direction: str | None = None,
-                setup_type: str | None = None, strategy_mode: str | None = None,
-                exit_reason: str | None = None, user_entered: bool | None = None,
+def performance(source: str = "LIVE", ticker: str | None = None, direction: str | None = None,
+                setup_type: str | None = None, strategy_mode: str = "ONE_MIN_0DTE",
+                exit_reason: str | None = None, user_entered: bool = False,
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
-                max_score: float | None = None, db: Session = Depends(get_db)):
-    query = select(SignalPerformance).order_by(SignalPerformance.triggered_at.desc())
-    for condition in (SignalPerformance.source == source if source else None,
+                max_score: float | None = None, deduplicate: bool = True,
+                db: Session = Depends(get_db)):
+    query = select(SignalPerformance).order_by(
+        SignalPerformance.triggered_at.asc(), SignalPerformance.signal_id.asc())
+    for condition in (SignalPerformance.source == source if source != "ALL" else None,
         SignalPerformance.ticker == ticker.upper() if ticker else None,
         SignalPerformance.direction == direction.upper() if direction else None,
         SignalPerformance.setup_type == setup_type if setup_type else None,
-        SignalPerformance.strategy_mode == strategy_mode if strategy_mode else None,
+        SignalPerformance.strategy_mode == strategy_mode if strategy_mode != "ALL" else None,
         SignalPerformance.exit_reason == exit_reason if exit_reason else None,
-        SignalPerformance.user_entered == user_entered if user_entered is not None else None,
+        SignalPerformance.user_entered == user_entered,
+        SignalPerformance.backend_status == "BUY",
         SignalPerformance.trading_date >= start if start else None, SignalPerformance.trading_date <= end if end else None,
         SignalPerformance.score >= min_score if min_score is not None else None,
         SignalPerformance.score <= max_score if max_score is not None else None):
         if condition is not None: query = query.where(condition)
-    rows = list(db.scalars(query).all())
+    raw_rows = list(db.scalars(query).all())
+    rows = deduplicate_positions(raw_rows) if deduplicate else raw_rows
     paper_ids = {row.paper_position_id for row in rows if row.paper_position_id is not None}
     paper_positions = ({position.id: position for position in db.scalars(
         select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
         if paper_ids else {})
-    return {"metrics": metrics(rows),
+    return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "signals": [
             _ledger(
                 row,
@@ -280,9 +289,12 @@ def performance(source: str | None = None, ticker: str | None = None, direction:
                 if row.paper_position_id is not None
                 else None,
             )
-            for row in rows
+            for row in reversed(rows)
         ],
-        "timezone": "America/New_York", "underlying_only": False, "paper_only": True}
+        "scope": {"source": source, "strategy_mode": strategy_mode,
+                  "user_entered": user_entered, "deduplication": (
+                      "FIRST_BUY_PER_TICKER_DAY" if deduplicate else "NONE")},
+        "timezone": "America/New_York", "underlying_only": not user_entered, "paper_only": True}
 
 
 @router.get("/backtests")
