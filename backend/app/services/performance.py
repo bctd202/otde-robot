@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -24,9 +24,9 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def _completed_candles(provider, ticker: str, after: datetime) -> list:
+def _completed_candles(provider, ticker: str, after: datetime, latest: datetime | None = None) -> list:
     """Return unseen, completed production-timeframe candles in chronological order."""
-    latest = _utc(provider.status().latest_timestamp)
+    latest = latest or _utc(provider.status().latest_timestamp)
     completion_boundary = latest - timedelta(minutes=1)
     return sorted(
         (candle for candle in provider.candles(ticker, PRODUCTION_TIMEFRAME)
@@ -35,20 +35,79 @@ def _completed_candles(provider, ticker: str, after: datetime) -> list:
     )
 
 
+def _eastern_date(value: datetime) -> date:
+    return _utc(value).astimezone(NY).date()
+
+
+def analytics_exclusion_reason(row: SignalPerformance) -> str | None:
+    """Return why a ledger row cannot support performance claims.
+
+    This is deliberately derived rather than persisted so historical research rows
+    stay intact and auditable.
+    """
+    if abs(row.entry_price - row.stop_price) <= 1e-9:
+        return "ZERO_RISK"
+    if row.exit_reason == "DATA_GAP":
+        return "DATA_GAP"
+    if row.result_r is not None and row.exit_at is not None and _eastern_date(row.exit_at) != row.trading_date:
+        return "CROSS_SESSION_EXIT"
+    return None
+
+
+def deduplicate_positions(rows: list[SignalPerformance]) -> list[SignalPerformance]:
+    """Keep the first actual BUY for each ticker and trading day.
+
+    A quality-excluded first BUY still occupies that ticker-day. Selecting a later
+    winner in its place would introduce survivorship bias.
+    """
+    selected: dict[tuple[date, str], SignalPerformance] = {}
+    ordered = sorted(rows, key=lambda row: (_utc(row.triggered_at), row.signal_id))
+    for row in ordered:
+        if row.backend_status != "BUY":
+            continue
+        selected.setdefault((row.trading_date, row.ticker), row)
+    return list(selected.values())
+
+
+def _mark_data_gap(row: SignalPerformance, observed_at: datetime) -> None:
+    row.exit_reason = "DATA_GAP"
+    row.result_r = None
+    row.result_return_pct = None
+    row.exit_at = None
+    row.exit_price = None
+    row.duration_minutes = None
+    row.updated_at = observed_at
+    details = dict(row.condition_snapshot or {})
+    details["analytics_data_quality"] = {
+        "reason": "No completed same-session candle reached the 15:45 ET cutoff",
+        "observed_at": observed_at.isoformat(),
+    }
+    row.condition_snapshot = details
+
+
 def evaluate_open_signals(db: Session, provider) -> None:
-    """Continue durable live outcomes from the persisted candle cursor."""
+    """Continue durable outcomes without carrying an intraday trade overnight."""
     rows = db.scalars(select(SignalPerformance).where(
         SignalPerformance.source == "LIVE", SignalPerformance.exit_reason == "OPEN"
     )).all()
+    provider_status = provider.status()
+    latest = _utc(provider_status.latest_timestamp)
     for row in rows:
         cursor = row.last_evaluated_at or row.triggered_at
-        for candle in _completed_candles(provider, row.ticker, cursor):
+        for candle in _completed_candles(provider, row.ticker, cursor, latest):
             stamp = _utc(candle.timestamp)
+            candle_day = stamp.astimezone(NY).date()
+            if candle_day != row.trading_date:
+                continue
             cutoff = stamp.astimezone(NY).time() >= SESSION_CUTOFF
             update_outcome(row, candle.high, candle.low, candle.close, stamp, cutoff=cutoff)
             row.last_evaluated_at = stamp
             if row.exit_reason != "OPEN":
                 break
+        cutoff_ready = datetime.combine(row.trading_date, SESSION_CUTOFF, NY) + timedelta(minutes=1)
+        if (row.exit_reason == "OPEN" and provider_status.status == "healthy"
+                and latest >= cutoff_ready.astimezone(timezone.utc)):
+            _mark_data_gap(row, latest)
     db.commit()
 
 
@@ -85,6 +144,12 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                                         "setup_type": candidate.strategy_mode.lower()}))
             continue
         if existing is None and candidate.signal_status in {"BUY", "MISSED"}:
+            entry = (candidate.underlying_trigger if candidate.underlying_trigger is not None
+                     else candidate.underlying_price)
+            stop = candidate.underlying_invalidation
+            target = candidate.first_underlying_target
+            if entry is None or stop is None or target is None or abs(entry - stop) <= 1e-9:
+                continue
             contract = candidate.contract.model_dump(mode="json") if candidate.contract else None
             db.add(SignalPerformance(signal_id=str(uuid4()), source="LIVE", dedupe_key=dedupe_key,
                 ticker=candidate.symbol, direction=candidate.direction.upper(), backend_status=candidate.signal_status,
@@ -97,8 +162,7 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                                    "target_dte": candidate.target_dte},
                 condition_snapshot={"reasons": candidate.reasons, "rejections": candidate.rejection_reasons},
                 trading_date=day, first_wait_at=waiting.first_seen_at if waiting else None,
-                triggered_at=stamp, entry_price=candidate.underlying_trigger or candidate.underlying_price,
-                stop_price=candidate.underlying_invalidation, target_price=candidate.first_underlying_target,
+                triggered_at=stamp, entry_price=entry, stop_price=stop, target_price=target,
                 exit_reason="MISSED" if candidate.signal_status == "MISSED" else "OPEN", result_r=None,
                 mfe_r=0, mae_r=0, score=candidate.score, user_entered=False, option_snapshot=contract,
                 conservative_same_candle=False, created_at=now, updated_at=now, last_evaluated_at=stamp,
@@ -166,9 +230,14 @@ def link_paper_position(db: Session, position: ParlayPaperPosition) -> None:
 
 
 def metrics(rows: list[SignalPerformance]) -> dict:
-    completed = [row for row in rows if row.exit_reason != "OPEN" and row.result_r is not None]
+    eligible = [row for row in rows if analytics_exclusion_reason(row) is None]
+    completed = sorted(
+        (row for row in eligible if row.exit_reason != "OPEN" and row.result_r is not None),
+        key=lambda row: (_utc(row.triggered_at), row.signal_id),
+    )
     values = [float(row.result_r) for row in completed if row.result_r is not None]
     wins, losses = [value for value in values if value > 0], [value for value in values if value < 0]
+    breakeven = [value for value in values if value == 0]
     equity = peak = drawdown = 0.0
     for value in values:
         equity += value
@@ -185,17 +254,28 @@ def metrics(rows: list[SignalPerformance]) -> dict:
         return_equity += value
         return_peak = max(return_peak, return_equity)
         return_drawdown = max(return_drawdown, return_peak - return_equity)
-    return {"total_triggered_signals": len(rows), "open_signals": sum(r.exit_reason == "OPEN" for r in rows),
-        "targets_hit": sum(r.exit_reason == "TARGET" for r in rows), "stops_hit": sum(r.exit_reason == "STOP" for r in rows),
-        "timed_exits": sum(r.exit_reason == "TIMED_EXIT" for r in rows),
-        "invalidated_missed": sum(r.exit_reason in {"INVALIDATED", "MISSED"} for r in rows),
+    quality_exclusions = sum(analytics_exclusion_reason(row) is not None for row in rows)
+    exposure_ticker_days = len({(row.trading_date, row.ticker) for row in rows})
+    return {"total_triggered_signals": len(rows), "resolved_signals": len(completed),
+        "open_signals": sum(r.exit_reason == "OPEN" for r in eligible),
+        "targets_hit": sum(r.exit_reason == "TARGET" for r in eligible),
+        "stops_hit": sum(r.exit_reason == "STOP" for r in eligible),
+        "timed_exits": sum(r.exit_reason == "TIMED_EXIT" for r in eligible),
+        "invalidated_missed": sum(r.exit_reason in {"INVALIDATED", "MISSED"} for r in eligible),
+        "data_gap_signals": sum(r.exit_reason == "DATA_GAP" for r in rows),
+        "quality_exclusions": quality_exclusions,
+        "wins": len(wins), "losses": len(losses), "breakeven": len(breakeven),
         "win_rate": round(100*len(wins)/len(completed), 1) if completed else 0,
         "average_r": round(sum(values)/len(values), 3) if values else 0, "cumulative_r": round(sum(values), 3),
         "profit_factor": round(sum(wins)/abs(sum(losses)), 2) if losses else None,
+        "average_win_r": round(sum(wins)/len(wins), 3) if wins else 0,
+        "average_loss_r": round(sum(losses)/len(losses), 3) if losses else 0,
         "maximum_drawdown_r": round(drawdown, 3),
         "average_return_pct": round(sum(returns)/len(returns), 3) if returns else 0,
         "cumulative_return_pct": round(sum(returns), 3),
         "maximum_drawdown_pct": round(return_drawdown, 3),
+        "exposure_ticker_days": exposure_ticker_days,
+        "exposure_minutes": sum(r.duration_minutes or 0 for r in completed),
         "average_duration": round(sum(r.duration_minutes or 0 for r in completed)/len(completed), 1) if completed else 0,
         "average_mfe": round(sum(r.mfe_r for r in completed)/len(completed), 3) if completed else 0,
         "average_mae": round(sum(r.mae_r for r in completed)/len(completed), 3) if completed else 0}

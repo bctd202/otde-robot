@@ -19,6 +19,7 @@ export const paperEnter=(candidate:ParlayCandidate,providerMode:string)=>{
   return send<PaperPosition>('/paper-positions',{symbol:candidate.symbol,option_symbol:candidate.contract.option_symbol,direction:candidate.direction,strategy_mode:candidate.strategy_mode,strategy_version:candidate.strategy_version,expiration:candidate.contract.expiration,strike:candidate.contract.strike,quantity:1,option_ask:candidate.contract.ask,underlying_entry_price:candidate.underlying_price,underlying_trigger:candidate.underlying_trigger,underlying_invalidation:candidate.underlying_invalidation,first_underlying_target:candidate.first_underlying_target,stretch_underlying_target:candidate.stretch_underlying_target,first_option_target:candidate.first_option_target,stretch_option_target:candidate.stretch_option_target,score:candidate.score,score_label:candidate.score_label,reasons:candidate.reasons,signal_status:candidate.signal_status,provider_mode:providerMode,entry_timestamp:new Date().toISOString(),paper_only:true});
 };
 export const exitPaperPosition=(id:number,reason:string)=>send<PaperPosition>(`/paper-positions/${id}/exit`,{reason,paper_only:true});
-export const getPerformance=()=>request<import('../types').PerformanceResponse>('/performance');
+export const getPerformance=(strategyMode:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY'='ONE_MIN_0DTE')=>
+  request<import('../types').PerformanceResponse>(`/performance?strategy_mode=${encodeURIComponent(strategyMode)}`);
 export const getBacktests=()=>request<import('../types').BacktestRun[]>('/backtests');
 export const startBacktest=(start:string,end:string,tickers:string[])=>send<import('../types').BacktestRun>('/backtests',{start,end,tickers});

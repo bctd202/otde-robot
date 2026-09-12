@@ -1,40 +1,75 @@
 import {useEffect,useMemo,useState} from 'react';
 import {getPerformance} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
-import type {PerformanceResponse,PerformanceSignal,StrategyView} from '../types';
+import type {PerformanceResponse,PerformanceSignal} from '../types';
 
 type OutcomeUnit='R'|'PCT';
-const baseLabels:Record<string,string>={total_triggered_signals:'Triggered',open_signals:'Open',targets_hit:'Targets',stops_hit:'Stops',timed_exits:'Timed exits',invalidated_missed:'Invalid / missed',win_rate:'Win rate %',profit_factor:'Profit factor',average_duration:'Avg duration min'};
+type PerformanceStrategy='ONE_MIN_0DTE'|'STRUCTURED_INTRADAY';
+type LedgerView='ALL'|'OPEN'|'COMPLETED'|'EXCLUDED';
 
-function visibleInView(row:PerformanceSignal,view:string):boolean{if(view==='ALL')return true;if(view==='PAPER')return row.user_entered;if(view==='LIVE')return row.source==='LIVE';if(view==='BACKTEST')return row.source==='BACKTEST';if(view==='OPEN')return row.exit_reason==='OPEN';if(view==='AUDIT')return ['UNKNOWN','LEGACY'].includes(row.source);return row.exit_reason!=='OPEN'}
-function inStrategy(row:PerformanceSignal,strategy:StrategyView):boolean{return strategy==='ALL'||row.strategy_mode===strategy}
+const labels:Record<string,string>={
+  total_triggered_signals:'Selected positions',resolved_signals:'Resolved',wins:'Wins',losses:'Losses',
+  win_rate:'Win rate %',profit_factor:'Profit factor',exposure_ticker_days:'Ticker-days exposed',
+  quality_exclusions:'Quality exclusions',average_duration:'Avg duration min',
+};
 
-function metricsFor(rows:PerformanceSignal[],unit:OutcomeUnit):Record<string,number|null>{
-  const completed=rows.filter(row=>row.exit_reason!=='OPEN'&&(unit==='R'?row.result_r:row.result_return_pct)!==null);
-  const values=completed.map(row=>(unit==='R'?row.result_r:row.result_return_pct) as number);
-  const mfe=completed.map(row=>unit==='R'?row.mfe_r:row.mfe_return_pct);
-  const mae=completed.map(row=>unit==='R'?row.mae_r:row.mae_return_pct);
-  const wins=values.filter(value=>value>0),losses=values.filter(value=>value<0);
-  let equity=0,peak=0,drawdown=0;for(const value of values){equity+=value;peak=Math.max(peak,equity);drawdown=Math.max(drawdown,peak-equity)}
-  return {total_triggered_signals:rows.length,open_signals:rows.filter(row=>row.exit_reason==='OPEN').length,targets_hit:rows.filter(row=>row.exit_reason==='TARGET').length,stops_hit:rows.filter(row=>row.exit_reason==='STOP').length,timed_exits:rows.filter(row=>row.exit_reason==='TIMED_EXIT').length,invalidated_missed:rows.filter(row=>['INVALIDATED','MISSED'].includes(row.exit_reason)).length,win_rate:completed.length?Number((100*wins.length/completed.length).toFixed(1)):0,average_outcome:values.length?Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(3)):0,cumulative_outcome:Number(values.reduce((sum,value)=>sum+value,0).toFixed(3)),profit_factor:losses.length?Number((wins.reduce((sum,value)=>sum+value,0)/Math.abs(losses.reduce((sum,value)=>sum+value,0))).toFixed(2)):null,maximum_drawdown:Number(drawdown.toFixed(3)),average_duration:completed.length?Number((completed.reduce((sum,row)=>sum+(row.duration_minutes??0),0)/completed.length).toFixed(1)):0,average_mfe:mfe.length?Number((mfe.reduce((sum,value)=>sum+value,0)/mfe.length).toFixed(3)):0,average_mae:mae.length?Number((mae.reduce((sum,value)=>sum+value,0)/mae.length).toFixed(3)):0};
+function visibleInView(row:PerformanceSignal,view:LedgerView):boolean{
+  if(view==='OPEN')return row.exit_reason==='OPEN';
+  if(view==='COMPLETED')return row.exit_reason!=='OPEN';
+  if(view==='EXCLUDED')return !row.analytics_eligible;
+  return true;
 }
 
-const strategyName=(mode:string)=>mode==='STRUCTURED_INTRADAY'?'Structured Intraday':'1-Min / 0DTE';
+function metricsFor(rows:PerformanceSignal[],unit:OutcomeUnit):Record<string,number|null>{
+  const ordered=[...rows].sort((a,b)=>a.triggered_at.localeCompare(b.triggered_at));
+  const completed=ordered.filter(row=>row.analytics_eligible&&row.exit_reason!=='OPEN'&&
+    (unit==='R'?row.result_r:row.result_return_pct)!==null);
+  const values=completed.map(row=>(unit==='R'?row.result_r:row.result_return_pct) as number);
+  const wins=values.filter(value=>value>0),losses=values.filter(value=>value<0);
+  let equity=0,peak=0,drawdown=0;
+  for(const value of values){equity+=value;peak=Math.max(peak,equity);drawdown=Math.max(drawdown,peak-equity)}
+  return {
+    total_triggered_signals:rows.length,resolved_signals:completed.length,wins:wins.length,losses:losses.length,
+    win_rate:completed.length?Number((100*wins.length/completed.length).toFixed(1)):0,
+    average_outcome:values.length?Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(3)):0,
+    cumulative_outcome:Number(values.reduce((sum,value)=>sum+value,0).toFixed(3)),
+    profit_factor:losses.length?Number((wins.reduce((sum,value)=>sum+value,0)/Math.abs(losses.reduce((sum,value)=>sum+value,0))).toFixed(2)):null,
+    maximum_drawdown:Number(drawdown.toFixed(3)),
+    average_win:wins.length?Number((wins.reduce((sum,value)=>sum+value,0)/wins.length).toFixed(3)):0,
+    average_loss:losses.length?Number((losses.reduce((sum,value)=>sum+value,0)/losses.length).toFixed(3)):0,
+    exposure_ticker_days:new Set(rows.map(row=>`${row.trading_date}:${row.ticker}`)).size,
+    quality_exclusions:rows.filter(row=>!row.analytics_eligible).length,
+    average_duration:completed.length?Number((completed.reduce((sum,row)=>sum+(row.duration_minutes??0),0)/completed.length).toFixed(1)):0,
+  };
+}
+
+const strategyName=(mode:PerformanceStrategy)=>mode==='STRUCTURED_INTRADAY'?'Structured Intraday · 5–14 DTE':'1-Min · true 0DTE';
+const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Boolean(value?.metrics)&&Boolean(value?.raw_metrics);
 
 export function Performance(){
-  const [data,setData]=useState<PerformanceResponse|null>(null);
-  const [view,setView]=useState('ALL');
-  const [strategy,setStrategy]=useState<StrategyView>('ALL');
-  const [unit,setUnit]=useState<OutcomeUnit>('PCT');
+  const [datasets,setDatasets]=useState<Record<PerformanceStrategy,PerformanceResponse>|null>(null);
+  const [view,setView]=useState<LedgerView>('ALL');
+  const [strategy,setStrategy]=useState<PerformanceStrategy>('ONE_MIN_0DTE');
+  const [unit,setUnit]=useState<OutcomeUnit>('R');
   const [expanded,setExpanded]=useState('');
-  useEffect(()=>{void getPerformance().then(value=>{if(value&&Array.isArray(value.signals)&&value.metrics)setData(value)})},[]);
-  const rows=useMemo(()=>data?.signals.filter(row=>visibleInView(row,view)&&inStrategy(row,strategy))??[],[data,view,strategy]);
+  useEffect(()=>{void Promise.all([getPerformance('ONE_MIN_0DTE'),getPerformance('STRUCTURED_INTRADAY')])
+    .then(([zeroDte,structured])=>{if(validResponse(zeroDte)&&validResponse(structured))setDatasets({ONE_MIN_0DTE:zeroDte,STRUCTURED_INTRADAY:structured})})},[]);
+  const data=datasets?.[strategy]??null;
+  const rows=useMemo(()=>data?.signals.filter(row=>visibleInView(row,view))??[],[data,view]);
   const selectedMetrics=useMemo(()=>metricsFor(rows,unit),[rows,unit]);
   const suffix=unit==='R'?'R':'%';
-  const labels:Record<string,string>={...baseLabels,average_outcome:`Average ${unit==='R'?'R':'return %'}`,cumulative_outcome:`Cumulative ${unit==='R'?'R':'return %'}`,maximum_drawdown:`Max drawdown ${suffix}`,average_mfe:`Avg MFE ${suffix}`,average_mae:`Avg MAE ${suffix}`};
-  return <section id="performance" className="performance-page"><p className="eyebrow">Normalized strategy evaluation</p><h2>Performance</h2><p>R uses the original underlying stop distance. Return % uses the actual option result for closed paper trades and the underlying result otherwise.</p>
-    <div className="performance-controls"><div><span>Strategy</span><div className="filter-tabs">{([['ALL','All'],['ONE_MIN_0DTE','1-Min'],['STRUCTURED_INTRADAY','Structured']] as [StrategyView,string][]).map(([value,label])=><button className={strategy===value?'active':''} onClick={()=>setStrategy(value)} key={value}>{label}</button>)}</div></div><div><span>Outcome</span><div className="filter-tabs"><button className={unit==='PCT'?'active':''} onClick={()=>setUnit('PCT')}>Return %</button><button className={unit==='R'?'active':''} onClick={()=>setUnit('R')}>R Multiple</button></div></div></div>
-    <div className="filter-tabs source-tabs">{['ALL','LIVE','PAPER','BACKTEST','OPEN','COMPLETED','AUDIT'].map(value=><button className={view===value?'active':''} onClick={()=>setView(value)} key={value}>{value}</button>)}</div>
-    {data&&<><div className="performance-metrics">{Object.entries(selectedMetrics).map(([key,value])=><div className="metric" key={key}><span>{labels[key]}</span><strong>{value??'N/A'}</strong></div>)}</div><div className="ledger" role="table"><div className="ledger-row ledger-head"><b>Ticker</b><b>Strategy / setup</b><b>Trigger (ET)</b><b>Plan</b><b>Outcome</b></div>{rows.map(row=>{const outcome=unit==='R'?row.result_r:row.result_return_pct;const basis=unit==='PCT'&&row.return_basis==='PAPER_OPTION'?' · OPTION':'';return <div key={row.signal_id}><button className="ledger-row" onClick={()=>setExpanded(expanded===row.signal_id?'':row.signal_id)}><b>{row.ticker}</b><span>{strategyName(row.strategy_mode)} · {row.direction} · {row.setup_type}</span><span>{formatEasternDateTime(row.triggered_at)}</span><span>{row.entry_price.toFixed(2)} / {row.stop_price.toFixed(2)} / {row.target_price.toFixed(2)}</span><span>{row.exit_reason} · {outcome==null?'—':`${outcome.toFixed(2)}${suffix}`}{row.user_entered?' · PAPER':''}{basis}</span></button>{expanded===row.signal_id&&<pre className="audit-view">{JSON.stringify({strategy_mode:row.strategy_mode,strategy_version:row.strategy_version,initial_risk_points:row.initial_risk_points,initial_risk_pct:row.initial_risk_pct,return_basis:row.return_basis,paper_entry_option_price:row.paper_entry_option_price,paper_exit_option_price:row.paper_exit_option_price,strategy:row.strategy_snapshot,conditions:row.condition_snapshot,option_at_trigger:row.option_snapshot,conservative_same_candle:row.conservative_same_candle},null,2)}</pre>}</div>})}</div></>}
+  const metricLabels:Record<string,string>={...labels,average_outcome:`Average ${unit==='R'?'R':'underlying return %'}`,
+    cumulative_outcome:`Cumulative ${unit==='R'?'R':'underlying return %'}`,maximum_drawdown:`Max drawdown ${suffix}`,
+    average_win:`Avg win ${suffix}`,average_loss:`Avg loss ${suffix}`};
+  return <section id="performance" className="performance-page">
+    <p className="eyebrow">Automated research · one position per ticker/day</p><h2>Performance</h2>
+    <p><strong>Underlying-path research only—not option-contract P/L.</strong> Manual positions and backtests are excluded. The first actual BUY per ticker/day is retained; cross-session and zero-risk outcomes stay visible but do not enter results.</p>
+    <div className="performance-controls"><div><span>Strategy (kept separate)</span><div className="filter-tabs">
+      {([['ONE_MIN_0DTE','True 0DTE'],['STRUCTURED_INTRADAY','Structured 5–14 DTE']] as [PerformanceStrategy,string][]).map(([value,label])=><button className={strategy===value?'active':''} onClick={()=>{setStrategy(value);setView('ALL')}} key={value}>{label}</button>)}
+    </div></div><div><span>Outcome</span><div className="filter-tabs"><button className={unit==='R'?'active':''} onClick={()=>setUnit('R')}>R Multiple</button><button className={unit==='PCT'?'active':''} onClick={()=>setUnit('PCT')}>Underlying %</button></div></div></div>
+    <div className="filter-tabs source-tabs">{(['ALL','OPEN','COMPLETED','EXCLUDED'] as LedgerView[]).map(value=><button className={view===value?'active':''} onClick={()=>setView(value)} key={value}>{value}</button>)}</div>
+    {data&&<><p><strong>{strategyName(strategy)}</strong> · {data.raw_metrics.total_triggered_signals} raw BUY rows → {data.metrics.total_triggered_signals} selected ticker-day positions. Raw eligible R: {data.raw_metrics.cumulative_r.toFixed(3)}R; selected eligible R: {data.metrics.cumulative_r.toFixed(3)}R.</p>
+      <div className="performance-metrics">{Object.entries(selectedMetrics).map(([key,value])=><div className="metric" key={key}><span>{metricLabels[key]}</span><strong>{value??'N/A'}</strong></div>)}</div>
+      <div className="ledger" role="table"><div className="ledger-row ledger-head"><b>Ticker</b><b>Strategy / setup</b><b>Trigger (ET)</b><b>Plan</b><b>Outcome</b></div>{rows.map(row=>{const outcome=unit==='R'?row.result_r:row.result_return_pct;const excluded=row.analytics_exclusion_reason?` · EXCLUDED: ${row.analytics_exclusion_reason.replaceAll('_',' ')}`:'';return <div key={row.signal_id}><button className="ledger-row" onClick={()=>setExpanded(expanded===row.signal_id?'':row.signal_id)}><b>{row.ticker}</b><span>{strategyName(strategy)} · {row.direction} · {row.setup_type}</span><span>{formatEasternDateTime(row.triggered_at)}</span><span>{row.entry_price.toFixed(2)} / {row.stop_price.toFixed(2)} / {row.target_price.toFixed(2)}</span><span>{row.exit_reason} · {outcome==null?'—':`${outcome.toFixed(2)}${suffix}`}{excluded}</span></button>{expanded===row.signal_id&&<pre className="audit-view">{JSON.stringify({analytics_eligible:row.analytics_eligible,analytics_exclusion_reason:row.analytics_exclusion_reason,strategy_mode:row.strategy_mode,strategy_version:row.strategy_version,initial_risk_points:row.initial_risk_points,initial_risk_pct:row.initial_risk_pct,strategy:row.strategy_snapshot,conditions:row.condition_snapshot,option_at_trigger:row.option_snapshot,conservative_same_candle:row.conservative_same_candle},null,2)}</pre>}</div>})}</div></>}
   </section>;
 }
