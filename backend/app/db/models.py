@@ -413,6 +413,50 @@ class SignalPerformance(Base):
     contract_option_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
 
+class AutomatedOptionMark(Base):
+    """Immutable ask-at-entry and bid-at-exit evidence for automated signals."""
+
+    __tablename__ = "automated_option_marks"
+    __table_args__ = (
+        UniqueConstraint("signal_id", "mark_type", name="uq_automated_option_signal_mark"),
+        UniqueConstraint("position_key", name="uq_automated_option_position_key"),
+        Index("ix_automated_option_date_status", "trading_date", "mark_status"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("signal_performance.signal_id"), index=True)
+    # Only ENTRY rows have a position key. This enforces one account-eligible
+    # position per ticker/day while allowing a separate EXIT row.
+    position_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    strategy_mode: Mapped[str] = mapped_column(String(32), index=True)
+    mark_type: Mapped[str] = mapped_column(String(8), index=True)
+    mark_status: Mapped[str] = mapped_column(String(32), index=True)
+    event_reason: Mapped[str] = mapped_column(String(32))
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    option_symbol: Mapped[str] = mapped_column(String(64))
+    normalized_option_symbol: Mapped[str] = mapped_column(String(64))
+    expiration: Mapped[date] = mapped_column(Date)
+    strike: Mapped[float] = mapped_column(Float)
+    right: Mapped[str] = mapped_column(String(8))
+    bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quote_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ask_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    selected_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_basis: Mapped[str] = mapped_column(String(16))
+    quote_lag_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    data_mode: Mapped[str] = mapped_column(String(32))
+    verification_status: Mapped[str] = mapped_column(String(32))
+    verification_reason: Mapped[str] = mapped_column(String(255))
+    contract_multiplier: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TradeOutcome(Base):
     __tablename__ = "trade_outcomes"
     id: Mapped[int] = mapped_column(primary_key=True)

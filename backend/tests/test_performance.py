@@ -4,11 +4,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import SignalPerformance
+from app.db.models import AutomatedOptionMark, SignalPerformance
 from app.db.session import Base
-from app.schemas.market import CandleOut, ParlayCandidateOut, ProviderStatus
+from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut,
+                                ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
-                                      evaluate_open_signals, metrics, track_candidates,
+                                      evaluate_open_signals, metrics,
+                                      option_shadow_results, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
 
@@ -171,3 +173,100 @@ def test_zero_risk_plan_is_not_added_to_the_performance_ledger():
         candidate.underlying_invalidation=candidate.underlying_trigger
         track_candidates(db,[candidate],LiveTradierProvider())
         assert list(db.scalars(select(SignalPerformance)).all())==[]
+
+
+SHADOW_START = datetime(2026, 8, 3, 14, 30, tzinfo=timezone.utc)
+
+
+def shadow_contract(*, bid=.40, ask=.45, stamp=SHADOW_START, symbol="SPY260803C00100000"):
+    return OptionContractOut(symbol="SPY", option_symbol=symbol, normalized_symbol=symbol,
+        expiration=date(2026, 8, 3), strike=100, right="call", bid=bid, ask=ask, last=(bid+ask)/2,
+        volume=500, open_interest=900, timestamp=stamp, bid_timestamp=stamp, ask_timestamp=stamp,
+        provider="tradier", data_mode="live", verification_status="verified",
+        verification_reason="Verified against exact Tradier chain response", actionable=True)
+
+
+def shadow_candidate(lifecycle="shadow-1", strategy="ONE_MIN_0DTE"):
+    return ParlayCandidateOut(symbol="SPY", rank="PLAY", direction="call", signal_status="BUY",
+        score=90, score_label="PLAY", underlying_price=100, contract=shadow_contract(),
+        underlying_trigger=100, underlying_invalidation=99, first_underlying_target=101.5,
+        primary_action="BUY", generated_at=SHADOW_START, data_freshness="live_current",
+        lifecycle_id=lifecycle, strategy_mode=strategy, strategy_version="shadow-v1", actionable=True)
+
+
+class ShadowProvider:
+    def __init__(self, *, exit_contract=True, remaining=80):
+        self.latest = SHADOW_START+timedelta(minutes=3)
+        exit_stamp = SHADOW_START+timedelta(minutes=1, seconds=30)
+        self.exit_contract = shadow_contract(bid=.75, ask=.80, stamp=exit_stamp) if exit_contract else None
+        self.remaining = remaining
+        self.chain_calls = 0
+
+    def status(self):
+        return ProviderStatus(provider="tradier", mode="live", status="healthy", delay_seconds=0,
+                              latest_timestamp=self.latest, message="live test")
+
+    def candles(self, ticker, timeframe="1m"):
+        return [candle(SHADOW_START+timedelta(minutes=1), 101.5, 99.8, 101.2)]
+
+    def option_chain(self, ticker, expiration=None):
+        self.chain_calls += 1
+        return [self.exit_contract] if self.exit_contract is not None else []
+
+    def budget_status(self):
+        return {"remaining": self.remaining}
+
+
+def test_shadow_marks_first_ticker_day_entry_ask_and_exact_exit_bid_once():
+    local = database(); provider = ShadowProvider()
+    with local() as db:
+        track_candidates(db, [shadow_candidate(), shadow_candidate("shadow-2", "STRUCTURED_INTRADAY")], provider)
+        marks = list(db.scalars(select(AutomatedOptionMark).order_by(AutomatedOptionMark.id)).all())
+        assert [(mark.mark_type, mark.selected_price) for mark in marks] == [("ENTRY", .45), ("EXIT", .75)]
+        assert marks[1].quote_lag_seconds == 30 and marks[1].event_reason == "TARGET"
+        assert len(list(db.scalars(select(SignalPerformance)).all())) == 2
+        summary, payloads = option_shadow_results(db, list(db.scalars(select(SignalPerformance)).all()))
+        assert summary["tracked_positions"] == 1 and summary["cumulative_pnl_dollars"] == 30
+        shadow = next(iter(payloads.values()))
+        assert shadow["status"] == "CLOSED" and shadow["return_percent"] == 66.67
+        evaluate_open_signals(db, provider)
+        assert len(list(db.scalars(select(AutomatedOptionMark)).all())) == 2
+        assert provider.chain_calls == 1
+
+
+def test_missing_exact_exit_quote_retries_then_appends_explicit_gap():
+    local = database(); provider = ShadowProvider(exit_contract=False)
+    with local() as db:
+        track_candidates(db, [shadow_candidate()], provider)
+        assert [mark.mark_type for mark in db.scalars(select(AutomatedOptionMark)).all()] == ["ENTRY"]
+        provider.latest = SHADOW_START+timedelta(minutes=5)
+        evaluate_open_signals(db, provider)
+        marks = list(db.scalars(select(AutomatedOptionMark).order_by(AutomatedOptionMark.id)).all())
+        assert len(marks) == 2 and marks[1].mark_status == "OPTION_QUOTE_GAP"
+        assert marks[1].selected_price is None and "absent" in marks[1].verification_reason
+
+
+def test_shadow_preserves_tradier_request_reserve_without_inventing_an_exit():
+    local = database(); provider = ShadowProvider(remaining=20)
+    with local() as db:
+        track_candidates(db, [shadow_candidate()], provider)
+        assert provider.chain_calls == 0
+        provider.latest = SHADOW_START+timedelta(minutes=5)
+        evaluate_open_signals(db, provider)
+        marks = list(db.scalars(select(AutomatedOptionMark).order_by(AutomatedOptionMark.id)).all())
+        assert provider.chain_calls == 0 and marks[-1].mark_status == "OPTION_QUOTE_GAP"
+        assert "request reserve" in marks[-1].verification_reason
+
+
+def test_shadow_uses_fresh_cached_chain_even_when_request_reserve_is_engaged():
+    class CachedShadowProvider(ShadowProvider):
+        def cached_option_chain(self, ticker, expiration):
+            return [self.exit_contract]
+
+    local = database(); provider = CachedShadowProvider(remaining=0)
+    with local() as db:
+        track_candidates(db, [shadow_candidate()], provider)
+        marks = list(db.scalars(select(AutomatedOptionMark).order_by(AutomatedOptionMark.id)).all())
+        assert provider.chain_calls == 0
+        assert [(mark.mark_type, mark.mark_status) for mark in marks] == [
+            ("ENTRY", "QUOTED"), ("EXIT", "QUOTED")]

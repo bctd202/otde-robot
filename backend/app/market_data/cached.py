@@ -127,6 +127,17 @@ class CachedMarketDataProvider:
             assert entry is not None
             return list(entry.value)
 
+    def cached_option_chain(self, symbol: str, expiration: date) -> list[OptionContractOut] | None:
+        """Return a fresh exact-expiration chain without initiating an upstream request."""
+        key = (symbol.upper(), expiration)
+        ttl = get_settings().market_chain_cache_seconds
+        with self._lock:
+            entry = self._chains.get(key)
+            if not self._fresh(entry, ttl):
+                return None
+            assert entry is not None
+            return list(entry.value)
+
     def budget_status(self) -> dict[str, Any]:
         if hasattr(self.provider, "budget_status"):
             return self.provider.budget_status()

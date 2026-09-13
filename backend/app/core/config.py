@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     parlay_background_scanner_enabled: bool = True
     parlay_scan_second: int = 5
     parlay_scan_misfire_grace_seconds: int = 30
+    automated_option_shadow_enabled: bool = True
+    automated_option_max_quote_lag_seconds: int = 180
+    automated_option_request_reserve: int = 20
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
