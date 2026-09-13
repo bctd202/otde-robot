@@ -11,6 +11,7 @@ services:
       MOCK_SCENARIO: active
       ENABLE_DEMO_OPTION_CONTRACTS: "false"
       PAPER_ONLY: "true"
+      AUTOMATED_OPTION_SHADOW_ENABLED: "true"
     volumes: ["app-data:/data"]
   frontend:
     restart: unless-stopped

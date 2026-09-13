@@ -5,8 +5,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import LiveWaitCandidate, ParlayPaperPosition, SignalPerformance
-from app.services.contracts import is_verified_actionable_contract
+from app.core.config import get_settings
+from app.db.models import (AutomatedOptionMark, LiveWaitCandidate,
+                           ParlayPaperPosition, SignalPerformance)
+from app.schemas.market import OptionContractOut
+from app.services.contracts import (is_verified_actionable_contract,
+                                    validate_exit_quote)
 from app.services.parlay import PRODUCTION_TIMEFRAME
 
 NY = ZoneInfo("America/New_York")
@@ -85,6 +89,139 @@ def _mark_data_gap(row: SignalPerformance, observed_at: datetime) -> None:
     row.condition_snapshot = details
 
 
+def _record_option_entry(db: Session, row: SignalPerformance, contract: OptionContractOut,
+                         observed_at: datetime) -> None:
+    """Append the conservative entry ask for the first BUY per ticker/day."""
+    if not get_settings().automated_option_shadow_enabled:
+        return
+    position_key = f"{row.trading_date.isoformat()}:{row.ticker.upper()}"
+    if db.scalar(select(AutomatedOptionMark.id).where(
+            AutomatedOptionMark.position_key == position_key)) is not None:
+        return
+    normalized = (contract.normalized_symbol or contract.option_symbol).strip().upper()
+    db.add(AutomatedOptionMark(
+        signal_id=row.signal_id, position_key=position_key, trading_date=row.trading_date,
+        ticker=row.ticker, strategy_mode=row.strategy_mode, mark_type="ENTRY", mark_status="QUOTED",
+        event_reason="AUTOMATED_BUY", event_at=_utc(row.triggered_at), observed_at=_utc(observed_at),
+        option_symbol=contract.option_symbol, normalized_option_symbol=normalized,
+        expiration=contract.expiration, strike=contract.strike, right=contract.right,
+        bid=contract.bid, ask=contract.ask, last=contract.last, quote_timestamp=_utc(contract.timestamp),
+        bid_timestamp=_utc(contract.bid_timestamp) if contract.bid_timestamp else None,
+        ask_timestamp=_utc(contract.ask_timestamp) if contract.ask_timestamp else None,
+        selected_price=contract.ask, price_basis="ASK", quote_lag_seconds=None,
+        provider=contract.provider, data_mode=contract.data_mode,
+        verification_status=contract.verification_status,
+        verification_reason=contract.verification_reason, contract_multiplier=100,
+        created_at=_utc(observed_at),
+    ))
+    db.flush()
+
+
+def _option_chain(provider, ticker: str, expiration: date) -> list[OptionContractOut]:
+    try:
+        return provider.option_chain(ticker, expiration)
+    except TypeError:
+        return provider.option_chain(ticker)
+    except (KeyError, ValueError, RuntimeError):
+        return []
+
+
+def _append_option_gap(db: Session, entry: AutomatedOptionMark, row: SignalPerformance,
+                       observed_at: datetime, reason: str, provider_status) -> None:
+    event_at = _utc(row.exit_at) if row.exit_at else _utc(observed_at)
+    db.add(AutomatedOptionMark(
+        signal_id=row.signal_id, position_key=None, trading_date=entry.trading_date,
+        ticker=entry.ticker, strategy_mode=entry.strategy_mode, mark_type="EXIT",
+        mark_status="OPTION_QUOTE_GAP", event_reason=row.exit_reason, event_at=event_at,
+        observed_at=_utc(observed_at), option_symbol=entry.option_symbol,
+        normalized_option_symbol=entry.normalized_option_symbol, expiration=entry.expiration,
+        strike=entry.strike, right=entry.right, bid=None, ask=None, last=None,
+        quote_timestamp=None, bid_timestamp=None, ask_timestamp=None, selected_price=None,
+        price_basis="NONE", quote_lag_seconds=None, provider=provider_status.provider,
+        data_mode=provider_status.mode, verification_status="unavailable",
+        verification_reason=reason[:255], contract_multiplier=entry.contract_multiplier,
+        created_at=_utc(observed_at),
+    ))
+
+
+def _record_option_exits(db: Session, provider, provider_status) -> None:
+    """Append exact exit bids, retrying gaps until the bounded quote window ends."""
+    settings = get_settings()
+    if not settings.automated_option_shadow_enabled:
+        return
+    exited = set(db.scalars(select(AutomatedOptionMark.signal_id).where(
+        AutomatedOptionMark.mark_type == "EXIT"
+    )).all())
+    entries = list(db.scalars(select(AutomatedOptionMark).where(
+        AutomatedOptionMark.mark_type == "ENTRY"
+    ).order_by(AutomatedOptionMark.event_at)).all())
+    observed_at = _utc(provider_status.latest_timestamp)
+    for entry in entries:
+        if entry.signal_id in exited:
+            continue
+        row = db.get(SignalPerformance, entry.signal_id)
+        if row is None or row.exit_reason == "OPEN":
+            continue
+        if row.exit_reason == "DATA_GAP" or row.exit_at is None:
+            _append_option_gap(db, entry, row, observed_at,
+                               "Underlying lifecycle ended without a defensible same-session exit event",
+                               provider_status)
+            continue
+
+        event_at = _utc(row.exit_at)
+        deadline = event_at + timedelta(seconds=settings.automated_option_max_quote_lag_seconds)
+        reason = "Exact selected contract was absent from the Tradier chain response"
+        chain: list[OptionContractOut] | None = None
+        if hasattr(provider, "cached_option_chain"):
+            chain = provider.cached_option_chain(entry.ticker, entry.expiration)
+        if chain is None:
+            can_request = (provider_status.provider == "tradier" and provider_status.mode == "live" and
+                           provider_status.status == "healthy")
+            if not can_request:
+                reason = "Live Tradier exit data was unavailable"
+            if can_request and hasattr(provider, "budget_status"):
+                budget = provider.budget_status()
+                remaining = budget.get("remaining")
+                if remaining is not None and remaining <= settings.automated_option_request_reserve:
+                    can_request = False
+                    reason = "Tradier request reserve protected the scanner"
+            if can_request:
+                chain = _option_chain(provider, entry.ticker, entry.expiration)
+
+        selected: OptionContractOut | None = None
+        if chain is not None:
+            expected = entry.normalized_option_symbol.strip().upper()
+            selected = next((contract for contract in chain
+                             if contract.option_symbol.strip().upper() == expected), None)
+            if selected is not None:
+                decision = validate_exit_quote(
+                    selected, entry.ticker, expected, event_at,
+                    settings.automated_option_max_quote_lag_seconds,
+                )
+                reason = decision.reason
+                if decision.actionable:
+                    assert selected.bid_timestamp is not None and selected.ask_timestamp is not None
+                    bid_at = _utc(selected.bid_timestamp)
+                    ask_at = _utc(selected.ask_timestamp)
+                    db.add(AutomatedOptionMark(
+                        signal_id=row.signal_id, position_key=None, trading_date=entry.trading_date,
+                        ticker=entry.ticker, strategy_mode=entry.strategy_mode, mark_type="EXIT",
+                        mark_status="QUOTED", event_reason=row.exit_reason, event_at=event_at,
+                        observed_at=observed_at, option_symbol=selected.option_symbol,
+                        normalized_option_symbol=expected, expiration=selected.expiration,
+                        strike=selected.strike, right=selected.right, bid=selected.bid, ask=selected.ask,
+                        last=selected.last, quote_timestamp=_utc(selected.timestamp),
+                        bid_timestamp=bid_at, ask_timestamp=ask_at, selected_price=selected.bid,
+                        price_basis="BID", quote_lag_seconds=max(0, round((bid_at-event_at).total_seconds())),
+                        provider=selected.provider, data_mode=selected.data_mode,
+                        verification_status="verified", verification_reason=decision.reason,
+                        contract_multiplier=entry.contract_multiplier, created_at=observed_at,
+                    ))
+                    continue
+        if observed_at >= deadline:
+            _append_option_gap(db, entry, row, observed_at, reason, provider_status)
+
+
 def evaluate_open_signals(db: Session, provider) -> None:
     """Continue durable outcomes without carrying an intraday trade overnight."""
     rows = db.scalars(select(SignalPerformance).where(
@@ -108,6 +245,7 @@ def evaluate_open_signals(db: Session, provider) -> None:
         if (row.exit_reason == "OPEN" and provider_status.status == "healthy"
                 and latest >= cutoff_ready.astimezone(timezone.utc)):
             _mark_data_gap(row, latest)
+    _record_option_exits(db, provider, provider_status)
     db.commit()
 
 
@@ -151,7 +289,7 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
             if entry is None or stop is None or target is None or abs(entry - stop) <= 1e-9:
                 continue
             contract = candidate.contract.model_dump(mode="json") if candidate.contract else None
-            db.add(SignalPerformance(signal_id=str(uuid4()), source="LIVE", dedupe_key=dedupe_key,
+            row = SignalPerformance(signal_id=str(uuid4()), source="LIVE", dedupe_key=dedupe_key,
                 ticker=candidate.symbol, direction=candidate.direction.upper(), backend_status=candidate.signal_status,
                 setup_type=("structured-liquidity" if candidate.strategy_mode == "STRUCTURED_INTRADAY"
                             else "directional-liquidity"), strategy_mode=candidate.strategy_mode,
@@ -179,7 +317,12 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 quote_timestamp=candidate.contract.timestamp if candidate.contract else None,
                 contract_expiration=candidate.contract.expiration if candidate.contract else None,
                 contract_strike=candidate.contract.strike if candidate.contract else None,
-                contract_option_type=candidate.contract.right if candidate.contract else None))
+                contract_option_type=candidate.contract.right if candidate.contract else None)
+            db.add(row)
+            db.flush()
+            if candidate.signal_status == "BUY" and verified_contract and candidate.contract is not None:
+                observed_at = provider_status.latest_timestamp if provider_status is not None else stamp
+                _record_option_entry(db, row, candidate.contract, observed_at)
     db.commit()
     if provider is not None:
         evaluate_open_signals(db, provider)
@@ -227,6 +370,76 @@ def link_paper_position(db: Session, position: ParlayPaperPosition) -> None:
         row.paper_position_id = position.id
         row.updated_at = datetime.now(timezone.utc)
         db.commit()
+
+
+def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[dict, dict[str, dict]]:
+    """Return separately labeled ask-to-bid option evidence for selected ledger rows."""
+    signal_ids = {row.signal_id for row in rows}
+    marks = (list(db.scalars(select(AutomatedOptionMark).where(
+        AutomatedOptionMark.signal_id.in_(signal_ids)
+    ).order_by(AutomatedOptionMark.event_at, AutomatedOptionMark.id)).all()) if signal_ids else [])
+    grouped: dict[str, dict[str, AutomatedOptionMark]] = {}
+    for mark in marks:
+        grouped.setdefault(mark.signal_id, {})[mark.mark_type] = mark
+
+    payloads: dict[str, dict] = {}
+    pnl_values: list[float] = []
+    return_values: list[float] = []
+    quoted = gaps = active = pending = 0
+    for row in rows:
+        pair = grouped.get(row.signal_id, {})
+        entry, exit_mark = pair.get("ENTRY"), pair.get("EXIT")
+        if entry is None:
+            continue
+        entry_cost = round(float(entry.selected_price or 0) * entry.contract_multiplier, 2)
+        exit_value = pnl = return_pct = None
+        if exit_mark is None:
+            status = "ACTIVE" if row.exit_reason == "OPEN" else "EXIT_PENDING"
+            active += status == "ACTIVE"
+            pending += status == "EXIT_PENDING"
+        elif exit_mark.mark_status == "QUOTED" and exit_mark.selected_price is not None:
+            status = "CLOSED"
+            exit_value = round(float(exit_mark.selected_price) * exit_mark.contract_multiplier, 2)
+            pnl = round(exit_value-entry_cost, 2)
+            return_pct = round(100*pnl/entry_cost, 2) if entry_cost else None
+            pnl_values.append(pnl)
+            if return_pct is not None:
+                return_values.append(return_pct)
+            quoted += 1
+        else:
+            status = "OPTION_QUOTE_GAP"
+            gaps += 1
+        payloads[row.signal_id] = {
+            "status": status, "option_symbol": entry.normalized_option_symbol,
+            "entry_ask": entry.selected_price, "entry_bid": entry.bid,
+            "entry_quote_at": entry.quote_timestamp, "entry_cost_dollars": entry_cost,
+            "exit_reason": exit_mark.event_reason if exit_mark else (
+                row.exit_reason if row.exit_reason != "OPEN" else None),
+            "exit_bid": exit_mark.selected_price if exit_mark and exit_mark.mark_status == "QUOTED" else None,
+            "exit_ask": exit_mark.ask if exit_mark and exit_mark.mark_status == "QUOTED" else None,
+            "exit_quote_at": exit_mark.quote_timestamp if exit_mark else None,
+            "quote_lag_seconds": exit_mark.quote_lag_seconds if exit_mark else None,
+            "exit_value_dollars": exit_value, "pnl_dollars": pnl, "return_percent": return_pct,
+            "gap_reason": (exit_mark.verification_reason if exit_mark and
+                           exit_mark.mark_status == "OPTION_QUOTE_GAP" else None),
+            "entry_basis": "ASK", "exit_basis": "BID", "contract_multiplier": entry.contract_multiplier,
+            "fees_modeled": False, "additional_slippage_modeled": False, "paper_only": True,
+        }
+    terminal = quoted + gaps
+    summary = {
+        "tracked_positions": len(payloads), "closed_with_quote": quoted, "quote_gaps": gaps,
+        "active_positions": active, "exit_pending": pending,
+        "untracked_selected_positions": max(0, len(rows)-len(payloads)),
+        "quote_coverage_percent": round(100*quoted/terminal, 1) if terminal else 0,
+        "wins": sum(value > 0 for value in pnl_values), "losses": sum(value < 0 for value in pnl_values),
+        "cumulative_pnl_dollars": round(sum(pnl_values), 2),
+        "average_pnl_dollars": round(sum(pnl_values)/len(pnl_values), 2) if pnl_values else 0,
+        "average_return_percent": round(sum(return_values)/len(return_values), 2) if return_values else 0,
+        "entry_basis": "Ask at automated BUY", "exit_basis": "First verified bid after underlying exit",
+        "forward_only": True, "headline_metrics": False, "fees_modeled": False,
+        "additional_slippage_modeled": False, "paper_only": True,
+    }
+    return summary, payloads
 
 
 def metrics(rows: list[SignalPerformance]) -> dict:

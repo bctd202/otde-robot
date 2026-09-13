@@ -43,7 +43,9 @@ def test_cache_shares_quotes_candles_expirations_and_chains_across_consumers():
     assert provider.candles("SPY", "15m")
     assert provider.expirations("SPY") == provider.expirations("SPY")
     expiration = date(2026, 8, 12)
+    assert provider.cached_option_chain("SPY", expiration) is None
     assert provider.option_chain("SPY", expiration) == provider.option_chain("SPY", expiration)
+    assert provider.cached_option_chain("SPY", expiration) == provider.option_chain("SPY", expiration)
     assert upstream.calls == {"quotes": 1, "candles": 1, "expirations": 1, "chains": 1}
 
 

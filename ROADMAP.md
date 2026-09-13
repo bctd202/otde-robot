@@ -4,7 +4,7 @@
 Backend/frontend application, mock provider, migrated and seeded database, dashboard, basic liquidity levels, structured setup detection, lottery filtering, persisted demo journal, and basic seeded analytics.
 
 ## Phase 2
-Validate 1-Min/0DTE and Structured Intraday side by side with live paper samples. Add external alert delivery, economic-event guardrails, correlation/risk controls, and richer grouped analytics.
+Validate 1-Min/0DTE and Structured Intraday side by side with live paper samples. Review automated option-shadow quote coverage and ask-to-bid results after each session; only promote option P/L after coverage is consistently defensible. Add external alert delivery, economic-event guardrails, correlation/risk controls, fees/additional-slippage assumptions, and richer grouped analytics.
 
 ## Phase 3
 Add optional restrictive risk controls to Structured Intraday after its baseline is measured: daily entry caps, loss limits, cooldowns, and a lottery-free surface.

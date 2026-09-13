@@ -12,7 +12,8 @@ const signal=(overrides:Partial<PerformanceSignal>):PerformanceSignal=>({
   exit_reason:'TARGET',result_r:2,result_return_pct:2,initial_risk_points:1,initial_risk_pct:1,
   mfe_return_pct:2,mae_return_pct:.1,duration_minutes:10,score:90,user_entered:false,
   analytics_eligible:true,analytics_exclusion_reason:null,option_snapshot:null,strategy_snapshot:{},
-  condition_snapshot:{},conservative_same_candle:false,mfe_r:2,mae_r:.1,...overrides,
+  condition_snapshot:{},conservative_same_candle:false,mfe_r:2,mae_r:.1,
+  automated_option_shadow:null,...overrides,
 });
 
 const metrics=(overrides:Partial<PerformanceMetrics>={}):PerformanceMetrics=>({
@@ -27,6 +28,11 @@ const metrics=(overrides:Partial<PerformanceMetrics>={}):PerformanceMetrics=>({
 const response=(strategy:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY',signals:PerformanceSignal[],
   selected:PerformanceMetrics=metrics(),raw:PerformanceMetrics=selected):PerformanceResponse=>({
   timezone:'America/New_York',underlying_only:true,paper_only:true,metrics:selected,raw_metrics:raw,signals,
+  option_shadow_metrics:{tracked_positions:0,closed_with_quote:0,quote_gaps:0,active_positions:0,
+    exit_pending:0,untracked_selected_positions:signals.length,quote_coverage_percent:0,wins:0,losses:0,
+    cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,
+    entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,
+    headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},
   scope:{source:'LIVE',strategy_mode:strategy,user_entered:false,deduplication:'FIRST_BUY_PER_TICKER_DAY'},
 });
 

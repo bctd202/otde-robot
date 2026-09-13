@@ -29,7 +29,8 @@ from app.services.paper_positions import (create_position, market_mark,
 from app.services.backtest import run_backtest
 from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
-                                      link_paper_position, metrics)
+                                      link_paper_position, metrics,
+                                      option_shadow_results)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         latest_scan, mark_lifecycle_entered,
                                         run_signal_scan)
@@ -221,7 +222,8 @@ def lottery_tracker_detail(tracker_id: str, db: Session = Depends(get_db)):
     )
 
 
-def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None = None) -> dict:
+def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None = None,
+            option_shadow: dict | None = None) -> dict:
     payload = {column.name: getattr(row, column.name) for column in row.__table__.columns}
     for key in ("triggered_at", "exit_at", "created_at", "updated_at", "last_evaluated_at"):
         value = payload.get(key)
@@ -251,6 +253,7 @@ def _ledger(row: SignalPerformance, paper_position: ParlayPaperPosition | None =
     exclusion = analytics_exclusion_reason(row)
     payload["analytics_eligible"] = exclusion is None
     payload["analytics_exclusion_reason"] = exclusion
+    payload["automated_option_shadow"] = option_shadow
     return payload
 
 
@@ -281,13 +284,16 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     paper_positions = ({position.id: position for position in db.scalars(
         select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
         if paper_ids else {})
+    option_shadow_metrics, option_shadows = option_shadow_results(db, rows)
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
+        "option_shadow_metrics": option_shadow_metrics,
         "signals": [
             _ledger(
                 row,
                 paper_positions.get(row.paper_position_id)
                 if row.paper_position_id is not None
                 else None,
+                option_shadows.get(row.signal_id),
             )
             for row in reversed(rows)
         ],

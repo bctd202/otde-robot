@@ -7,7 +7,7 @@ from app.db.models import SignalPerformance
 from app.db.session import Base
 from app.market_data.mock import MockMarketDataProvider
 from app.schemas.market import OptionContractOut, ProviderStatus, Quote
-from app.services.contracts import validate_contract
+from app.services.contracts import validate_contract, validate_exit_quote
 from app.services.parlay import rank_parlays
 from app.services.performance import track_candidates
 
@@ -61,6 +61,19 @@ def test_strategy_specific_dte_window_preserves_authenticity_and_controls_action
     assert same_day_policy.authentic and not same_day_policy.actionable
     assert "same-day" in same_day_policy.reason
     assert structured_policy.authentic and structured_policy.actionable
+
+
+def test_exact_exit_quote_accepts_explicit_zero_bid_but_rejects_substitutes():
+    zero_bid = contract(bid=0, bid_timestamp=NOW+timedelta(seconds=30),
+                        ask_timestamp=NOW+timedelta(seconds=30), timestamp=NOW+timedelta(seconds=30))
+    result = validate_exit_quote(zero_bid, "IWN", zero_bid.option_symbol, NOW, 180)
+    assert result.authentic and result.actionable
+    wrong_contract = contract(option_symbol="IWN260804C00251000", strike=251,
+                              bid_timestamp=NOW+timedelta(seconds=30),
+                              ask_timestamp=NOW+timedelta(seconds=30))
+    result = validate_exit_quote(wrong_contract, "IWN", zero_bid.option_symbol, NOW, 180)
+    assert result.authentic and not result.actionable
+    assert "not the selected" in result.reason
 
 
 class IwnTradierMissingExpiration:

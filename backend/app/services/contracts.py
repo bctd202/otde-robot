@@ -17,10 +17,8 @@ class ContractDecision:
     reason: str
 
 
-def validate_contract(contract: OptionContractOut, underlying: str, *, now: datetime | None = None,
-                      max_spread: float = 20, min_volume: int = 250, min_open_interest: int = 500,
-                      min_dte: int = 0, max_dte: int = 0) -> ContractDecision:
-    """Independently parse OCC identity, compare the chain row, then apply liquidity policy."""
+def _identity_decision(contract: OptionContractOut, underlying: str) -> ContractDecision | None:
+    """Return a rejection when the OCC symbol and chain identity disagree."""
     match = OCC.fullmatch(contract.option_symbol.strip().upper())
     if not match:
         return ContractDecision(False, False, "Invalid OCC option symbol")
@@ -35,6 +33,16 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     parsed = (root, expiry, strike, right)
     if parsed != expected or contract.symbol.upper() != underlying.upper():
         return ContractDecision(False, False, "OCC identity disagrees with Tradier chain row")
+    return None
+
+
+def validate_contract(contract: OptionContractOut, underlying: str, *, now: datetime | None = None,
+                      max_spread: float = 20, min_volume: int = 250, min_open_interest: int = 500,
+                      min_dte: int = 0, max_dte: int = 0) -> ContractDecision:
+    """Independently parse OCC identity, compare the chain row, then apply liquidity policy."""
+    identity_rejection = _identity_decision(contract, underlying)
+    if identity_rejection is not None:
+        return identity_rejection
     if contract.provider != "tradier":
         return ContractDecision(contract.data_mode == "demo", False, "Only Tradier contracts can be actionable")
     if contract.data_mode == "demo":
@@ -67,6 +75,35 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     if contract.open_interest < min_open_interest:
         return ContractDecision(True, False, "Open interest too low")
     return ContractDecision(True, True, "Verified against exact Tradier chain response")
+
+
+def validate_exit_quote(contract: OptionContractOut, underlying: str, expected_symbol: str,
+                        event_at: datetime, max_lag_seconds: int) -> ContractDecision:
+    """Validate an exact live exit quote without applying entry-liquidity filters.
+
+    A zero bid is accepted as explicit evidence of zero liquidation value. It is
+    materially different from a missing contract row or missing bid timestamp.
+    """
+    identity_rejection = _identity_decision(contract, underlying)
+    if identity_rejection is not None:
+        return identity_rejection
+    if contract.option_symbol.strip().upper() != expected_symbol.strip().upper():
+        return ContractDecision(True, False, "Tradier row is not the selected entry contract")
+    if contract.provider != "tradier" or contract.data_mode != "live":
+        return ContractDecision(True, False, "Exit quote is not explicit live Tradier data")
+    if contract.bid < 0 or contract.ask <= 0 or contract.ask < contract.bid:
+        return ContractDecision(True, False, "Invalid exit bid/ask")
+    if contract.bid_timestamp is None or contract.ask_timestamp is None:
+        return ContractDecision(True, False, "Exit bid/ask timestamps unavailable")
+    event = event_at.astimezone(timezone.utc) if event_at.tzinfo else event_at.replace(tzinfo=timezone.utc)
+    bid_at = contract.bid_timestamp.astimezone(timezone.utc)
+    ask_at = contract.ask_timestamp.astimezone(timezone.utc)
+    earliest, latest = min(bid_at, ask_at), max(bid_at, ask_at)
+    if earliest < event:
+        return ContractDecision(True, False, "Exit quote predates the underlying exit event")
+    if (latest - event).total_seconds() > max_lag_seconds:
+        return ContractDecision(True, False, "Exit quote arrived outside the allowed lag window")
+    return ContractDecision(True, True, "Verified exact Tradier quote after the underlying exit event")
 
 
 def annotate_chain(chain: list[OptionContractOut], underlying: str, now: datetime, *,
