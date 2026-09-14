@@ -10,7 +10,7 @@ from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut
                                 ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
                                       evaluate_open_signals, metrics,
-                                      option_shadow_results, track_candidates,
+                                      option_shadow_results, performance_chart_data, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
 
@@ -134,6 +134,46 @@ def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():
         assert [item["signal_id"] for item in payload["signals"]]==["first"]
         assert payload["raw_metrics"]["total_triggered_signals"]==2
         assert payload["metrics"]["total_triggered_signals"]==1
+
+
+def test_performance_paginates_newest_first_without_changing_full_metrics():
+    local=database()
+    with local() as db:
+        for index in range(30):
+            trade=row(signal_id=f"signal-{index}", ticker=f"T{index}")
+            trade.triggered_at+=timedelta(minutes=index)
+            db.add(trade)
+        db.commit()
+        payload=performance(page=2,page_size=10,db=db)
+        assert payload["pagination"]=={"page":2,"page_size":10,"total_items":30,"total_pages":3}
+        assert len(payload["signals"])==10
+        assert payload["signals"][0]["signal_id"]=="signal-19"
+        assert payload["metrics"]["total_triggered_signals"]==30
+        assert payload["chart_data"]["daily"][0]["trading_date"]=="2026-08-03"
+
+
+def test_chart_data_keeps_exclusions_and_option_dollars_separate():
+    winner=row(signal_id="winner")
+    winner.exit_reason="TARGET";winner.exit_price=102;winner.result_r=2;winner.result_return_pct=2
+    winner.exit_at=winner.triggered_at+timedelta(minutes=10)
+    loser=row(signal_id="loser",ticker="QQQ")
+    loser.trading_date=date(2026,8,4);loser.triggered_at+=timedelta(days=1)
+    loser.exit_reason="STOP";loser.exit_price=99;loser.result_r=-1;loser.result_return_pct=-1
+    loser.exit_at=loser.triggered_at+timedelta(minutes=5)
+    excluded=row(signal_id="excluded",ticker="IWM")
+    excluded.trading_date=date(2026,8,5);excluded.triggered_at+=timedelta(days=2)
+    excluded.exit_reason="TARGET";excluded.exit_price=150;excluded.result_r=50
+    excluded.exit_at=excluded.triggered_at+timedelta(days=1)
+    charts=performance_chart_data([winner,loser,excluded],{
+        "winner":{"status":"CLOSED","pnl_dollars":30},
+    })
+    assert [point["cumulative_r"] for point in charts["daily"]]==[2,1,1]
+    assert charts["daily"][0]["cumulative_option_pnl_dollars"]==30
+    assert charts["daily"][-1]["cumulative_option_pnl_dollars"]==30
+    assert charts["outcomes"]==[
+        {"outcome":"TARGET","count":1},{"outcome":"STOP","count":1},
+        {"outcome":"EXCLUDED","count":1},
+    ]
 
 
 class LiveTradierProvider:

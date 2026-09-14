@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import (BacktestRun, DailyWatchSymbol, LotteryTracker, ParlayPaperPosition,
@@ -30,7 +30,8 @@ from app.services.backtest import run_backtest
 from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
                                       link_paper_position, metrics,
-                                      option_shadow_results)
+                                      option_shadow_results,
+                                      performance_chart_data)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         latest_scan, mark_lifecycle_entered,
                                         run_signal_scan)
@@ -196,7 +197,7 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
 @router.get("/lottery-trackers", response_model=LotteryTrackerListOut)
 def lottery_trackers(trading_date: date | None = None, limit: int = 50,
                      db: Session = Depends(get_db)):
-    selected_date = trading_date or _trading_date()
+    selected_date = trading_date or db.scalar(select(func.max(LotteryTracker.trading_date))) or _trading_date()
     bounded_limit = max(1, min(limit, 200))
     rows = list(db.scalars(select(LotteryTracker).where(
         LotteryTracker.trading_date == selected_date,
@@ -262,7 +263,8 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
                 setup_type: str | None = None, strategy_mode: str = "ONE_MIN_0DTE",
                 exit_reason: str | None = None, user_entered: bool = False,
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
-                max_score: float | None = None, deduplicate: bool = True,
+                max_score: float | None = None, deduplicate: bool = True, view: str = "ALL",
+                page: int = 1, page_size: int = 25,
                 db: Session = Depends(get_db)):
     query = select(SignalPerformance).order_by(
         SignalPerformance.triggered_at.asc(), SignalPerformance.signal_id.asc())
@@ -285,8 +287,29 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
         select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
         if paper_ids else {})
     option_shadow_metrics, option_shadows = option_shadow_results(db, rows)
+    selected_view = view.upper()
+    if selected_view not in {"ALL", "OPEN", "COMPLETED", "EXCLUDED"}:
+        raise HTTPException(status_code=422, detail="View must be ALL, OPEN, COMPLETED, or EXCLUDED")
+    if selected_view == "OPEN":
+        visible_rows = [row for row in rows if row.exit_reason == "OPEN"]
+    elif selected_view == "COMPLETED":
+        visible_rows = [row for row in rows if row.exit_reason != "OPEN"]
+    elif selected_view == "EXCLUDED":
+        visible_rows = [row for row in rows if analytics_exclusion_reason(row) is not None]
+    else:
+        visible_rows = rows
+    newest_first = list(reversed(visible_rows))
+    bounded_page_size = max(5, min(page_size, 100))
+    total_items = len(newest_first)
+    total_pages = max(1, (total_items+bounded_page_size-1)//bounded_page_size)
+    bounded_page = min(max(1, page), total_pages)
+    page_start = (bounded_page-1)*bounded_page_size
+    page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "option_shadow_metrics": option_shadow_metrics,
+        "chart_data": performance_chart_data(rows, option_shadows),
+        "pagination": {"page": bounded_page, "page_size": bounded_page_size,
+                       "total_items": total_items, "total_pages": total_pages},
         "signals": [
             _ledger(
                 row,
@@ -295,7 +318,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
                 else None,
                 option_shadows.get(row.signal_id),
             )
-            for row in reversed(rows)
+            for row in page_rows
         ],
         "scope": {"source": source, "strategy_mode": strategy_mode,
                   "user_entered": user_entered, "deduplication": (

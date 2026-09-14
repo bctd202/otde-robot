@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { getLotteryTracker, getLotteryTrackers } from '../api/client';
-import { formatEasternTime, parseApiTimestamp } from '../lib/dates';
-import type { Lottery, LotteryTrackerDetail, LotteryTrackerPoint, LotteryTrackerSummary } from '../types';
+import { formatDateOnly, formatEasternTime, parseApiTimestamp } from '../lib/dates';
+import type { LotteryTrackerDetail, LotteryTrackerPoint, LotteryTrackerSummary } from '../types';
 
 export const LOTTERY_TRACKER_REFRESH_INTERVAL_MS=60_000;
 
@@ -61,8 +61,9 @@ function TrackerDetail({detail,onClose}:{detail:LotteryTrackerDetail;onClose:()=
   </section>;
 }
 
-export function LotteryLab({setups}:{setups:Lottery[]}) {
+export function LotteryLab() {
   const [trackers,setTrackers]=useState<LotteryTrackerSummary[]>([]);
+  const [tradingDate,setTradingDate]=useState('');
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [detail,setDetail]=useState<LotteryTrackerDetail|null>(null);
   const [loadingId,setLoadingId]=useState<string|null>(null);
@@ -71,6 +72,7 @@ export function LotteryLab({setups}:{setups:Lottery[]}) {
     try{
       const result=await getLotteryTrackers();
       setTrackers(Array.isArray(result.trackers)?result.trackers:[]);
+      setTradingDate(result.trading_date);
     }catch{setMessage('Lottery history is temporarily unavailable.');}
   },[]);
   useEffect(()=>{void refresh();const timer=window.setInterval(()=>void refresh(),LOTTERY_TRACKER_REFRESH_INTERVAL_MS);return()=>window.clearInterval(timer)},[refresh]);
@@ -80,9 +82,8 @@ export function LotteryLab({setups}:{setups:Lottery[]}) {
     const timer=window.setInterval(refreshDetail,LOTTERY_TRACKER_REFRESH_INTERVAL_MS);
     return()=>window.clearInterval(timer);
   },[selectedId]);
-  const trackerByContract=useMemo(()=>new Map(trackers.map(row=>[row.option_symbol.toUpperCase(),row])),[trackers]);
-  const currentContracts=useMemo(()=>new Set(setups.map(row=>(row.option_symbol??'').toUpperCase())),[setups]);
-  const history=trackers.filter(row=>!currentContracts.has(row.option_symbol.toUpperCase()));
+  const current=useMemo(()=>trackers.filter(row=>row.status==='ACTIVE'&&row.currently_qualified),[trackers]);
+  const history=useMemo(()=>trackers.filter(row=>!current.includes(row)),[trackers,current]);
   const open=async(row:LotteryTrackerSummary)=>{
     if(selectedId===row.id){setSelectedId(null);setDetail(null);return;}
     setLoadingId(row.id);setMessage('');
@@ -93,11 +94,12 @@ export function LotteryLab({setups}:{setups:Lottery[]}) {
   const button=(row:LotteryTrackerSummary|undefined)=>row
     ?<button className="lottery-chart-button" type="button" aria-expanded={selectedId===row.id} aria-controls={`lottery-detail-${row.id}`} disabled={loadingId===row.id} onClick={()=>void open(row)}>{loadingId===row.id?'Loading…':selectedId===row.id?'Hide performance':'View performance'}</button>
     :<button className="lottery-chart-button" type="button" disabled>Tracking starts next scan</button>;
-  return <>
-    <div className="risk-warning"><strong>Highly speculative. Most lottery contracts are expected to expire worthless.</strong><span>Maximum modeled loss is the full debit shown. Estimates are not guarantees.</span></div>
-    {setups.length===0?<p>No lottery candidates right now.</p>:setups.map(row=>{const tracker=trackerByContract.get((row.option_symbol??'').toUpperCase());return <article className="lotto" key={`${row.symbol}-${row.strike}-${row.right}`}><div><span className="tag orange">{row.symbol} {row.right.toUpperCase()} {row.strike}</span><h3>Momentum runner · score {row.setup_score}</h3><p>{row.explanation}</p>{button(tracker)}</div><div className="trade-grid"><Metric label="OCC symbol" value={row.option_symbol}/><Metric label="Normalized" value={row.normalized_symbol??'—'}/><Metric label="Provider / mode" value={`${row.provider} / ${row.data_mode}`}/><Metric label="Verification" value={`${row.verification_status}: ${row.verification_reason}`}/><Metric label="Bid / ask" value={`${row.bid} / ${row.ask}`}/><Metric label="Quote timestamps" value={`bid ${formatEasternTime(row.bid_timestamp)} / ask ${formatEasternTime(row.ask_timestamp)} / shown ${formatEasternTime(row.quote_timestamp)}`}/><Metric label="Expiration / type" value={`${row.expiration} ${row.right.toUpperCase()} ${row.strike}`}/><Metric label="Maximum loss" value={`$${row.total_debit}`}/><Metric label="Spread" value={`${row.spread_percent}%`}/><Metric label="Delta / gamma" value={`${row.delta} / ${row.gamma}`}/><Metric label="Trigger / invalid" value={`${row.underlying_trigger} / ${row.underlying_invalidation}`}/><Metric label="2x / 5x / 10x est." value={`${row.estimated_2x_underlying} / ${row.estimated_5x_underlying} / ${row.estimated_10x_underlying}`}/></div><ul>{row.worthless_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul></article>})}
-    {history.length>0&&<section className="lottery-history"><header><div><p className="eyebrow">TRACKED TODAY</p><h3>Earlier lottery plays</h3></div><span>{history.length} contract{history.length===1?'':'s'}</span></header>{history.map(row=><div className="lottery-history-row" key={row.id}><div><strong>{row.symbol} {row.right.toUpperCase()} {row.strike}</strong><small>First seen {formatEasternTime(row.first_seen_at)} · {row.point_count} scans</small></div><span>Cost {money(row.entry_cost)}</span><span>Peak {multiple(row.peak_multiple)}</span>{button(row)}</div>)}</section>}
+  return <section id="lottery" className="lottery-page">
+    <header className="lottery-page-heading"><div><p className="eyebrow">SCAN-BY-SCAN OPTION HISTORY</p><h2>Lottery Plays</h2><p>{tradingDate?`${formatDateOnly(tradingDate)} · `:''}Every curve uses the first qualifying ask as cost and each later bid as sellable value.</p></div><span>{trackers.length} tracked</span></header>
+    <div className="risk-warning"><strong>Highly speculative. Most lottery contracts are expected to expire worthless.</strong><span>Maximum modeled loss is the original debit. Estimates are not guarantees.</span></div>
+    {current.length===0?<div className="lottery-empty"><strong>No active lottery candidate</strong><span>The most recent tracked session remains below.</span></div>:<div className="lottery-active-grid">{current.map(row=><article className="lotto tracked-lottery-card" key={row.id}><header><div><span className="tag orange">{row.symbol} {row.right.toUpperCase()} {row.strike}</span><h3>Momentum runner · score {row.setup_score.toFixed(1)}</h3><p>{row.option_symbol}</p></div><strong>{multiple(row.latest_multiple)}</strong></header><div className="trade-grid"><Metric label="Original cost" value={money(row.entry_cost)}/><Metric label="Latest sellable" value={money(row.latest_sellable_value)}/><Metric label="Peak sellable" value={money(row.peak_sellable_value)}/><Metric label="Peak multiple" value={multiple(row.peak_multiple)}/><Metric label="First seen" value={formatEasternTime(row.first_seen_at)}/><Metric label="Saved scans" value={row.point_count}/></div>{button(row)}</article>)}</div>}
+    {history.length>0&&<section className="lottery-history"><header><div><p className="eyebrow">SESSION HISTORY</p><h3>Tracked lottery plays</h3></div><span>{history.length} contract{history.length===1?'':'s'}</span></header>{history.map(row=><div className="lottery-history-row" key={row.id}><div><strong>{row.symbol} {row.right.toUpperCase()} {row.strike}</strong><small>First seen {formatEasternTime(row.first_seen_at)} · {row.point_count} scans · {row.status.toLowerCase()}</small></div><span>Cost {money(row.entry_cost)}</span><span>Peak {multiple(row.peak_multiple)}</span>{button(row)}</div>)}</section>}
     {message&&<p className="lottery-tracker-message" role="status">{message}</p>}
     {detail&&selectedId===detail.tracker.id&&<TrackerDetail detail={detail} onClose={()=>{setSelectedId(null);setDetail(null)}}/>}
-  </>;
+  </section>;
 }

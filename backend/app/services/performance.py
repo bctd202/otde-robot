@@ -442,6 +442,70 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
     return summary, payloads
 
 
+def performance_chart_data(rows: list[SignalPerformance], option_shadows: dict[str, dict]) -> dict:
+    """Build compact, daily chart series without shipping the full ledger.
+
+    Underlying-path results and ask-to-bid option evidence intentionally remain
+    separate series. Quality-excluded rows stay visible in the outcome counts but
+    never enter either underlying equity curve.
+    """
+    daily: dict[str, dict] = {}
+    outcomes: dict[str, int] = {}
+    ordered = sorted(rows, key=lambda row: (_utc(row.triggered_at), row.signal_id))
+    for row in ordered:
+        day = row.trading_date.isoformat()
+        bucket = daily.setdefault(day, {
+            "trading_date": day, "result_r": 0.0, "return_pct": 0.0,
+            "resolved": 0, "wins": 0, "losses": 0,
+            "option_pnl_dollars": 0.0, "option_closed": 0,
+        })
+        exclusion = analytics_exclusion_reason(row)
+        outcome = "EXCLUDED" if exclusion is not None else row.exit_reason
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        if exclusion is None and row.exit_reason != "OPEN" and row.result_r is not None:
+            result_r = float(row.result_r)
+            if row.result_return_pct is not None:
+                return_pct = float(row.result_return_pct)
+            elif row.entry_price:
+                return_pct = result_r * abs(row.entry_price-row.stop_price) / row.entry_price * 100
+            else:
+                return_pct = 0.0
+            bucket["result_r"] += result_r
+            bucket["return_pct"] += return_pct
+            bucket["resolved"] += 1
+            bucket["wins"] += result_r > 0
+            bucket["losses"] += result_r < 0
+        shadow = option_shadows.get(row.signal_id)
+        if shadow and shadow.get("status") == "CLOSED" and shadow.get("pnl_dollars") is not None:
+            bucket["option_pnl_dollars"] += float(shadow["pnl_dollars"])
+            bucket["option_closed"] += 1
+
+    cumulative_r = cumulative_return = cumulative_option = 0.0
+    points = []
+    for day in sorted(daily):
+        bucket = daily[day]
+        cumulative_r += bucket["result_r"]
+        cumulative_return += bucket["return_pct"]
+        cumulative_option += bucket["option_pnl_dollars"]
+        points.append({
+            **bucket,
+            "result_r": round(bucket["result_r"], 3),
+            "return_pct": round(bucket["return_pct"], 3),
+            "option_pnl_dollars": round(bucket["option_pnl_dollars"], 2),
+            "cumulative_r": round(cumulative_r, 3),
+            "cumulative_return_pct": round(cumulative_return, 3),
+            "cumulative_option_pnl_dollars": round(cumulative_option, 2),
+        })
+    outcome_order = ["TARGET", "STOP", "TIMED_EXIT", "OPEN", "EXCLUDED",
+                     "DATA_GAP", "INVALIDATED", "MISSED"]
+    labels = [label for label in outcome_order if label in outcomes]
+    labels.extend(sorted(set(outcomes)-set(labels)))
+    return {
+        "daily": points,
+        "outcomes": [{"outcome": label, "count": outcomes[label]} for label in labels],
+    }
+
+
 def metrics(rows: list[SignalPerformance]) -> dict:
     eligible = [row for row in rows if analytics_exclusion_reason(row) is None]
     completed = sorted(

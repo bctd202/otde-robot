@@ -138,6 +138,9 @@ def test_tracker_api_exposes_the_summary_and_scan_points():
     assert listing.status_code == 200
     assert listing.json()["trackers"][0]["entry_cost"] == 20
     assert listing.json()["performance_basis"] == "Subsequent sellable bid"
+    latest_listing = client.get("/api/lottery-trackers")
+    assert latest_listing.status_code == 200
+    assert latest_listing.json()["trading_date"] == "2026-09-02"
 
     detail = client.get(f"/api/lottery-trackers/{tracker_id}")
     assert detail.status_code == 200
