@@ -82,6 +82,9 @@ def test_tracker_records_each_scan_and_keeps_marking_after_contract_stops_qualif
         assert summary["peak_sellable_value"] == 45
         assert summary["hit_2x_at"].replace(tzinfo=ZoneInfo("UTC")) == provider.now.astimezone(ZoneInfo("UTC"))
         assert summary["currently_qualified"] is False
+        assert summary["exit_scenarios"]["take_2x"]["target_hit"] is True
+        assert summary["exit_scenarios"]["take_2x"]["exit_value"] == 45
+        assert summary["exit_scenarios"]["take_5x"]["exit_reason"] == "OPEN_MARK"
 
 
 def test_same_completed_candle_cannot_duplicate_a_chart_point():
@@ -138,6 +141,11 @@ def test_tracker_api_exposes_the_summary_and_scan_points():
     assert listing.status_code == 200
     assert listing.json()["trackers"][0]["entry_cost"] == 20
     assert listing.json()["performance_basis"] == "Subsequent sellable bid"
+    assert listing.json()["available_dates"] == ["2026-09-02"]
+    assert listing.json()["summary"]["contract_count"] == 1
+    assert listing.json()["summary"]["entry_wave_count"] == 1
+    assert listing.json()["summary"]["total_entry_cost"] == 20
+    assert listing.json()["summary"]["rule_comparisons"][0]["key"] == "hold_to_last"
     latest_listing = client.get("/api/lottery-trackers")
     assert latest_listing.status_code == 200
     assert latest_listing.json()["trading_date"] == "2026-09-02"

@@ -10,8 +10,18 @@ export interface LotteryTrackerSummary {
   latest_bid:number|null;latest_ask:number|null;latest_sellable_value:number|null;latest_multiple:number|null;
   latest_return_percent:number|null;peak_bid:number;peak_sellable_value:number;peak_multiple:number;
   peak_return_percent:number;peak_bid_at:string|null;hit_2x_at:string|null;hit_5x_at:string|null;hit_10x_at:string|null;
-  point_count:number;currently_qualified:boolean;provider:string;data_mode:string;verification_status:string;
+  point_count:number;entry_wave_id:string;exit_scenarios:LotteryExitScenarios;currently_qualified:boolean;provider:string;data_mode:string;verification_status:string;
   verification_reason:string;actionable:boolean;
+}
+export interface LotteryExitScenario {
+  target_multiple:number|null;target_hit:boolean;exit_reason:'TARGET_2X'|'TARGET_5X'|'SESSION_END'|'OPEN_MARK'|'NO_QUOTES';
+  exit_at:string|null;exit_bid:number|null;exit_value:number|null;multiple:number|null;return_percent:number|null;
+}
+export interface LotteryExitScenarios {hold_to_last:LotteryExitScenario;take_2x:LotteryExitScenario;take_5x:LotteryExitScenario}
+export interface LotteryRuleComparison {key:string;label:string;ending_value:number;pnl:number;return_percent:number|null}
+export interface LotterySessionSummary {
+  contract_count:number;entry_wave_count:number;total_entry_cost:number;hit_2x_count:number;hit_5x_count:number;
+  hit_10x_count:number;best_observed_multiple:number;rule_comparisons:LotteryRuleComparison[];
 }
 export interface LotteryTrackerPoint {
   observed_at:string;quote_timestamp:string;bid_timestamp:string|null;ask_timestamp:string|null;
@@ -19,7 +29,8 @@ export interface LotteryTrackerPoint {
   underlying_price:number|null;spread_percent:number;is_qualified:boolean;setup_score:number|null;
 }
 export interface LotteryTrackerList {
-  trading_date:string;trackers:LotteryTrackerSummary[];entry_basis:string;performance_basis:string;paper_only:boolean;
+  trading_date:string;available_dates:string[];summary:LotterySessionSummary;trackers:LotteryTrackerSummary[];
+  entry_basis:string;performance_basis:string;accounting_note:string;paper_only:boolean;
 }
 export interface LotteryTrackerDetail {
   tracker:LotteryTrackerSummary;points:LotteryTrackerPoint[];entry_basis:string;performance_basis:string;paper_only:boolean;

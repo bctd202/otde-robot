@@ -20,6 +20,23 @@ class LotteryTrackerPointOut(BaseModel):
     setup_score: float | None = None
 
 
+class LotteryExitScenarioOut(BaseModel):
+    target_multiple: float | None = None
+    target_hit: bool
+    exit_reason: str
+    exit_at: datetime | None = None
+    exit_bid: float | None = None
+    exit_value: float | None = None
+    multiple: float | None = None
+    return_percent: float | None = None
+
+
+class LotteryExitScenariosOut(BaseModel):
+    hold_to_last: LotteryExitScenarioOut
+    take_2x: LotteryExitScenarioOut
+    take_5x: LotteryExitScenarioOut
+
+
 class LotteryTrackerSummaryOut(BaseModel):
     id: str
     trading_date: date
@@ -52,6 +69,8 @@ class LotteryTrackerSummaryOut(BaseModel):
     hit_5x_at: datetime | None = None
     hit_10x_at: datetime | None = None
     point_count: int
+    entry_wave_id: str
+    exit_scenarios: LotteryExitScenariosOut
     currently_qualified: bool
     provider: str
     data_mode: str
@@ -60,11 +79,36 @@ class LotteryTrackerSummaryOut(BaseModel):
     actionable: bool
 
 
+class LotteryRuleComparisonOut(BaseModel):
+    key: str
+    label: str
+    ending_value: float
+    pnl: float
+    return_percent: float | None = None
+
+
+class LotterySessionSummaryOut(BaseModel):
+    contract_count: int
+    entry_wave_count: int
+    total_entry_cost: float
+    hit_2x_count: int
+    hit_5x_count: int
+    hit_10x_count: int
+    best_observed_multiple: float
+    rule_comparisons: list[LotteryRuleComparisonOut] = Field(default_factory=list)
+
+
 class LotteryTrackerListOut(BaseModel):
     trading_date: date
+    available_dates: list[date] = Field(default_factory=list)
+    summary: LotterySessionSummaryOut
     trackers: list[LotteryTrackerSummaryOut] = Field(default_factory=list)
     entry_basis: str = "First qualifying ask"
     performance_basis: str = "Subsequent sellable bid"
+    accounting_note: str = (
+        "Rule comparisons assume one contract in every logged row. Adjacent strikes from the same "
+        "scanner wave are correlated and are not independent trade alerts."
+    )
     paper_only: bool = True
 
 

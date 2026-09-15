@@ -217,6 +217,31 @@ def tracker_points(db: Session, tracker_id: str) -> list[LotteryQuoteSnapshot]:
     ).order_by(LotteryQuoteSnapshot.observed_at, LotteryQuoteSnapshot.id)).all())
 
 
+def _exit_scenario(points: list[LotteryQuoteSnapshot], entry: float, status: str,
+                   target_multiple: float | None = None) -> dict:
+    """Replay a deterministic one-contract exit against saved, sellable bids."""
+    target = next((point for point in points
+                   if target_multiple is not None and point.bid >= entry * target_multiple), None)
+    selected = target or (points[-1] if points else None)
+    if selected is None or entry <= 0:
+        return {
+            "target_multiple": target_multiple, "target_hit": False, "exit_reason": "NO_QUOTES",
+            "exit_at": None, "exit_bid": None, "exit_value": None,
+            "multiple": None, "return_percent": None,
+        }
+    multiple = selected.bid / entry
+    if target is not None:
+        reason = f"TARGET_{target_multiple:g}X"
+    else:
+        reason = "SESSION_END" if status == "CLOSED" else "OPEN_MARK"
+    return {
+        "target_multiple": target_multiple, "target_hit": target is not None,
+        "exit_reason": reason, "exit_at": selected.observed_at,
+        "exit_bid": selected.bid, "exit_value": round(selected.bid * 100, 2),
+        "multiple": round(multiple, 3), "return_percent": round((multiple - 1) * 100, 1),
+    }
+
+
 def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -> dict:
     entry = row.entry_ask
     latest_multiple = row.latest_bid / entry if row.latest_bid is not None and entry > 0 else None
@@ -242,10 +267,57 @@ def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -
         "peak_bid_at": row.peak_bid_at, "hit_2x_at": row.hit_2x_at,
         "hit_5x_at": row.hit_5x_at, "hit_10x_at": row.hit_10x_at,
         "point_count": len(points),
+        "entry_wave_id": (
+            f"{row.trading_date}:{row.symbol}:{row.first_seen_at.strftime('%H:%M:%S')}"
+        ),
+        "exit_scenarios": {
+            "hold_to_last": _exit_scenario(points, entry, row.status),
+            "take_2x": _exit_scenario(points, entry, row.status, 2),
+            "take_5x": _exit_scenario(points, entry, row.status, 5),
+        },
         "currently_qualified": bool(latest_point and latest_point.is_qualified),
         "provider": row.provider, "data_mode": row.data_mode,
         "verification_status": row.verification_status,
         "verification_reason": row.verification_reason, "actionable": row.actionable,
+    }
+
+
+def lottery_session_summary(trackers: list[dict]) -> dict:
+    """Summarize saved contracts without pretending correlated strikes are independent alerts."""
+    entry_cost = round(sum(row["entry_cost"] for row in trackers), 2)
+
+    def aggregate_scenario(key: str, label: str) -> dict:
+        outcomes = [row["exit_scenarios"][key] for row in trackers]
+        ending_value = round(sum(outcome["exit_value"] or 0 for outcome in outcomes), 2)
+        pnl = round(ending_value - entry_cost, 2)
+        return {
+            "key": key, "label": label, "ending_value": ending_value, "pnl": pnl,
+            "return_percent": round(pnl / entry_cost * 100, 1) if entry_cost else None,
+        }
+
+    observed_peak_value = round(sum(row["peak_sellable_value"] for row in trackers), 2)
+    observed_peak_pnl = round(observed_peak_value - entry_cost, 2)
+    rules = [
+        aggregate_scenario("hold_to_last", "Hold to last saved bid"),
+        aggregate_scenario("take_2x", "2× target, else last bid"),
+        aggregate_scenario("take_5x", "5× target, else last bid"),
+        {
+            "key": "observed_peak", "label": "Best observed bid (hindsight)",
+            "ending_value": observed_peak_value, "pnl": observed_peak_pnl,
+            "return_percent": (
+                round(observed_peak_pnl / entry_cost * 100, 1) if entry_cost else None
+            ),
+        },
+    ]
+    return {
+        "contract_count": len(trackers),
+        "entry_wave_count": len({row["entry_wave_id"] for row in trackers}),
+        "total_entry_cost": entry_cost,
+        "hit_2x_count": sum(row["hit_2x_at"] is not None for row in trackers),
+        "hit_5x_count": sum(row["hit_5x_at"] is not None for row in trackers),
+        "hit_10x_count": sum(row["hit_10x_at"] is not None for row in trackers),
+        "best_observed_multiple": max((row["peak_multiple"] for row in trackers), default=0),
+        "rule_comparisons": rules,
     }
 
 

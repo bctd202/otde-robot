@@ -1,7 +1,7 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,test,vi} from 'vitest';
 import {App,PARLAY_REFRESH_INTERVAL_MS,stabilizeCandidateOrder} from './main';
-import type {ParlayCandidate,ParlayResponse,PerformanceMetrics,PerformanceResponse} from './types';
+import type {LotteryTrackerList,ParlayCandidate,ParlayResponse,PerformanceMetrics,PerformanceResponse} from './types';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks()});
 
@@ -9,6 +9,7 @@ const providerStatus={provider:'tradier',mode:'live',status:'healthy',delay_seco
 const board:ParlayResponse={provider_status:providerStatus,universe:['SPY'],scanner_health:{candidate_count:0,unavailable_candidate_count:0,provider_status:'healthy',engine_status:'running'},paper_only:true,candidates:[]};
 const emptyMetrics:PerformanceMetrics={total_triggered_signals:0,resolved_signals:0,open_signals:0,targets_hit:0,stops_hit:0,timed_exits:0,invalidated_missed:0,data_gap_signals:0,quality_exclusions:0,wins:0,losses:0,breakeven:0,win_rate:0,average_r:0,cumulative_r:0,profit_factor:null,average_win_r:0,average_loss_r:0,maximum_drawdown_r:0,exposure_ticker_days:0,exposure_minutes:0,average_duration:0,average_mfe:0,average_mae:0,average_return_pct:0,cumulative_return_pct:0,maximum_drawdown_pct:0};
 const performance:PerformanceResponse={metrics:emptyMetrics,raw_metrics:emptyMetrics,option_shadow_metrics:{tracked_positions:0,closed_with_quote:0,quote_gaps:0,active_positions:0,exit_pending:0,untracked_selected_positions:0,quote_coverage_percent:0,wins:0,losses:0,cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},chart_data:{daily:[],outcomes:[]},pagination:{page:1,page_size:25,total_items:0,total_pages:1},signals:[],scope:{source:'LIVE',strategy_mode:'ONE_MIN_0DTE',user_entered:false,deduplication:'FIRST_BUY_PER_TICKER_DAY'},timezone:'America/New_York',underlying_only:true,paper_only:true};
+const lottery:LotteryTrackerList={trading_date:'2026-09-11',available_dates:['2026-09-11'],summary:{contract_count:0,entry_wave_count:0,total_entry_cost:0,hit_2x_count:0,hit_5x_count:0,hit_10x_count:0,best_observed_multiple:0,rule_comparisons:[]},trackers:[],entry_basis:'First qualifying ask',performance_basis:'Subsequent sellable bid',accounting_note:'Adjacent strikes are correlated.',paper_only:true};
 
 function response(body:unknown){return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}})}
 
@@ -20,7 +21,7 @@ function mockApplication(){
     if(url.includes('/paper-positions'))return response({positions:[],paper_only:true});
     if(url.includes('/signal-alerts'))return response({alerts:[],latest_id:0,paper_only:true});
     if(url.includes('/daily-watch'))return response({trading_date:'2026-09-11',symbols:[],slots_used:0,slot_limit:2});
-    if(url.includes('/lottery-trackers'))return response({trading_date:'2026-09-11',trackers:[],entry_basis:'First qualifying ask',performance_basis:'Subsequent sellable bid',paper_only:true});
+    if(url.includes('/lottery-trackers'))return response(lottery);
     if(url.includes('/performance'))return response(performance);
     if(url.includes('/backtests'))return response([]);
     return new Response('not found',{status:404});
@@ -58,7 +59,7 @@ test('manual refresh retains the board, prevents overlap, and marks a failed sca
     if(url.includes('/paper-positions'))return response({positions:[],paper_only:true});
     if(url.includes('/signal-alerts'))return response({alerts:[],latest_id:0,paper_only:true});
     if(url.includes('/daily-watch'))return response({trading_date:'2026-09-11',symbols:[],slots_used:0,slot_limit:2});
-    if(url.includes('/lottery-trackers'))return response({trading_date:'2026-09-11',trackers:[],entry_basis:'First qualifying ask',performance_basis:'Subsequent sellable bid',paper_only:true});
+    if(url.includes('/lottery-trackers'))return response(lottery);
     if(url.includes('/performance'))return response(performance);
     if(url.includes('/backtests'))return response([]);
     return new Response('not found',{status:404});

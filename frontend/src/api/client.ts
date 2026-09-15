@@ -12,7 +12,7 @@ export const addDailyWatch=(symbol:string)=>send<DailyWatchResponse>('/daily-wat
 export const removeDailyWatch=(symbol:string)=>remove<DailyWatchResponse>(`/daily-watch/${encodeURIComponent(symbol)}`);
 export const getPaperPositions=()=>request<PaperPositionsResponse>('/paper-positions');
 export const getSignalAlerts=(afterId=0)=>request<SignalAlertsResponse>(`/signal-alerts?after_id=${afterId}`);
-export const getLotteryTrackers=()=>request<LotteryTrackerList>('/lottery-trackers');
+export const getLotteryTrackers=(tradingDate?:string)=>request<LotteryTrackerList>(`/lottery-trackers${tradingDate?`?trading_date=${encodeURIComponent(tradingDate)}&limit=200`:'?limit=200'}`);
 export const getLotteryTracker=(id:string)=>request<LotteryTrackerDetail>(`/lottery-trackers/${encodeURIComponent(id)}`);
 export const paperEnter=(candidate:ParlayCandidate,providerMode:string)=>{
   if(!candidate.contract||candidate.underlying_price===null||candidate.underlying_trigger===null||candidate.underlying_invalidation===null||candidate.first_underlying_target===null||candidate.stretch_underlying_target===null||candidate.first_option_target===null||candidate.stretch_option_target===null)throw new Error('Candidate trade plan is incomplete');
