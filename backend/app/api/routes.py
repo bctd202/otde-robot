@@ -16,6 +16,7 @@ from app.schemas.market import (DashboardOut, DailyWatchCreate,
 from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
                                          LotteryTrackerListOut,
                                          LotteryTrackerPointOut,
+                                         LotterySessionSummaryOut,
                                          LotteryTrackerSummaryOut)
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
@@ -209,7 +210,9 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
     return LotteryTrackerListOut(
         trading_date=selected_date,
         available_dates=available_dates,
-        summary=lottery_session_summary(serialized),
+        summary=LotterySessionSummaryOut.model_validate(
+            lottery_session_summary(serialized)
+        ),
         trackers=[LotteryTrackerSummaryOut.model_validate(row)
                   for row in serialized[:bounded_limit]],
     )
