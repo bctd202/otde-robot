@@ -506,6 +506,56 @@ def performance_chart_data(rows: list[SignalPerformance], option_shadows: dict[s
     }
 
 
+def market_movement_data(rows: list[SignalPerformance]) -> dict:
+    """Describe saved underlying entry-to-exit moves without altering strategy R."""
+    daily: dict[str, dict] = {}
+    raw_moves: list[float] = []
+    directional_moves: list[float] = []
+    ordered = sorted(rows, key=lambda row: (_utc(row.triggered_at), row.signal_id))
+    for row in ordered:
+        if (analytics_exclusion_reason(row) is not None or row.exit_reason == "OPEN"
+                or row.result_r is None or row.entry_price <= 0 or row.exit_price is None
+                or row.direction not in {"CALL", "PUT"}):
+            continue
+        raw_move = (row.exit_price - row.entry_price) / row.entry_price * 100
+        directional_move = raw_move if row.direction == "CALL" else -raw_move
+        raw_moves.append(raw_move)
+        directional_moves.append(directional_move)
+        day = row.trading_date.isoformat()
+        bucket = daily.setdefault(day, {
+            "trading_date": day, "raw_move_pct": 0.0, "directional_move_pct": 0.0,
+            "resolved": 0,
+        })
+        bucket["raw_move_pct"] += raw_move
+        bucket["directional_move_pct"] += directional_move
+        bucket["resolved"] += 1
+
+    cumulative_raw = cumulative_directional = 0.0
+    points = []
+    for day in sorted(daily):
+        bucket = daily[day]
+        cumulative_raw += float(bucket["raw_move_pct"])
+        cumulative_directional += float(bucket["directional_move_pct"])
+        points.append({
+            **bucket,
+            "raw_move_pct": round(float(bucket["raw_move_pct"]), 3),
+            "directional_move_pct": round(float(bucket["directional_move_pct"]), 3),
+            "cumulative_raw_move_pct": round(cumulative_raw, 3),
+            "cumulative_directional_move_pct": round(cumulative_directional, 3),
+        })
+    count = len(directional_moves)
+    return {
+        "resolved_with_prices": count,
+        "average_directional_move_pct": round(sum(directional_moves) / count, 3) if count else 0,
+        "positive_direction_rate": round(100 * sum(value > 0 for value in directional_moves) / count, 1)
+        if count else 0,
+        "cumulative_directional_move_pct": round(sum(directional_moves), 3),
+        "net_raw_underlying_move_pct": round(sum(raw_moves), 3),
+        "average_raw_underlying_move_pct": round(sum(raw_moves) / count, 3) if count else 0,
+        "daily": points,
+    }
+
+
 def metrics(rows: list[SignalPerformance]) -> dict:
     eligible = [row for row in rows if analytics_exclusion_reason(row) is None]
     completed = sorted(

@@ -31,7 +31,7 @@ from app.services.paper_positions import (create_position, market_mark,
 from app.services.backtest import run_backtest
 from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
-                                      link_paper_position, metrics,
+                                      link_paper_position, market_movement_data, metrics,
                                       option_shadow_results,
                                       performance_chart_data)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
@@ -315,6 +315,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "option_shadow_metrics": option_shadow_metrics,
         "chart_data": performance_chart_data(rows, option_shadows),
+        "market_movement": market_movement_data(rows),
         "pagination": {"page": bounded_page, "page_size": bounded_page_size,
                        "total_items": total_items, "total_pages": total_pages},
         "signals": [

@@ -1,4 +1,4 @@
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,expect,test,vi} from 'vitest';
 import {Performance} from './Performance';
 import type {PerformanceMetrics,PerformanceResponse,PerformanceSignal} from '../types';
@@ -37,6 +37,10 @@ const response=(strategy:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY',signals:Performanc
   chart_data:{daily:[{trading_date:'2026-08-04',result_r:2,return_pct:2,cumulative_r:2,
     cumulative_return_pct:2,resolved:1,wins:1,losses:0,option_pnl_dollars:0,
     cumulative_option_pnl_dollars:0,option_closed:0}],outcomes:[{outcome:'TARGET',count:signals.length}]},
+  market_movement:{resolved_with_prices:1,average_directional_move_pct:2,positive_direction_rate:100,
+    cumulative_directional_move_pct:2,net_raw_underlying_move_pct:2,average_raw_underlying_move_pct:2,
+    daily:[{trading_date:'2026-08-04',raw_move_pct:2,directional_move_pct:2,
+      cumulative_raw_move_pct:2,cumulative_directional_move_pct:2,resolved:1}]},
   pagination:{page:1,page_size:25,total_items:signals.length,total_pages:1},
   scope:{source:'LIVE',strategy_mode:strategy,user_entered:false,deduplication:'FIRST_BUY_PER_TICKER_DAY'},
 });
@@ -62,13 +66,54 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
     average_return_pct:0,cumulative_return_pct:0}));
   mockResponses(zero,structured);
   render(<Performance/>);
-  await waitFor(()=>expect(screen.getByLabelText('Cumulative R multiple by trading day')).toBeInTheDocument());
-  expect(screen.getByText('Selected plays').closest('.metric')).toHaveTextContent('2');
-  expect(screen.getByText('Total R').closest('.metric')).toHaveTextContent('2');
+  await waitFor(()=>expect(screen.getByLabelText('Cumulative Strategy R by trading day')).toBeInTheDocument());
+  const strategyMetrics=screen.getByRole('region',{name:'Strategy Performance metrics'});
+  expect(within(strategyMetrics).getByText('Total Selected Plays').closest('.metric')).toHaveTextContent('2');
+  expect(within(strategyMetrics).getByText('Total R').closest('.metric')).toHaveTextContent('2');
+  expect(within(strategyMetrics).getByText('Open Plays')).toBeInTheDocument();
+  expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);
   expect(screen.getByText('Technical audit data')).toBeInTheDocument();
   expect(screen.getByText(/Raw repeated alerts remain visible only in aggregate counts/)).toBeInTheDocument();
+});
+
+test('keeps Strategy R primary and distinguishes directional from raw put movement',async()=>{
+  const put=signal({signal_id:'put',direction:'PUT',entry_price:100,stop_price:101,target_price:99,
+    exit_price:99,result_r:1,result_return_pct:1});
+  const data=response('ONE_MIN_0DTE',[put],metrics({average_r:1,cumulative_r:1}));
+  data.chart_data.daily[0].result_r=1;
+  data.chart_data.daily[0].cumulative_r=1;
+  data.market_movement={resolved_with_prices:1,average_directional_move_pct:1,
+    positive_direction_rate:100,cumulative_directional_move_pct:1,
+    net_raw_underlying_move_pct:-1,average_raw_underlying_move_pct:-1,
+    daily:[{trading_date:'2026-08-04',raw_move_pct:-1,directional_move_pct:1,
+      cumulative_raw_move_pct:-1,cumulative_directional_move_pct:1,resolved:1}]};
+  mockResponses(data,response('STRUCTURED_INTRADAY',[]));
+  render(<Performance/>);
+  await waitFor(()=>expect(screen.getByLabelText('Cumulative Strategy R by trading day')).toBeInTheDocument());
+  expect(screen.getByRole('button',{name:'Strategy R'})).toHaveAttribute('aria-pressed','true');
+  expect(screen.getByText('Is the strategy growing?')).toBeInTheDocument();
+  expect(within(screen.getByRole('region',{name:'Strategy Performance metrics'})).getByText('Total R').closest('.metric')).toHaveTextContent('+1.00R');
+
+  fireEvent.click(screen.getByRole('button',{name:'Directional Move'}));
+  expect(screen.getByLabelText('Cumulative directional underlying move by trading day')).toBeInTheDocument();
+  expect(screen.getByText('Did Parlay correctly predict the direction of the underlying?')).toBeInTheDocument();
+  const directional=screen.getByRole('region',{name:'Market Movement metrics'});
+  expect(within(directional).getByText('Average Directional Move').closest('.metric')).toHaveTextContent('+1.000%');
+  expect(within(directional).getByText('Positive Direction Rate').closest('.metric')).toHaveTextContent('100%');
+  expect(within(directional).getByText('Cumulative Directional Move').closest('.metric')).toHaveTextContent('+1.00%');
+  expect(screen.getByText('Directional move').closest('div')).toHaveTextContent('+1.00%');
+
+  fireEvent.click(screen.getByRole('button',{name:'Raw Underlying'}));
+  expect(screen.getByLabelText('Cumulative raw underlying move by trading day')).toBeInTheDocument();
+  expect(screen.getByText('Raw Underlying Movement')).toBeInTheDocument();
+  const raw=screen.getByRole('region',{name:'Market Movement metrics'});
+  expect(within(raw).getByText('Net Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.00%');
+  expect(within(raw).getByText('Avg. Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.000%');
+  expect(screen.getByText("Shows price movement of the underlying, not the option trade's return. Calls and puts are not direction-adjusted in this view.")).toBeInTheDocument();
+  expect(screen.getByText('Raw underlying move').closest('div')).toHaveTextContent('-1.00%');
+  expect(screen.queryByText('Total Underlying %')).not.toBeInTheDocument();
 });
 
 test('keeps structured 5-14 DTE results in a separate dataset',async()=>{

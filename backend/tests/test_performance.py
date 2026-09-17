@@ -9,7 +9,7 @@ from app.db.session import Base
 from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut,
                                 ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
-                                      evaluate_open_signals, metrics,
+                                      evaluate_open_signals, market_movement_data, metrics,
                                       option_shadow_results, performance_chart_data, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
@@ -174,6 +174,38 @@ def test_chart_data_keeps_exclusions_and_option_dollars_separate():
         {"outcome":"TARGET","count":1},{"outcome":"STOP","count":1},
         {"outcome":"EXCLUDED","count":1},
     ]
+
+
+def test_market_movement_flips_puts_and_excludes_unresolved_or_ineligible_rows():
+    specs = [
+        ("call-up", "CALL", 102, 2, 0),
+        ("put-down", "PUT", 97, 3, 0),
+        ("call-down", "CALL", 99, -1, 1),
+        ("put-up", "PUT", 101, -1, 1),
+    ]
+    resolved = []
+    for signal_id, direction, exit_price, result_r, day_offset in specs:
+        trade = row(direction=direction, signal_id=signal_id, ticker=signal_id)
+        trade.trading_date += timedelta(days=day_offset)
+        trade.triggered_at += timedelta(days=day_offset)
+        trade.exit_at = trade.triggered_at + timedelta(minutes=5)
+        trade.exit_reason = "TARGET" if result_r > 0 else "STOP"
+        trade.exit_price = exit_price
+        trade.result_r = result_r
+        resolved.append(trade)
+    excluded = row(signal_id="excluded", ticker="EXCLUDED")
+    excluded.exit_reason = "DATA_GAP"
+    excluded.exit_price = 200
+    excluded.result_r = 100
+    movement = market_movement_data([*resolved, excluded, row(signal_id="open")])
+    assert movement["resolved_with_prices"] == 4
+    assert movement["average_directional_move_pct"] == .75
+    assert movement["positive_direction_rate"] == 50
+    assert movement["cumulative_directional_move_pct"] == 3
+    assert movement["net_raw_underlying_move_pct"] == -1
+    assert movement["average_raw_underlying_move_pct"] == -.25
+    assert [point["cumulative_directional_move_pct"] for point in movement["daily"]] == [5, 3]
+    assert [point["cumulative_raw_move_pct"] for point in movement["daily"]] == [-1, -1]
 
 
 class LiveTradierProvider:
