@@ -15,7 +15,7 @@ from app.db.models import (DailyWatchSymbol, ParlayPaperPosition, ScannerRuntime
 from app.db.session import SessionLocal
 from app.market_data.factory import get_provider
 from app.schemas.market import ParlayCandidateOut
-from app.services.market_calendar import market_session
+from app.services.market_calendar import market_session, next_market_open
 from app.services.lottery_tracker import close_lottery_trackers, track_lottery_scan
 from app.services.paper_positions import refresh_position
 from app.services.parlay import latest_completed_candle_at, rank_parlays
@@ -362,10 +362,18 @@ def background_scan_once(*, now: datetime | None = None) -> None:
     with SessionLocal() as db:
         runtime = _runtime(db)
         runtime.heartbeat_at = scan_now
-        if market_session(scan_now) != "regular":
+        session = market_session(scan_now)
+        if session != "regular":
             expire_stale_lifecycles(db, scan_now)
             close_lottery_trackers(db, scan_now)
-            runtime.status = "idle_market_closed"
+            runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
+            runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(scan_now)
+            runtime.last_error = None
+            db.commit()
+            return
+        if runtime.operator_hold:
+            runtime.status = "held_by_operator"
+            runtime.next_evaluation_at = None
             runtime.last_error = None
             db.commit()
             return

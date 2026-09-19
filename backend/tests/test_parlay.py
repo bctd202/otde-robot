@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
+from app.db.models import ScannerRuntime
 from app.db.session import Base, get_db
 from app.main import app
 from app.market_data.mock import MockMarketDataProvider
@@ -161,6 +162,7 @@ def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):
 
     app.dependency_overrides[get_db] = db_override
     monkeypatch.setattr("app.api.routes.get_provider", mock_provider)
+    monkeypatch.setattr("app.api.routes.market_session", lambda _now: "regular")
     try:
         response = TestClient(app).get("/api/parlays")
     finally:
@@ -197,3 +199,52 @@ def test_live_and_replay_share_identical_completed_candle_evaluation():
     replay=replay_evaluation(candles,candles[-1].close)
     assert replay == live
     assert (replay.direction,replay.trigger,replay.stop,replay.target,replay.checks,replay.confirmed) == (live.direction,live.trigger,live.stop,live.target,live.checks,live.confirmed)
+
+
+def test_closed_market_board_does_not_force_provider_scan(monkeypatch):
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def db_override():
+        with local() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = db_override
+    monkeypatch.setattr("app.api.routes.get_provider", mock_provider)
+    monkeypatch.setattr("app.api.routes.market_session", lambda _now: "closed_holiday_or_weekend")
+    monkeypatch.setattr("app.api.routes.run_signal_scan",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")))
+    try:
+        response = TestClient(app).get("/api/parlays")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["candidates"] == []
+    assert response.json()["scanner_health"]["market_session"] == "closed_holiday_or_weekend"
+
+
+def test_scanner_control_persists_hold_and_resume(monkeypatch):
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def db_override():
+        with local() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = db_override
+    monkeypatch.setattr("app.api.routes.market_session", lambda _now: "closed")
+    try:
+        with TestClient(app) as client:
+            held = client.post("/api/scanner-control", json={"action": "HOLD"})
+            resumed = client.post("/api/scanner-control", json={"action": "RESUME"})
+    finally:
+        app.dependency_overrides.clear()
+    assert held.status_code == 200 and held.json()["operator_hold"] is True
+    assert resumed.status_code == 200 and resumed.json()["operator_hold"] is False
+    assert resumed.json()["engine_status"] == "idle_market_closed"
+    with local() as db:
+        runtime = db.get(ScannerRuntime, "parlay")
+        assert runtime is not None and runtime.operator_hold is False
+        assert runtime.control_updated_at is not None

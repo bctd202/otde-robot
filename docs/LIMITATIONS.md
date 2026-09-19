@@ -10,4 +10,5 @@
 - The market-data cache and 100-request safety guard are process-local. Multi-worker deployment needs a shared cache and distributed rate limiter.
 - Holiday logic is a small deterministic Phase 1 calendar rather than a full exchange calendar package.
 - The server scheduler assumes a single application worker. Multi-worker deployment needs a distributed scheduler lock.
+- Automatic exchange-day sleep uses the published NYSE holiday and early-close calendars through 2028. Extend the calendar table before operating in 2029.
 - WebSocket sends heartbeat state only; the UI currently polls the persisted cache for updates.

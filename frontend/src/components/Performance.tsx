@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {getPerformance} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
-import type {PerformanceDailyPoint,PerformanceResponse,PerformanceSignal} from '../types';
+import type {OptionShadowBreakdown,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
 
 type OutcomeUnit='R'|'DIRECTIONAL'|'RAW';
 type PerformanceStrategy='ONE_MIN_0DTE'|'STRUCTURED_INTRADAY';
@@ -13,7 +13,7 @@ const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
 const strategyName=(mode:PerformanceStrategy)=>mode==='STRUCTURED_INTRADAY'?'Structured Intraday · 5–14 DTE':'1-Min · true 0DTE';
 const shortDate=(value:string)=>new Date(`${value}T12:00:00`).toLocaleDateString('en-US',{month:'short',day:'numeric'});
 const humanize=(value:string)=>value.replaceAll('_',' ').replaceAll('-',' ');
-const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
+const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Array.isArray(value?.research_breakdowns?.cohorts)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
 
 function signed(value:number,digits=2,suffix=''):string{
   return `${value>0?'+':''}${value.toFixed(digits)}${suffix}`;
@@ -99,6 +99,21 @@ function OptionEquityChart({points}:{points:PerformanceDailyPoint[]}){
     {optionPoints.map((point,index)=><circle className="graph-point" key={point.trading_date} cx={x(index)} cy={y(values[index])} r="4"><title>{`${shortDate(point.trading_date)} · ${dollars.format(values[index])}`}</title></circle>)}
     <text className="graph-axis" x={left} y={height-13}>{shortDate(optionPoints[0].trading_date)}</text><text className="graph-axis" x={width-right} y={height-13} textAnchor="end">{shortDate(optionPoints[optionPoints.length-1].trading_date)}</text>
   </svg>;
+}
+
+function ResultBar({value,max,unit}:{value:number;max:number;unit:'R'|'DOLLARS'}){
+  const width=max===0?0:Math.max(2,Math.abs(value)/max*100);
+  return <div className="result-bar"><span className={value>=0?'positive':'negative'} style={{width:`${width}%`}}/><b>{unit==='R'?signed(value,2,'R'):dollars.format(value)}</b></div>;
+}
+
+function CohortComparison({cohorts}:{cohorts:ResearchCohort[]}){
+  const maximum=Math.max(1,...cohorts.map(cohort=>Math.abs(cohort.total_r)));
+  return <section className="research-breakdown" aria-label="Core and experimental cohort comparison"><header><div><span>UNIVERSE COHORTS</span><h3>Where the strategy R is coming from</h3></div><strong>Observation only</strong></header><div className="cohort-grid">{cohorts.map(cohort=><article key={cohort.key}><div><span>{cohort.key}</span><h4>{cohort.label}</h4><small>{cohort.tickers.length?cohort.tickers.join(' · '):'No tickers in this result set'}</small></div><ResultBar value={cohort.total_r} max={maximum} unit="R"/><dl><div><dt>Resolved</dt><dd>{cohort.resolved_plays}</dd></div><div><dt>Avg.</dt><dd>{signed(cohort.average_r,3,'R')}</dd></div><div><dt>Win rate</dt><dd>{cohort.win_rate}%</dd></div><div><dt>Profit factor</dt><dd>{cohort.profit_factor?.toFixed(2)??'N/A'}</dd></div></dl></article>)}</div><p>Core is SPY, QQQ, and IWM. Experimental contains every other configured ticker. This comparison does not remove tickers or alter prior plays.</p></section>;
+}
+
+function ShadowBreakdownGraph({title,rows}:{title:string;rows:OptionShadowBreakdown[]}){
+  const maximum=Math.max(1,...rows.map(row=>Math.abs(row.pnl_dollars)));
+  return <div className="shadow-breakdown"><h4>{title}</h4>{rows.length===0?<p>No closed option quotes in this group yet.</p>:<div>{rows.map(row=><div className="shadow-breakdown-row" key={row.label}><span>{humanize(row.label)}</span><ResultBar value={row.pnl_dollars} max={maximum} unit="DOLLARS"/><small>{row.closed_with_quote} quoted · {row.wins}W/{row.losses}L</small></div>)}</div>}</div>;
 }
 
 function PlanRail({row}:{row:PerformanceSignal}){
@@ -198,7 +213,8 @@ export function Performance(){
         <section className="graph-panel"><header><div><span>DAY BY DAY</span><h3>{unit==='R'?'Where gains and losses happened':unit==='DIRECTIONAL'?'When direction was right or wrong':'When underlying prices rose or fell'}</h3></div></header><DailyBars points={graphData} unit={unit}/></section>
         <section className="graph-panel"><header><div><span>OUTCOME MIX</span><h3>How plays finished</h3></div><strong>{data.metrics.resolved_signals} resolved</strong></header><OutcomeGraph data={data.chart_data.outcomes}/></section>
       </div>
-      <section className="option-shadow"><header><div><span>REAL OPTION EVIDENCE · FORWARD ONLY</span><h3>Automated ask-to-bid shadow</h3></div><strong>{data.option_shadow_metrics.quote_coverage_percent}% quote coverage</strong></header><div className="shadow-layout"><OptionEquityChart points={data.chart_data.daily}/><div className="shadow-stats"><div><span>Tracked</span><strong>{data.option_shadow_metrics.tracked_positions}</strong></div><div><span>Closed with quote</span><strong>{data.option_shadow_metrics.closed_with_quote}</strong></div><div><span>Quote gaps</span><strong>{data.option_shadow_metrics.quote_gaps}</strong></div><div><span>Shadow P/L</span><strong>{dollars.format(data.option_shadow_metrics.cumulative_pnl_dollars)}</strong></div><p>Entry is the verified ask. Exit is the first verified bid after the underlying exit. This never mixes into underlying-R headlines.</p></div></div></section>
+      <CohortComparison cohorts={data.research_breakdowns.cohorts}/>
+      <section className="option-shadow"><header><div><span>REAL OPTION EVIDENCE · FORWARD ONLY</span><h3>Automated ask-to-bid shadow</h3></div><strong>{data.option_shadow_metrics.quote_coverage_percent}% quote coverage</strong></header><div className="shadow-layout"><OptionEquityChart points={data.chart_data.daily}/><div className="shadow-stats"><div><span>Tracked</span><strong>{data.option_shadow_metrics.tracked_positions}</strong></div><div><span>Closed with quote</span><strong>{data.option_shadow_metrics.closed_with_quote}</strong></div><div><span>Quote gaps</span><strong>{data.option_shadow_metrics.quote_gaps}</strong></div><div><span>Shadow P/L</span><strong>{dollars.format(data.option_shadow_metrics.cumulative_pnl_dollars)}</strong></div><p>Entry is the verified ask. Exit is the first verified bid after the underlying exit. This never mixes into underlying-R headlines.</p></div></div><div className="shadow-breakdown-grid"><ShadowBreakdownGraph title="P/L by ticker" rows={data.research_breakdowns.option_shadow_by_ticker}/><ShadowBreakdownGraph title="P/L by underlying exit" rows={data.research_breakdowns.option_shadow_by_exit_reason}/></div></section>
       <div className="play-log-heading"><div><p className="eyebrow">THE PLAYS</p><h3>{view==='ALL'?'Every selected play':view.charAt(0)+view.slice(1).toLowerCase()}</h3><p>{first}–{last} of {pagination?.total_items??0} · newest first</p></div><label>Rows per page<select value={pageSize} onChange={event=>{setPageSize(Number(event.target.value));setPage(1)}}>{PAGE_SIZES.map(size=><option key={size} value={size}>{size}</option>)}</select></label></div>
       {data.signals.length===0?<div className="play-log-empty">No plays match this view.</div>:<div className="performance-play-grid">{data.signals.map(row=><PlayCard row={row} unit={unit} expanded={expanded===row.signal_id} onToggle={()=>setExpanded(expanded===row.signal_id?'':row.signal_id)} key={row.signal_id}/>)}</div>}
       {pagination&&<nav className="pagination" aria-label="Performance log pages"><button type="button" disabled={loading||pagination.page<=1} onClick={()=>{setPage(value=>value-1);setExpanded('')}}>← Previous</button><span>Page <strong>{pagination.page}</strong> of <strong>{pagination.total_pages}</strong></span><button type="button" disabled={loading||pagination.page>=pagination.total_pages} onClick={()=>{setPage(value=>value+1);setExpanded('')}}>Next →</button></nav>}

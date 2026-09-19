@@ -8,7 +8,7 @@ afterEach(()=>{cleanup();vi.restoreAllMocks()});
 const providerStatus={provider:'tradier',mode:'live',status:'healthy',delay_seconds:0,latest_timestamp:'2026-09-11T14:00:00-04:00',message:'Live Tradier market data; paper research only.'};
 const board:ParlayResponse={provider_status:providerStatus,universe:['SPY'],scanner_health:{candidate_count:0,unavailable_candidate_count:0,provider_status:'healthy',engine_status:'running'},paper_only:true,candidates:[]};
 const emptyMetrics:PerformanceMetrics={total_triggered_signals:0,resolved_signals:0,open_signals:0,targets_hit:0,stops_hit:0,timed_exits:0,invalidated_missed:0,data_gap_signals:0,quality_exclusions:0,wins:0,losses:0,breakeven:0,win_rate:0,average_r:0,cumulative_r:0,profit_factor:null,average_win_r:0,average_loss_r:0,maximum_drawdown_r:0,exposure_ticker_days:0,exposure_minutes:0,average_duration:0,average_mfe:0,average_mae:0,average_return_pct:0,cumulative_return_pct:0,maximum_drawdown_pct:0};
-const performance:PerformanceResponse={metrics:emptyMetrics,raw_metrics:emptyMetrics,option_shadow_metrics:{tracked_positions:0,closed_with_quote:0,quote_gaps:0,active_positions:0,exit_pending:0,untracked_selected_positions:0,quote_coverage_percent:0,wins:0,losses:0,cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},chart_data:{daily:[],outcomes:[]},market_movement:{resolved_with_prices:0,average_directional_move_pct:0,positive_direction_rate:0,cumulative_directional_move_pct:0,net_raw_underlying_move_pct:0,average_raw_underlying_move_pct:0,daily:[]},pagination:{page:1,page_size:25,total_items:0,total_pages:1},signals:[],scope:{source:'LIVE',strategy_mode:'ONE_MIN_0DTE',user_entered:false,deduplication:'FIRST_BUY_PER_TICKER_DAY'},timezone:'America/New_York',underlying_only:true,paper_only:true};
+const performance:PerformanceResponse={metrics:emptyMetrics,raw_metrics:emptyMetrics,option_shadow_metrics:{tracked_positions:0,closed_with_quote:0,quote_gaps:0,active_positions:0,exit_pending:0,untracked_selected_positions:0,quote_coverage_percent:0,wins:0,losses:0,cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},research_breakdowns:{cohorts:[{key:'CORE',label:'Core index cohort',tickers:['SPY','QQQ','IWM'],selected_plays:0,resolved_plays:0,total_r:0,average_r:0,win_rate:0,profit_factor:null,maximum_drawdown_r:0},{key:'EXPERIMENTAL',label:'Experimental universe',tickers:[],selected_plays:0,resolved_plays:0,total_r:0,average_r:0,win_rate:0,profit_factor:null,maximum_drawdown_r:0}],option_shadow_by_ticker:[],option_shadow_by_exit_reason:[],cohort_definition:'Core = SPY, QQQ, IWM; Experimental = every other configured ticker.',historical_records_changed:false},chart_data:{daily:[],outcomes:[]},market_movement:{resolved_with_prices:0,average_directional_move_pct:0,positive_direction_rate:0,cumulative_directional_move_pct:0,net_raw_underlying_move_pct:0,average_raw_underlying_move_pct:0,daily:[]},pagination:{page:1,page_size:25,total_items:0,total_pages:1},signals:[],scope:{source:'LIVE',strategy_mode:'ONE_MIN_0DTE',user_entered:false,deduplication:'FIRST_BUY_PER_TICKER_DAY'},timezone:'America/New_York',underlying_only:true,paper_only:true};
 const lottery:LotteryTrackerList={trading_date:'2026-09-11',available_dates:['2026-09-11'],summary:{contract_count:0,entry_wave_count:0,total_entry_cost:0,hit_2x_count:0,hit_5x_count:0,hit_10x_count:0,best_observed_multiple:0,rule_comparisons:[]},trackers:[],entry_basis:'First qualifying ask',performance_basis:'Subsequent sellable bid',accounting_note:'Adjacent strikes are correlated.',paper_only:true};
 
 function response(body:unknown){return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}})}
@@ -48,6 +48,29 @@ test('polls the server-owned Parlay cache every 15 seconds',()=>{
   const interval=vi.spyOn(window,'setInterval');mockApplication();render(<App/>);
   expect(PARLAY_REFRESH_INTERVAL_MS).toBe(15_000);
   expect(interval).toHaveBeenCalledWith(expect.any(Function),15_000);
+});
+
+test('shows automatic off-hours sleep and lets the operator hold the scanner',async()=>{
+  const closedBoard={...board,scanner_health:{...board.scanner_health,market_session:'closed_holiday_or_weekend',operator_hold:false,next_market_open_at:'2026-09-21T09:30:00-04:00'}};
+  const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
+  vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
+    const url=String(input);
+    if(url.includes('/scanner-control')){expect(init?.method).toBe('POST');expect(init?.body).toBe(JSON.stringify({action:'HOLD'}));return response({operator_hold:true,engine_status:'held_by_operator',market_session:'closed_holiday_or_weekend',next_market_open_at:'2026-09-21T09:30:00-04:00',control_updated_at:'2026-09-19T12:00:00Z',message:'Scanner held. Dashboard and saved research remain available.',paper_only:true})}
+    if(url.includes('/parlays'))return response(closedBoard);
+    if(url.includes('/paper-positions'))return response({positions:[],paper_only:true});
+    if(url.includes('/signal-alerts'))return response({alerts:[],latest_id:0,paper_only:true});
+    if(url.includes('/daily-watch'))return response({trading_date:'2026-09-19',symbols:[],slots_used:0,slot_limit:2});
+    if(url.includes('/lottery-trackers'))return response(lottery);
+    if(url.includes('/performance'))return response(performance);
+    if(url.includes('/backtests'))return response([]);
+    return new Response('not found',{status:404});
+  });
+  render(<App/>);
+  await waitFor(()=>expect(screen.getByRole('heading',{name:'Scanner sleeping off hours'})).toBeInTheDocument());
+  expect(screen.getByText(/dashboard stays online for research/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Hold scanner'}));
+  await waitFor(()=>expect(screen.getByText('Scanner held. Dashboard and saved research remain available.')).toBeInTheDocument());
+  expect(confirm).toHaveBeenCalledTimes(1);
 });
 
 test('manual refresh retains the board, prevents overlap, and marks a failed scan stale',async()=>{

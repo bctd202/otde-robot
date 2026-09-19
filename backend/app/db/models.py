@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
@@ -273,6 +273,8 @@ class ScannerRuntime(Base):
     next_evaluation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    operator_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    control_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class PositionMark(Base):
     __tablename__ = "position_marks"

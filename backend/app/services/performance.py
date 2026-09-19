@@ -442,6 +442,64 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
     return summary, payloads
 
 
+CORE_RESEARCH_TICKERS = {"SPY", "QQQ", "IWM"}
+
+
+def research_breakdowns(rows: list[SignalPerformance], option_shadows: dict[str, dict]) -> dict:
+    """Compare saved research cohorts and option evidence without changing selection."""
+    cohorts = []
+    for key, label, tickers, cohort_rows in (
+        ("CORE", "Core index cohort", sorted(CORE_RESEARCH_TICKERS),
+         [row for row in rows if row.ticker in CORE_RESEARCH_TICKERS]),
+        ("EXPERIMENTAL", "Experimental universe", sorted({row.ticker for row in rows}
+                                                           - CORE_RESEARCH_TICKERS),
+         [row for row in rows if row.ticker not in CORE_RESEARCH_TICKERS]),
+    ):
+        cohort_metrics = metrics(cohort_rows)
+        cohorts.append({
+            "key": key,
+            "label": label,
+            "tickers": tickers,
+            "selected_plays": cohort_metrics["total_triggered_signals"],
+            "resolved_plays": cohort_metrics["resolved_signals"],
+            "total_r": cohort_metrics["cumulative_r"],
+            "average_r": cohort_metrics["average_r"],
+            "win_rate": cohort_metrics["win_rate"],
+            "profit_factor": cohort_metrics["profit_factor"],
+            "maximum_drawdown_r": cohort_metrics["maximum_drawdown_r"],
+        })
+
+    by_ticker: dict[str, dict] = {}
+    by_exit_reason: dict[str, dict] = {}
+    for row in rows:
+        shadow = option_shadows.get(row.signal_id)
+        if not shadow or shadow.get("status") != "CLOSED" or shadow.get("pnl_dollars") is None:
+            continue
+        pnl = float(shadow["pnl_dollars"])
+        for bucket, key in ((by_ticker, row.ticker),
+                            (by_exit_reason, str(shadow.get("exit_reason") or row.exit_reason))):
+            item = bucket.setdefault(key, {"label": key, "closed_with_quote": 0,
+                                           "wins": 0, "losses": 0, "pnl_dollars": 0.0})
+            item["closed_with_quote"] += 1
+            item["wins"] += pnl > 0
+            item["losses"] += pnl < 0
+            item["pnl_dollars"] += pnl
+
+    def finish(bucket: dict[str, dict]) -> list[dict]:
+        return [
+            {**item, "pnl_dollars": round(item["pnl_dollars"], 2)}
+            for item in sorted(bucket.values(), key=lambda value: (-value["pnl_dollars"], value["label"]))
+        ]
+
+    return {
+        "cohorts": cohorts,
+        "option_shadow_by_ticker": finish(by_ticker),
+        "option_shadow_by_exit_reason": finish(by_exit_reason),
+        "cohort_definition": "Core = SPY, QQQ, IWM; Experimental = every other configured ticker.",
+        "historical_records_changed": False,
+    }
+
+
 def performance_chart_data(rows: list[SignalPerformance], option_shadows: dict[str, dict]) -> dict:
     """Build compact, daily chart series without shipping the full ledger.
 

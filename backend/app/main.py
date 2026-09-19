@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.base import BaseTrigger
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.core.config import get_settings
+from app.services.market_calendar import next_scanner_run
 from app.services.signal_engine import background_scan_once
 
 logger = logging.getLogger(__name__)
@@ -23,13 +24,27 @@ settings = get_settings()
 SCANNER_JOB_ID = "parlay-signal-engine"
 
 
+class MarketHoursTrigger(BaseTrigger):
+    """Fire on one-minute boundaries only while the exchange session needs work."""
+
+    def __init__(self, second: int = 5):
+        self.second = max(0, min(second, 59))
+
+    def get_next_fire_time(self, previous_fire_time, now):
+        anchor = max(value for value in (previous_fire_time, now) if value is not None)
+        return next_scanner_run(anchor, self.second)
+
+    def __str__(self) -> str:
+        return f"market hours at second {self.second:02d}, plus close housekeeping"
+
+
 def add_scanner_job(scheduler: AsyncIOScheduler, scan_callable=background_scan_once):
-    """Register one coalescing scan shortly after each one-minute candle closes."""
+    """Register scans after one-minute candles without an overnight wake loop."""
     second = max(0, min(settings.parlay_scan_second, 59))
     grace = max(1, settings.parlay_scan_misfire_grace_seconds)
     return scheduler.add_job(
         scan_callable,
-        CronTrigger(minute="*", second=second, timezone=settings.timezone),
+        MarketHoursTrigger(second),
         id=SCANNER_JOB_ID,
         replace_existing=True,
         max_instances=1,
@@ -47,8 +62,8 @@ async def lifespan(application: FastAPI):
         scanner_scheduler.start()
         application.state.scanner_scheduler = scanner_scheduler
         startup_logger.info(
-            "Parlay background signal engine started; schedule=every minute at second=%02d "
-            "timezone=%s max_instances=1 coalesce=true misfire_grace_time=%ss",
+            "Parlay background signal engine started; schedule=regular market minutes at second=%02d "
+            "plus close housekeeping timezone=%s max_instances=1 coalesce=true misfire_grace_time=%ss",
             max(0, min(settings.parlay_scan_second, 59)), settings.timezone,
             max(1, settings.parlay_scan_misfire_grace_seconds),
         )
