@@ -10,7 +10,7 @@ from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut
                                 ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
                                       evaluate_open_signals, market_movement_data, metrics,
-                                      option_shadow_results, performance_chart_data, track_candidates,
+                                      option_shadow_results, performance_chart_data, research_breakdowns, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
 
@@ -118,6 +118,28 @@ def test_deduplication_keeps_first_actual_buy_per_ticker_day():
     other=row(signal_id="other",ticker="QQQ");other.triggered_at+=timedelta(minutes=4)
     selected=deduplicate_positions([repeat,missed,other,first])
     assert [item.signal_id for item in selected]==["first","other"]
+
+
+def test_research_breakdowns_compare_cohorts_and_option_evidence_without_mutation():
+    spy = row(signal_id="spy", ticker="SPY")
+    spy.exit_reason = "TARGET"; spy.exit_at = spy.triggered_at + timedelta(minutes=5)
+    spy.exit_price = 102; spy.result_r = 2; spy.duration_minutes = 5
+    tsla = row(signal_id="tsla", ticker="TSLA")
+    tsla.exit_reason = "STOP"; tsla.exit_at = tsla.triggered_at + timedelta(minutes=4)
+    tsla.exit_price = 99; tsla.result_r = -1; tsla.duration_minutes = 4
+    breakdown = research_breakdowns([spy, tsla], {
+        "spy": {"status": "CLOSED", "pnl_dollars": 75, "exit_reason": "TARGET"},
+        "tsla": {"status": "CLOSED", "pnl_dollars": -40, "exit_reason": "STOP"},
+    })
+    core, experimental = breakdown["cohorts"]
+    assert core["tickers"] == ["IWM", "QQQ", "SPY"] and core["total_r"] == 2
+    assert experimental["tickers"] == ["TSLA"] and experimental["total_r"] == -1
+    assert breakdown["option_shadow_by_ticker"] == [
+        {"label": "SPY", "closed_with_quote": 1, "wins": 1, "losses": 0, "pnl_dollars": 75.0},
+        {"label": "TSLA", "closed_with_quote": 1, "wins": 0, "losses": 1, "pnl_dollars": -40.0},
+    ]
+    assert breakdown["historical_records_changed"] is False
+    assert (spy.result_r, tsla.result_r) == (2, -1)
 
 
 def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():

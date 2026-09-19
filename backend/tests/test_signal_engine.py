@@ -111,6 +111,32 @@ def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch)
         assert runtime.status == "idle_market_closed"
         assert runtime.heartbeat_at is not None
         assert runtime.last_error is None
+        assert runtime.next_evaluation_at is not None
+
+
+def test_background_scanner_operator_hold_blocks_regular_session_provider_work(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    local = lambda: Session(engine)  # noqa: E731
+    with Session(engine) as db:
+        db.add(ScannerRuntime(key=signal_engine.ENGINE_KEY, status="healthy", heartbeat_at=NOW,
+                              operator_hold=True, control_updated_at=NOW))
+        db.commit()
+    monkeypatch.setattr(signal_engine, "SessionLocal", local)
+    monkeypatch.setattr(signal_engine, "market_session", lambda _now: "regular")
+    monkeypatch.setattr(signal_engine, "get_provider",
+                        lambda: (_ for _ in ()).throw(AssertionError("must not load provider")))
+    monkeypatch.setattr(signal_engine, "run_signal_scan",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")))
+
+    signal_engine.background_scan_once(now=NOW)
+
+    with Session(engine) as db:
+        runtime = db.get(ScannerRuntime, signal_engine.ENGINE_KEY)
+        assert runtime is not None
+        assert runtime.status == "held_by_operator"
+        assert runtime.operator_hold is True
+        assert runtime.next_evaluation_at is None
 
 
 def test_background_scanner_uses_current_session_after_after_hours_startup(monkeypatch):

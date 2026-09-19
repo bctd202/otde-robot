@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.market_data.factory import get_provider
 from app.schemas.market import (DashboardOut, DailyWatchCreate,
                                 DailyWatchResponse, ParlayResponse,
+                                ScannerControlRequest, ScannerControlResponse,
                                 ScannerHealth, SignalAlertOut,
                                 SignalAlertsResponse)
 from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
@@ -20,7 +21,7 @@ from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
                                          LotteryTrackerSummaryOut)
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
-from app.services.market_calendar import market_session
+from app.services.market_calendar import market_session, next_market_open
 from app.services.lottery_tracker import (lottery_session_summary, serialize_point,
                                           serialize_tracker, tracker_points)
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
@@ -33,7 +34,7 @@ from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
                                       link_paper_position, market_movement_data, metrics,
                                       option_shadow_results,
-                                      performance_chart_data)
+                                      performance_chart_data, research_breakdowns)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         latest_scan, mark_lifecycle_entered,
                                         run_signal_scan)
@@ -158,7 +159,12 @@ def parlays(db: Session = Depends(get_db)):
     provider = get_provider()
     universe = list(dict.fromkeys(settings.parlay_symbol_list + _daily_watch_symbols(db)))
     scan = latest_scan(db)
-    if scan is None or scan.universe != universe:
+    runtime = db.get(ScannerRuntime, ENGINE_KEY)
+    now = datetime.now(timezone.utc)
+    session = market_session(now)
+    if (scan is None or scan.universe != universe) and session == "regular" and not (
+        runtime and runtime.operator_hold
+    ):
         scan = run_signal_scan(db, provider, universe, force=True)
     candidates = cached_candidates(scan, db) if scan is not None else []
     runtime = db.get(ScannerRuntime, ENGINE_KEY)
@@ -182,7 +188,46 @@ def parlays(db: Session = Depends(get_db)):
             last_failure=runtime.last_error if runtime else None,
             runtime_duration_ms=_runtime_duration_ms(runtime),
             api_budget=provider.budget_status() if hasattr(provider, "budget_status") else {},
+            operator_hold=runtime.operator_hold if runtime else False,
+            control_updated_at=runtime.control_updated_at if runtime else None,
+            market_session=session,
+            next_market_open_at=next_market_open(now) if session != "regular" else None,
         ),
+    )
+
+
+@router.post("/scanner-control", response_model=ScannerControlResponse)
+def scanner_control(payload: ScannerControlRequest, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    runtime = db.get(ScannerRuntime, ENGINE_KEY)
+    if runtime is None:
+        runtime = ScannerRuntime(key=ENGINE_KEY, status="starting", heartbeat_at=now)
+        db.add(runtime)
+    session = market_session(now)
+    runtime.operator_hold = payload.action == "HOLD"
+    runtime.control_updated_at = now
+    runtime.heartbeat_at = now
+    runtime.last_error = None
+    if runtime.operator_hold:
+        runtime.status = "held_by_operator"
+        runtime.next_evaluation_at = None
+        message = "Scanner held. Dashboard and saved research remain available."
+    elif session == "regular":
+        runtime.status = "resume_pending"
+        message = "Scanner enabled. The next scheduled market-minute scan will run automatically."
+    else:
+        runtime.status = "idle_market_closed"
+        runtime.next_evaluation_at = next_market_open(now)
+        message = "Scanner enabled and waiting for the next regular market session."
+    db.commit()
+    db.refresh(runtime)
+    return ScannerControlResponse(
+        operator_hold=runtime.operator_hold,
+        engine_status=runtime.status,
+        market_session=session,
+        next_market_open_at=next_market_open(now) if session != "regular" else None,
+        control_updated_at=runtime.control_updated_at,
+        message=message,
     )
 
 
@@ -314,6 +359,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "option_shadow_metrics": option_shadow_metrics,
+        "research_breakdowns": research_breakdowns(rows, option_shadows),
         "chart_data": performance_chart_data(rows, option_shadows),
         "market_movement": market_movement_data(rows),
         "pagination": {"page": bounded_page, "page_size": bounded_page_size,

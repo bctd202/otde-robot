@@ -196,15 +196,35 @@ class ScannerHealth(BaseModel):
     last_failure: str | None = None
     runtime_duration_ms: int | None = None
     api_budget: dict = Field(default_factory=dict)
+    operator_hold: bool = False
+    control_updated_at: datetime | None = None
+    market_session: str = "unknown"
+    next_market_open_at: datetime | None = None
+    schedule_mode: str = "REGULAR_MARKET_HOURS"
 
     @field_validator("heartbeat_at", "last_scan_started_at", "last_completed_scan_at",
-                     "last_successful_completion_at", "evaluation_candle_at", "next_evaluation_at")
+                     "last_successful_completion_at", "evaluation_candle_at", "next_evaluation_at",
+                     "control_updated_at", "next_market_open_at")
     @classmethod
     def restore_sqlite_utc(cls, value: datetime | None) -> datetime | None:
         """SQLite drops offsets from UTC DateTime columns; restore the stored timezone at the API edge."""
         if value is None:
             return None
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+class ScannerControlRequest(BaseModel):
+    action: Literal["HOLD", "RESUME"]
+
+
+class ScannerControlResponse(BaseModel):
+    operator_hold: bool
+    engine_status: str
+    market_session: str
+    next_market_open_at: datetime | None = None
+    control_updated_at: datetime
+    message: str
+    paper_only: bool = True
 
 
 class ParlayResponse(BaseModel):

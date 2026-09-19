@@ -34,6 +34,10 @@ const response=(strategy:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY',signals:Performanc
     cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,
     entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,
     headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},
+  research_breakdowns:{cohorts:[
+    {key:'CORE',label:'Core index cohort',tickers:['SPY','QQQ','IWM'],selected_plays:selected.total_triggered_signals,resolved_plays:selected.resolved_signals,total_r:selected.cumulative_r,average_r:selected.average_r,win_rate:selected.win_rate,profit_factor:selected.profit_factor,maximum_drawdown_r:selected.maximum_drawdown_r},
+    {key:'EXPERIMENTAL',label:'Experimental universe',tickers:[],selected_plays:0,resolved_plays:0,total_r:0,average_r:0,win_rate:0,profit_factor:null,maximum_drawdown_r:0},
+  ],option_shadow_by_ticker:[],option_shadow_by_exit_reason:[],cohort_definition:'Core = SPY, QQQ, IWM; Experimental = every other configured ticker.',historical_records_changed:false},
   chart_data:{daily:[{trading_date:'2026-08-04',result_r:2,return_pct:2,cumulative_r:2,
     cumulative_return_pct:2,resolved:1,wins:1,losses:0,option_pnl_dollars:0,
     cumulative_option_pnl_dollars:0,option_closed:0}],outcomes:[{outcome:'TARGET',count:signals.length}]},
@@ -73,6 +77,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(strategyMetrics).getByText('Open Plays')).toBeInTheDocument();
   expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
+  expect(screen.getByRole('region',{name:'Core and experimental cohort comparison'})).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);
   expect(screen.getByText('Technical audit data')).toBeInTheDocument();
   expect(screen.getByText(/Raw repeated alerts remain visible only in aggregate counts/)).toBeInTheDocument();

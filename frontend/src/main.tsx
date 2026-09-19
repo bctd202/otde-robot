@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { addDailyWatch, exitPaperPosition, getDailyWatch, getPaperPositions, getParlays, getSignalAlerts, paperEnter, removeDailyWatch } from './api/client';
+import { addDailyWatch, exitPaperPosition, getDailyWatch, getPaperPositions, getParlays, getSignalAlerts, paperEnter, removeDailyWatch, setScannerControl } from './api/client';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import { Performance } from './components/Performance';
 import { BacktestLab } from './components/BacktestLab';
@@ -40,6 +40,8 @@ export function App() {
   const [positionsStale,setPositionsStale]=useState(false);
   const [enteringSymbol,setEnteringSymbol]=useState<string|null>(null);
   const [paperFeedback,setPaperFeedback]=useState('');
+  const [scannerControlBusy,setScannerControlBusy]=useState(false);
+  const [scannerFeedback,setScannerFeedback]=useState('');
   const [signalAlerts,setSignalAlerts]=useState<SignalAlert[]>([]);
   const [strategyView,setStrategyView]=useState<StrategyView>('ALL');
   const [strategyAlerts,setStrategyAlerts]=useState<Record<StrategyMode,boolean>>(()=>{
@@ -68,13 +70,14 @@ export function App() {
   const exitPaper=useCallback(async(position:PaperPosition)=>{if(!window.confirm(`Close the simulated ${position.symbol} position? This does not place an order.`))return;setPaperFeedback('');try{await exitPaperPosition(position.id,'USER CONFIRMED PAPER EXIT');setPaperFeedback(`${position.symbol} paper position closed.`);await refreshParlays()}catch(reason){setPaperFeedback(reason instanceof Error?reason.message:'Unable to close paper position')}},[refreshParlays]);
   const addWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await addDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} added for today.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to add ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const removeWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await removeDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} removed.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to remove ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
+  const controlScanner=useCallback(async(action:'HOLD'|'RESUME')=>{if(action==='HOLD'&&!window.confirm('Hold automated scans? The dashboard and saved research will remain available.'))return;setScannerControlBusy(true);setScannerFeedback('');try{const result=await setScannerControl(action);setScannerFeedback(result.message);await refreshParlays()}catch(reason){setScannerFeedback(reason instanceof Error?reason.message:'Unable to update scanner control')}finally{setScannerControlBusy(false)}},[refreshParlays]);
   return <main>
     <nav className="top-navigation" aria-label="Primary"><a href="#parlay">Trade Board</a><a href="#lottery">Lottery Plays</a><a href="#performance">Play History</a><a href="#backtest-lab">Backtests</a></nav>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
     <StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>
     <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
     <SignalAlerts alerts={signalAlerts}/>
-    {parlays?<ParlayBoard data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol}/>:<ParlaySkeleton/>}
+    {parlays?<ParlayBoard data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
     <LotteryLab/>
     <Performance/>
     <BacktestLab/>
