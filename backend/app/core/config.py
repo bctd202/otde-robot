@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     lottery_min_delta: float = 0.05
     lottery_max_delta: float = 0.25
     paper_account_size: float = 25000.0
-    paper_money_starting_cash: float = 500.0
+    paper_money_starting_cash: float = 2000.0
     paper_only: bool = True
     event_trading_enabled: bool = False
     close_to_close_squeeze_enabled: bool = False

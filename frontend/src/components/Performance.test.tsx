@@ -90,6 +90,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   mockResponses(zero,structured);
   render(<Performance/>);
   await waitFor(()=>expect(screen.getByLabelText('Cumulative Strategy R by trading day')).toBeInTheDocument());
+  expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=2000'))).toBe(true);
   const strategyMetrics=screen.getByRole('region',{name:'Strategy Performance metrics'});
   expect(within(strategyMetrics).getByText('Total Selected Plays').closest('.metric')).toHaveTextContent('2');
   expect(within(strategyMetrics).getByText('Total R').closest('.metric')).toHaveTextContent('2');
