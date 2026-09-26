@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {getPerformance} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
-import type {OptionShadowBreakdown,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
+import type {OptionShadowBreakdown,PaperMoneyPortfolio,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
 
 type OutcomeUnit='R'|'DIRECTIONAL'|'RAW';
 type PerformanceStrategy='ONE_MIN_0DTE'|'STRUCTURED_INTRADAY';
@@ -13,7 +13,7 @@ const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
 const strategyName=(mode:PerformanceStrategy)=>mode==='STRUCTURED_INTRADAY'?'Structured Intraday · 5–14 DTE':'1-Min · true 0DTE';
 const shortDate=(value:string)=>new Date(`${value}T12:00:00`).toLocaleDateString('en-US',{month:'short',day:'numeric'});
 const humanize=(value:string)=>value.replaceAll('_',' ').replaceAll('-',' ');
-const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Array.isArray(value?.research_breakdowns?.cohorts)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
+const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Array.isArray(value?.research_breakdowns?.cohorts)&&Array.isArray(value?.paper_money_tracker?.portfolios)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
 
 function signed(value:number,digits=2,suffix=''):string{
   return `${value>0?'+':''}${value.toFixed(digits)}${suffix}`;
@@ -101,6 +101,36 @@ function OptionEquityChart({points}:{points:PerformanceDailyPoint[]}){
   </svg>;
 }
 
+function PaperMoneyChart({portfolios}:{portfolios:PaperMoneyPortfolio[]}){
+  const dates=[...new Set(portfolios.flatMap(portfolio=>portfolio.daily.map(point=>point.trading_date)))].sort();
+  if(dates.length===0)return <EmptyGraph>The cash account begins with the first verified automated option entry.</EmptyGraph>;
+  const width=760,height=270,left=66,right=18,top=20,bottom=42;
+  const series=portfolios.map(portfolio=>{
+    const byDate=new Map(portfolio.daily.map(point=>[point.trading_date,point.book_equity_dollars]));
+    let value=portfolio.starting_cash_dollars;
+    return {portfolio,values:dates.map(day=>{value=byDate.get(day)??value;return value})};
+  });
+  const values=series.flatMap(item=>item.values);
+  let min=Math.min(...values),max=Math.max(...values);const padding=Math.max(25,(max-min)*.12);
+  min-=padding;max+=padding;
+  const x=(index:number)=>dates.length===1?(left+width-right)/2:left+index*(width-left-right)/(dates.length-1);
+  const y=(value:number)=>top+(max-value)*(height-top-bottom)/(max-min);
+  return <div className="paper-money-chart-wrap"><svg className="performance-line-chart paper-money-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Paper account equity comparison">
+    {[0,.5,1].map(level=>{const value=min+(max-min)*level;return <g key={level}><line className="graph-grid" x1={left} x2={width-right} y1={y(value)} y2={y(value)}/><text className="graph-axis" x={left-7} y={y(value)+4} textAnchor="end">{dollars.format(value)}</text></g>})}
+    {series.map(({portfolio,values:lineValues})=><polyline className={`paper-equity-line paper-${portfolio.key.toLowerCase()}`} points={lineValues.map((value,index)=>`${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(' ')} key={portfolio.key}/>) }
+    <text className="graph-axis" x={left} y={height-13}>{shortDate(dates[0])}</text><text className="graph-axis" x={width-right} y={height-13} textAnchor="end">{shortDate(dates[dates.length-1])}</text>
+  </svg><div className="paper-chart-legend">{portfolios.map(portfolio=><span key={portfolio.key}><i className={`paper-${portfolio.key.toLowerCase()}`}/>{portfolio.label}</span>)}</div></div>;
+}
+
+function PaperMoneyPanel({data,onStartingCashChange,loading}:{data:PerformanceResponse;onStartingCashChange:(value:number)=>void;loading:boolean}){
+  const tracker=data.paper_money_tracker;
+  return <section className="paper-money-panel" aria-label="Paper money tracker"><header><div><span>PAPER MONEY · CASH CONSTRAINED · FORWARD ONLY</span><h3>What would the account balance look like?</h3></div><strong>{dollars.format(tracker.starting_cash_dollars)} start · {tracker.quantity_per_entry} contract each</strong></header>
+    <div className="bankroll-control"><span>Starting bankroll</span><div>{[250,500,1000,2500].map(value=><button type="button" className={tracker.starting_cash_dollars===value?'active':''} disabled={loading} onClick={()=>onStartingCashChange(value)} key={value}>{dollars.format(value)}</button>)}</div><label><span>Custom</span><b>$</b><input key={tracker.starting_cash_dollars} type="number" min="50" max="1000000" step="50" defaultValue={tracker.starting_cash_dollars} disabled={loading} onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur()}} onBlur={event=>{const value=event.currentTarget.valueAsNumber;if(Number.isFinite(value)&&value>=50&&value<=1000000&&value!==tracker.starting_cash_dollars)onStartingCashChange(value)}} aria-label="Custom paper starting bankroll"/></label></div>
+    <div className="paper-money-layout"><PaperMoneyChart portfolios={tracker.portfolios}/><div className="paper-portfolio-grid">{tracker.portfolios.map(portfolio=><article key={portfolio.key}><header><span>{portfolio.key==='CORE'?'CONTROL PORTFOLIO':'FULL UNIVERSE'}</span><h4>{portfolio.label}</h4></header><strong className={portfolio.realized_pnl_dollars>=0?'positive-text':'negative-text'}>{dollars.format(portfolio.book_equity_dollars)}</strong><small>book equity</small><dl><div><dt>Realized P/L</dt><dd>{portfolio.realized_pnl_dollars>0?'+':''}{dollars.format(portfolio.realized_pnl_dollars)}</dd></div><div><dt>Return</dt><dd>{signed(portfolio.return_percent,2,'%')}</dd></div><div><dt>Cash available</dt><dd>{dollars.format(portfolio.cash_available_dollars)}</dd></div><div><dt>Open at cost</dt><dd>{dollars.format(portfolio.capital_at_cost_dollars)}</dd></div><div><dt>Max drawdown</dt><dd>{dollars.format(portfolio.maximum_drawdown_dollars)}</dd></div><div><dt>Taken / closed</dt><dd>{portfolio.positions_taken} / {portfolio.closed_positions}</dd></div><div><dt>Skipped: cash</dt><dd>{portfolio.skipped_insufficient_cash}</dd></div><div><dt>Unpriced exits</dt><dd>{portfolio.quote_gaps+portfolio.exit_pending}</dd></div></dl></article>)}</div></div>
+    <p><strong>Accounting boundary:</strong> Entry debits reduce available cash and quoted exit proceeds restore it. Open or unpriced positions are carried at original cost—not a current liquidation value. Fees and extra slippage are not modeled. This view never places an order or changes the strategy ledger.</p>
+  </section>;
+}
+
 function ResultBar({value,max,unit}:{value:number;max:number;unit:'R'|'DOLLARS'}){
   const width=max===0?0:Math.max(2,Math.abs(value)/max*100);
   return <div className="result-bar"><span className={value>=0?'positive':'negative'} style={{width:`${width}%`}}/><b>{unit==='R'?signed(value,2,'R'):dollars.format(value)}</b></div>;
@@ -149,10 +179,11 @@ export function Performance(){
   const [unit,setUnit]=useState<OutcomeUnit>('R');
   const [page,setPage]=useState(1);
   const [pageSize,setPageSize]=useState(25);
+  const [paperStartingCash,setPaperStartingCash]=useState(500);
   const [expanded,setExpanded]=useState('');
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
-  useEffect(()=>{let cancelled=false;setLoading(true);setError('');void getPerformance(strategy,{page,pageSize,view}).then(result=>{if(cancelled)return;if(!validResponse(result))throw new Error('Performance response was incomplete');setData(result);setPage(result.pagination.page)}).catch(reason=>{if(!cancelled)setError(reason instanceof Error?reason.message:'Unable to load performance')}).finally(()=>{if(!cancelled)setLoading(false)});return()=>{cancelled=true}},[strategy,view,page,pageSize]);
+  useEffect(()=>{let cancelled=false;setLoading(true);setError('');void getPerformance(strategy,{page,pageSize,view,paperStartingCash}).then(result=>{if(cancelled)return;if(!validResponse(result))throw new Error('Performance response was incomplete');setData(result);setPage(result.pagination.page)}).catch(reason=>{if(!cancelled)setError(reason instanceof Error?reason.message:'Unable to load performance')}).finally(()=>{if(!cancelled)setLoading(false)});return()=>{cancelled=true}},[strategy,view,page,pageSize,paperStartingCash]);
   const metrics=data?.metrics;
   const movement=data?.market_movement;
   const graphData=useMemo(()=>data?graphPoints(data,unit):[],[data,unit]);
@@ -215,6 +246,7 @@ export function Performance(){
       </div>
       <CohortComparison cohorts={data.research_breakdowns.cohorts}/>
       <section className="option-shadow"><header><div><span>REAL OPTION EVIDENCE · FORWARD ONLY</span><h3>Automated ask-to-bid shadow</h3></div><strong>{data.option_shadow_metrics.quote_coverage_percent}% quote coverage</strong></header><div className="shadow-layout"><OptionEquityChart points={data.chart_data.daily}/><div className="shadow-stats"><div><span>Tracked</span><strong>{data.option_shadow_metrics.tracked_positions}</strong></div><div><span>Closed with quote</span><strong>{data.option_shadow_metrics.closed_with_quote}</strong></div><div><span>Quote gaps</span><strong>{data.option_shadow_metrics.quote_gaps}</strong></div><div><span>Shadow P/L</span><strong>{dollars.format(data.option_shadow_metrics.cumulative_pnl_dollars)}</strong></div><p>Entry is the verified ask. Exit is the first verified bid after the underlying exit. This never mixes into underlying-R headlines.</p></div></div><div className="shadow-breakdown-grid"><ShadowBreakdownGraph title="P/L by ticker" rows={data.research_breakdowns.option_shadow_by_ticker}/><ShadowBreakdownGraph title="P/L by underlying exit" rows={data.research_breakdowns.option_shadow_by_exit_reason}/></div></section>
+      <PaperMoneyPanel data={data} loading={loading} onStartingCashChange={setPaperStartingCash}/>
       <div className="play-log-heading"><div><p className="eyebrow">THE PLAYS</p><h3>{view==='ALL'?'Every selected play':view.charAt(0)+view.slice(1).toLowerCase()}</h3><p>{first}–{last} of {pagination?.total_items??0} · newest first</p></div><label>Rows per page<select value={pageSize} onChange={event=>{setPageSize(Number(event.target.value));setPage(1)}}>{PAGE_SIZES.map(size=><option key={size} value={size}>{size}</option>)}</select></label></div>
       {data.signals.length===0?<div className="play-log-empty">No plays match this view.</div>:<div className="performance-play-grid">{data.signals.map(row=><PlayCard row={row} unit={unit} expanded={expanded===row.signal_id} onToggle={()=>setExpanded(expanded===row.signal_id?'':row.signal_id)} key={row.signal_id}/>)}</div>}
       {pagination&&<nav className="pagination" aria-label="Performance log pages"><button type="button" disabled={loading||pagination.page<=1} onClick={()=>{setPage(value=>value-1);setExpanded('')}}>← Previous</button><span>Page <strong>{pagination.page}</strong> of <strong>{pagination.total_pages}</strong></span><button type="button" disabled={loading||pagination.page>=pagination.total_pages} onClick={()=>{setPage(value=>value+1);setExpanded('')}}>Next →</button></nav>}

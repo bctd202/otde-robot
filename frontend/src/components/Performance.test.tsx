@@ -34,6 +34,25 @@ const response=(strategy:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY',signals:Performanc
     cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,
     entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,
     headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},
+  paper_money_tracker:{starting_cash_dollars:25000,quantity_per_entry:1,entry_basis:'One contract at verified ask',
+    exit_basis:'First verified bid after underlying exit',open_value_basis:'Original debit; unrealized option value is not estimated',
+    fees_modeled:false,additional_slippage_modeled:false,forward_only:true,historical_records_changed:false,paper_only:true,
+    portfolios:[
+      {key:'ALL',label:'All tracked tickers',starting_cash_dollars:25000,cash_available_dollars:24950,
+        capital_at_cost_dollars:0,book_equity_dollars:24950,realized_pnl_dollars:-50,return_percent:-.2,
+        maximum_drawdown_dollars:50,maximum_drawdown_percent:.2,total_entry_debits_dollars:100,
+        positions_taken:1,closed_positions:1,active_positions:0,quote_gaps:0,exit_pending:0,
+        skipped_insufficient_cash:0,wins:0,losses:1,daily:[{trading_date:'2026-08-04',entries:1,
+          closed:1,skipped:0,daily_realized_pnl_dollars:-50,cash_dollars:24950,
+          capital_at_cost_dollars:0,book_equity_dollars:24950,cumulative_realized_pnl_dollars:-50}]},
+      {key:'CORE',label:'Core only · SPY / QQQ / IWM',starting_cash_dollars:25000,cash_available_dollars:25030,
+        capital_at_cost_dollars:0,book_equity_dollars:25030,realized_pnl_dollars:30,return_percent:.12,
+        maximum_drawdown_dollars:0,maximum_drawdown_percent:0,total_entry_debits_dollars:45,
+        positions_taken:1,closed_positions:1,active_positions:0,quote_gaps:0,exit_pending:0,
+        skipped_insufficient_cash:0,wins:1,losses:0,daily:[{trading_date:'2026-08-04',entries:1,
+          closed:1,skipped:0,daily_realized_pnl_dollars:30,cash_dollars:25030,
+          capital_at_cost_dollars:0,book_equity_dollars:25030,cumulative_realized_pnl_dollars:30}]},
+    ]},
   research_breakdowns:{cohorts:[
     {key:'CORE',label:'Core index cohort',tickers:['SPY','QQQ','IWM'],selected_plays:selected.total_triggered_signals,resolved_plays:selected.resolved_signals,total_r:selected.cumulative_r,average_r:selected.average_r,win_rate:selected.win_rate,profit_factor:selected.profit_factor,maximum_drawdown_r:selected.maximum_drawdown_r},
     {key:'EXPERIMENTAL',label:'Experimental universe',tickers:[],selected_plays:0,resolved_plays:0,total_r:0,average_r:0,win_rate:0,profit_factor:null,maximum_drawdown_r:0},
@@ -78,6 +97,13 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
   expect(screen.getByRole('region',{name:'Core and experimental cohort comparison'})).toBeInTheDocument();
+  const money=screen.getByRole('region',{name:'Paper money tracker'});
+  expect(within(money).getByText('What would the account balance look like?')).toBeInTheDocument();
+  expect(within(money).getByLabelText('Paper account equity comparison')).toBeInTheDocument();
+  expect(within(money).getAllByText('Core only · SPY / QQQ / IWM')).toHaveLength(2);
+  expect(within(money).getByText(/Open or unpriced positions are carried at original cost/)).toBeInTheDocument();
+  fireEvent.click(within(money).getByRole('button',{name:'$250.00'}));
+  await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=250'))).toBe(true));
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);
   expect(screen.getByText('Technical audit data')).toBeInTheDocument();
   expect(screen.getByText(/Raw repeated alerts remain visible only in aggregate counts/)).toBeInTheDocument();
