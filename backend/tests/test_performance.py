@@ -10,7 +10,8 @@ from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut
                                 ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
                                       evaluate_open_signals, market_movement_data, metrics,
-                                      option_shadow_results, performance_chart_data, research_breakdowns, track_candidates,
+                                      option_shadow_results, paper_portfolio_results,
+                                      performance_chart_data, research_breakdowns, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
 
@@ -156,6 +157,8 @@ def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():
         assert [item["signal_id"] for item in payload["signals"]]==["first"]
         assert payload["raw_metrics"]["total_triggered_signals"]==2
         assert payload["metrics"]["total_triggered_signals"]==1
+        custom_cash=performance(paper_starting_cash=250,db=db)
+        assert custom_cash["paper_money_tracker"]["starting_cash_dollars"]==250
 
 
 def test_performance_paginates_newest_first_without_changing_full_metrics():
@@ -326,6 +329,62 @@ def test_shadow_marks_first_ticker_day_entry_ask_and_exact_exit_bid_once():
         evaluate_open_signals(db, provider)
         assert len(list(db.scalars(select(AutomatedOptionMark)).all())) == 2
         assert provider.chain_calls == 1
+
+
+def add_shadow_pair(db: Session, trade: SignalPerformance, *, entry_ask: float,
+                    exit_bid: float, offset_minutes: int) -> None:
+    trade.triggered_at = SHADOW_START+timedelta(minutes=offset_minutes)
+    trade.last_evaluated_at = trade.triggered_at
+    trade.exit_at = trade.triggered_at+timedelta(minutes=5)
+    trade.exit_reason = "TARGET" if exit_bid > entry_ask else "STOP"
+    trade.exit_price = 101 if exit_bid > entry_ask else 99
+    trade.result_r = 1 if exit_bid > entry_ask else -1
+    db.add(trade)
+    symbol = f"{trade.ticker}260803C00100000"
+    common = dict(signal_id=trade.signal_id, trading_date=trade.trading_date,
+        ticker=trade.ticker, strategy_mode=trade.strategy_mode, option_symbol=symbol,
+        normalized_option_symbol=symbol, expiration=trade.trading_date, strike=100,
+        right="call", last=entry_ask, provider="tradier", data_mode="live",
+        verification_status="verified", verification_reason="test quote",
+        contract_multiplier=100)
+    db.add(AutomatedOptionMark(**common, position_key=f"{trade.trading_date}:{trade.ticker}",
+        mark_type="ENTRY", mark_status="QUOTED", event_reason="AUTOMATED_BUY",
+        event_at=trade.triggered_at, observed_at=trade.triggered_at, bid=entry_ask-.05,
+        ask=entry_ask, quote_timestamp=trade.triggered_at, bid_timestamp=trade.triggered_at,
+        ask_timestamp=trade.triggered_at, selected_price=entry_ask, price_basis="ASK",
+        quote_lag_seconds=None, created_at=trade.triggered_at))
+    db.add(AutomatedOptionMark(**common, position_key=None, mark_type="EXIT",
+        mark_status="QUOTED", event_reason=trade.exit_reason, event_at=trade.exit_at,
+        observed_at=trade.exit_at, bid=exit_bid, ask=exit_bid+.05,
+        quote_timestamp=trade.exit_at, bid_timestamp=trade.exit_at,
+        ask_timestamp=trade.exit_at, selected_price=exit_bid, price_basis="BID",
+        quote_lag_seconds=0, created_at=trade.exit_at))
+
+
+def test_paper_money_tracker_replays_cash_and_keeps_core_separate():
+    local = database()
+    with local() as db:
+        spy = row(signal_id="cash-spy", ticker="SPY")
+        tsla = row(signal_id="cash-tsla", ticker="TSLA")
+        add_shadow_pair(db, spy, entry_ask=.45, exit_bid=.75, offset_minutes=0)
+        add_shadow_pair(db, tsla, entry_ask=.80, exit_bid=.40, offset_minutes=10)
+        db.commit()
+        tracker = paper_portfolio_results(db, [spy, tsla], 100)
+        all_tickers, core = tracker["portfolios"]
+        assert all_tickers["book_equity_dollars"] == 90
+        assert all_tickers["realized_pnl_dollars"] == -10
+        assert all_tickers["positions_taken"] == 2
+        assert all_tickers["maximum_drawdown_dollars"] == 40
+        assert core["book_equity_dollars"] == 130
+        assert core["realized_pnl_dollars"] == 30
+        assert core["positions_taken"] == 1
+        assert tracker["historical_records_changed"] is False
+        assert (spy.result_r, tsla.result_r) == (1, -1)
+
+        constrained = paper_portfolio_results(db, [spy, tsla], 40)["portfolios"][0]
+        assert constrained["positions_taken"] == 0
+        assert constrained["skipped_insufficient_cash"] == 2
+        assert constrained["book_equity_dollars"] == 40
 
 
 def test_missing_exact_exit_quote_retries_then_appends_explicit_gap():

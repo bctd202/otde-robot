@@ -442,6 +442,138 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
     return summary, payloads
 
 
+def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
+                            starting_cash: float) -> dict:
+    """Replay immutable option marks through two clearly labeled paper cash accounts.
+
+    This is a read-only accounting view. It does not create positions, alter signal
+    selection, or invent prices when an exit quote is missing. Open or unpriced
+    positions remain carried at their original debit so realized results stay
+    separate from unknown unrealized value.
+    """
+    signal_ids = {row.signal_id for row in rows}
+    marks = (list(db.scalars(select(AutomatedOptionMark).where(
+        AutomatedOptionMark.signal_id.in_(signal_ids)
+    ).order_by(AutomatedOptionMark.event_at, AutomatedOptionMark.id)).all()) if signal_ids else [])
+    grouped: dict[str, dict[str, AutomatedOptionMark]] = {}
+    for mark in marks:
+        grouped.setdefault(mark.signal_id, {})[mark.mark_type] = mark
+    rows_by_id = {row.signal_id: row for row in rows}
+    initial_cash = round(max(0.0, float(starting_cash)), 2)
+
+    def replay(key: str, label: str, allowed_tickers: set[str] | None) -> dict:
+        pairs = {
+            signal_id: pair for signal_id, pair in grouped.items()
+            if pair.get("ENTRY") is not None and (
+                allowed_tickers is None or pair["ENTRY"].ticker.upper() in allowed_tickers)
+        }
+        events: list[tuple[datetime, int, str, AutomatedOptionMark]] = []
+        for signal_id, pair in pairs.items():
+            entry = pair["ENTRY"]
+            if entry.mark_status != "QUOTED" or entry.selected_price is None:
+                continue
+            events.append((_utc(entry.event_at), 1, signal_id, entry))
+            exit_mark = pair.get("EXIT")
+            if (exit_mark is not None and exit_mark.mark_status == "QUOTED" and
+                    exit_mark.selected_price is not None):
+                events.append((_utc(exit_mark.event_at), 0, signal_id, exit_mark))
+        events.sort(key=lambda event: (event[0], event[1], event[2]))
+
+        cash = initial_cash
+        realized_pnl = 0.0
+        accepted: set[str] = set()
+        open_costs: dict[str, float] = {}
+        total_entry_debits = 0.0
+        positions_taken = closed_positions = skipped_entries = wins = losses = 0
+        daily: dict[date, dict] = {}
+        equity_path = [initial_cash]
+
+        for event_at, _, signal_id, mark in events:
+            event_date = _eastern_date(event_at)
+            point = daily.setdefault(event_date, {
+                "trading_date": event_date.isoformat(), "entries": 0, "closed": 0,
+                "skipped": 0, "daily_realized_pnl_dollars": 0.0,
+            })
+            value = round(float(mark.selected_price or 0) * mark.contract_multiplier, 2)
+            if mark.mark_type == "ENTRY":
+                if value <= 0 or value > cash + 1e-9:
+                    skipped_entries += 1
+                    point["skipped"] += 1
+                else:
+                    cash = round(cash-value, 2)
+                    accepted.add(signal_id)
+                    open_costs[signal_id] = value
+                    total_entry_debits = round(total_entry_debits+value, 2)
+                    positions_taken += 1
+                    point["entries"] += 1
+            elif signal_id in accepted and signal_id in open_costs:
+                entry_cost = open_costs.pop(signal_id)
+                pnl = round(value-entry_cost, 2)
+                cash = round(cash+value, 2)
+                realized_pnl = round(realized_pnl+pnl, 2)
+                closed_positions += 1
+                wins += pnl > 0
+                losses += pnl < 0
+                point["closed"] += 1
+                point["daily_realized_pnl_dollars"] = round(
+                    point["daily_realized_pnl_dollars"]+pnl, 2)
+            point["cash_dollars"] = cash
+            point["capital_at_cost_dollars"] = round(sum(open_costs.values()), 2)
+            point["book_equity_dollars"] = round(cash+sum(open_costs.values()), 2)
+            point["cumulative_realized_pnl_dollars"] = realized_pnl
+            equity_path.append(point["book_equity_dollars"])
+
+        daily_points = [daily[day] for day in sorted(daily)]
+        peak = initial_cash
+        maximum_drawdown = 0.0
+        maximum_drawdown_percent = 0.0
+        for equity in equity_path:
+            peak = max(peak, equity)
+            maximum_drawdown = max(maximum_drawdown, peak-equity)
+            maximum_drawdown_percent = max(
+                maximum_drawdown_percent, 100*(peak-equity)/peak if peak else 0)
+
+        active_positions = quote_gaps = exit_pending = 0
+        for signal_id in open_costs:
+            pair = pairs[signal_id]
+            exit_mark = pair.get("EXIT")
+            row = rows_by_id.get(signal_id)
+            if row is not None and row.exit_reason == "OPEN":
+                active_positions += 1
+            elif exit_mark is not None and exit_mark.mark_status == "OPTION_QUOTE_GAP":
+                quote_gaps += 1
+            else:
+                exit_pending += 1
+        capital_at_cost = round(sum(open_costs.values()), 2)
+        book_equity = round(cash+capital_at_cost, 2)
+        return {
+            "key": key, "label": label, "starting_cash_dollars": initial_cash,
+            "cash_available_dollars": cash, "capital_at_cost_dollars": capital_at_cost,
+            "book_equity_dollars": book_equity, "realized_pnl_dollars": realized_pnl,
+            "return_percent": round(100*realized_pnl/initial_cash, 2) if initial_cash else 0,
+            "maximum_drawdown_dollars": round(maximum_drawdown, 2),
+            "maximum_drawdown_percent": round(maximum_drawdown_percent, 2),
+            "total_entry_debits_dollars": total_entry_debits,
+            "positions_taken": positions_taken, "closed_positions": closed_positions,
+            "active_positions": active_positions, "quote_gaps": quote_gaps,
+            "exit_pending": exit_pending, "skipped_insufficient_cash": skipped_entries,
+            "wins": wins, "losses": losses, "daily": daily_points,
+        }
+
+    return {
+        "starting_cash_dollars": initial_cash, "quantity_per_entry": 1,
+        "portfolios": [
+            replay("ALL", "All tracked tickers", None),
+            replay("CORE", "Core only · SPY / QQQ / IWM", CORE_RESEARCH_TICKERS),
+        ],
+        "entry_basis": "One contract at verified ask",
+        "exit_basis": "First verified bid after underlying exit",
+        "open_value_basis": "Original debit; unrealized option value is not estimated",
+        "fees_modeled": False, "additional_slippage_modeled": False,
+        "forward_only": True, "historical_records_changed": False, "paper_only": True,
+    }
+
+
 CORE_RESEARCH_TICKERS = {"SPY", "QQQ", "IWM"}
 
 

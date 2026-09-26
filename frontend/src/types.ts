@@ -94,6 +94,19 @@ export interface AutomatedOptionShadowMetrics {
   average_pnl_dollars:number;average_return_percent:number;entry_basis:string;exit_basis:string;forward_only:true;
   headline_metrics:false;fees_modeled:false;additional_slippage_modeled:false;paper_only:true;
 }
+export interface PaperMoneyDailyPoint {trading_date:string;entries:number;closed:number;skipped:number;daily_realized_pnl_dollars:number;cash_dollars:number;capital_at_cost_dollars:number;book_equity_dollars:number;cumulative_realized_pnl_dollars:number}
+export interface PaperMoneyPortfolio {
+  key:'ALL'|'CORE';label:string;starting_cash_dollars:number;cash_available_dollars:number;
+  capital_at_cost_dollars:number;book_equity_dollars:number;realized_pnl_dollars:number;return_percent:number;
+  maximum_drawdown_dollars:number;maximum_drawdown_percent:number;total_entry_debits_dollars:number;
+  positions_taken:number;closed_positions:number;active_positions:number;quote_gaps:number;exit_pending:number;
+  skipped_insufficient_cash:number;wins:number;losses:number;daily:PaperMoneyDailyPoint[];
+}
+export interface PaperMoneyTracker {
+  starting_cash_dollars:number;quantity_per_entry:1;portfolios:PaperMoneyPortfolio[];entry_basis:string;
+  exit_basis:string;open_value_basis:string;fees_modeled:false;additional_slippage_modeled:false;
+  forward_only:true;historical_records_changed:false;paper_only:true;
+}
 export interface ResearchCohort {key:'CORE'|'EXPERIMENTAL';label:string;tickers:string[];selected_plays:number;resolved_plays:number;total_r:number;average_r:number;win_rate:number;profit_factor:number|null;maximum_drawdown_r:number}
 export interface OptionShadowBreakdown {label:string;closed_with_quote:number;wins:number;losses:number;pnl_dollars:number}
 export interface ResearchBreakdowns {cohorts:ResearchCohort[];option_shadow_by_ticker:OptionShadowBreakdown[];option_shadow_by_exit_reason:OptionShadowBreakdown[];cohort_definition:string;historical_records_changed:false}
@@ -104,5 +117,5 @@ export interface MarketMovementData {resolved_with_prices:number;average_directi
 export interface PerformanceOutcomePoint {outcome:string;count:number}
 export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:PerformanceOutcomePoint[]}
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
-export interface PerformanceResponse {metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
+export interface PerformanceResponse {metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}

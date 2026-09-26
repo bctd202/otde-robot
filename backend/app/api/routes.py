@@ -34,7 +34,8 @@ from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
                                       link_paper_position, market_movement_data, metrics,
                                       option_shadow_results,
-                                      performance_chart_data, research_breakdowns)
+                                      paper_portfolio_results, performance_chart_data,
+                                      research_breakdowns)
 from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         latest_scan, mark_lifecycle_entered,
                                         run_signal_scan)
@@ -316,8 +317,10 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
                 exit_reason: str | None = None, user_entered: bool = False,
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
                 max_score: float | None = None, deduplicate: bool = True, view: str = "ALL",
-                page: int = 1, page_size: int = 25,
+                page: int = 1, page_size: int = 25, paper_starting_cash: float | None = None,
                 db: Session = Depends(get_db)):
+    if paper_starting_cash is not None and not 50 <= paper_starting_cash <= 1_000_000:
+        raise HTTPException(status_code=422, detail="Paper starting cash must be between $50 and $1,000,000")
     query = select(SignalPerformance).order_by(
         SignalPerformance.triggered_at.asc(), SignalPerformance.signal_id.asc())
     for condition in (SignalPerformance.source == source if source != "ALL" else None,
@@ -359,6 +362,9 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "option_shadow_metrics": option_shadow_metrics,
+        "paper_money_tracker": paper_portfolio_results(
+            db, rows, paper_starting_cash if paper_starting_cash is not None
+            else get_settings().paper_money_starting_cash),
         "research_breakdowns": research_breakdowns(rows, option_shadows),
         "chart_data": performance_chart_data(rows, option_shadows),
         "market_movement": market_movement_data(rows),
