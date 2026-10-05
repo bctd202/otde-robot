@@ -14,7 +14,8 @@ from app.schemas.market import (DashboardOut, DailyWatchCreate,
                                 ScannerControlRequest, ScannerControlResponse,
                                 ScannerHealth, SignalAlertOut,
                                 SignalAlertsResponse)
-from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
+from app.schemas.lottery_tracker import (LotteryCashTrackerOut,
+                                         LotteryTrackerDetailOut,
                                          LotteryTrackerListOut,
                                          LotteryTrackerPointOut,
                                          LotterySessionSummaryOut,
@@ -22,8 +23,8 @@ from app.schemas.lottery_tracker import (LotteryTrackerDetailOut,
 from app.schemas.paper_positions import (PaperPositionCreate, PaperPositionExit,
                                          PaperPositionOut, PaperPositionsResponse)
 from app.services.market_calendar import market_session, next_market_open
-from app.services.lottery_tracker import (lottery_session_summary, serialize_point,
-                                          serialize_tracker, tracker_points)
+from app.services.lottery_tracker import (lottery_cash_tracker, lottery_session_summary,
+                                          serialize_point, serialize_tracker, tracker_points)
 from app.services.setup_engine import levels_for, lottery_candidates, structured_setups
 from app.services.paper_positions import (create_position, market_mark,
                                           cached_position,
@@ -251,6 +252,9 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
         LotteryTracker.trading_date == selected_date,
     ).order_by(LotteryTracker.first_seen_at.desc())).all())
     serialized = [serialize_tracker(row, tracker_points(db, row.id)) for row in rows]
+    all_rows = list(db.scalars(select(LotteryTracker).order_by(
+        LotteryTracker.first_seen_at, LotteryTracker.option_symbol)).all())
+    all_serialized = [serialize_tracker(row, tracker_points(db, row.id)) for row in all_rows]
     available_dates = list(db.scalars(select(LotteryTracker.trading_date).distinct()
                                       .order_by(LotteryTracker.trading_date.desc())).all())
     return LotteryTrackerListOut(
@@ -261,6 +265,7 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
         ),
         trackers=[LotteryTrackerSummaryOut.model_validate(row)
                   for row in serialized[:bounded_limit]],
+        cash_tracker=LotteryCashTrackerOut.model_validate(lottery_cash_tracker(all_serialized)),
     )
 
 

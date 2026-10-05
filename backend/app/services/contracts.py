@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from app.schemas.market import OptionContractOut
 
 ACCEPTED_ACTIONABLE_DATA_MODES = {"live"}
+ACCEPTED_ACTIONABLE_PROVIDERS = {"tradier", "tastytrade"}
 from app.services.indicators import spread_pct
 
 OCC = re.compile(r"^([A-Z0-9]{1,6})(\d{6})([CP])(\d{8})$")
@@ -32,7 +33,7 @@ def _identity_decision(contract: OptionContractOut, underlying: str) -> Contract
     expected = (underlying.upper(), contract.expiration, contract.strike, contract.right.lower())
     parsed = (root, expiry, strike, right)
     if parsed != expected or contract.symbol.upper() != underlying.upper():
-        return ContractDecision(False, False, "OCC identity disagrees with Tradier chain row")
+        return ContractDecision(False, False, "OCC identity disagrees with provider chain row")
     return None
 
 
@@ -43,17 +44,20 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
     identity_rejection = _identity_decision(contract, underlying)
     if identity_rejection is not None:
         return identity_rejection
-    if contract.provider != "tradier":
-        return ContractDecision(contract.data_mode == "demo", False, "Only Tradier contracts can be actionable")
+    if contract.provider not in ACCEPTED_ACTIONABLE_PROVIDERS:
+        return ContractDecision(contract.data_mode == "demo", False, "Provider is not approved for actionable contracts")
     if contract.data_mode == "demo":
         return ContractDecision(True, False, "Demo contracts are never actionable")
     if contract.data_mode == "unknown":
+        message = ("TRADIER_DATA_MODE must be explicitly set to live or delayed; unknown data is not actionable"
+                   if contract.provider == "tradier" else
+                   "Provider data mode must be explicitly live; unknown data is not actionable")
         return ContractDecision(
-            True, False,
-            "TRADIER_DATA_MODE must be explicitly set to live or delayed; unknown data is not actionable",
+            True, False, message,
         )
     if contract.data_mode == "delayed":
-        return ContractDecision(True, False, "Delayed Tradier data is research-only and not actionable")
+        label = "Tradier" if contract.provider == "tradier" else contract.provider
+        return ContractDecision(True, False, f"Delayed {label} data is research-only and not actionable")
     if contract.data_mode not in ACCEPTED_ACTIONABLE_DATA_MODES:
         return ContractDecision(True, False, "Provider data mode is not explicitly accepted for trading")
     now = now or datetime.now(timezone.utc)
@@ -74,7 +78,7 @@ def validate_contract(contract: OptionContractOut, underlying: str, *, now: date
         return ContractDecision(True, False, "Option volume too low")
     if contract.open_interest < min_open_interest:
         return ContractDecision(True, False, "Open interest too low")
-    return ContractDecision(True, True, "Verified against exact Tradier chain response")
+    return ContractDecision(True, True, f"Verified against exact {contract.provider} chain response")
 
 
 def validate_exit_quote(contract: OptionContractOut, underlying: str, expected_symbol: str,
@@ -88,9 +92,9 @@ def validate_exit_quote(contract: OptionContractOut, underlying: str, expected_s
     if identity_rejection is not None:
         return identity_rejection
     if contract.option_symbol.strip().upper() != expected_symbol.strip().upper():
-        return ContractDecision(True, False, "Tradier row is not the selected entry contract")
-    if contract.provider != "tradier" or contract.data_mode != "live":
-        return ContractDecision(True, False, "Exit quote is not explicit live Tradier data")
+        return ContractDecision(True, False, "Provider row is not the selected entry contract")
+    if contract.provider not in ACCEPTED_ACTIONABLE_PROVIDERS or contract.data_mode != "live":
+        return ContractDecision(True, False, "Exit quote is not explicit approved live-provider data")
     if contract.bid < 0 or contract.ask <= 0 or contract.ask < contract.bid:
         return ContractDecision(True, False, "Invalid exit bid/ask")
     if contract.bid_timestamp is None or contract.ask_timestamp is None:
@@ -103,7 +107,7 @@ def validate_exit_quote(contract: OptionContractOut, underlying: str, expected_s
         return ContractDecision(True, False, "Exit quote predates the underlying exit event")
     if (latest - event).total_seconds() > max_lag_seconds:
         return ContractDecision(True, False, "Exit quote arrived outside the allowed lag window")
-    return ContractDecision(True, True, "Verified exact Tradier quote after the underlying exit event")
+    return ContractDecision(True, True, f"Verified exact {contract.provider} quote after the underlying exit event")
 
 
 def annotate_chain(chain: list[OptionContractOut], underlying: str, now: datetime, *,
@@ -131,5 +135,6 @@ def has_complete_provenance(contract: OptionContractOut) -> bool:
 
 def is_verified_actionable_contract(contract: OptionContractOut | None) -> bool:
     return bool(contract and contract.actionable is True and contract.verification_status == "verified"
-                and contract.provider == "tradier" and contract.data_mode in ACCEPTED_ACTIONABLE_DATA_MODES
+                and contract.provider in ACCEPTED_ACTIONABLE_PROVIDERS
+                and contract.data_mode in ACCEPTED_ACTIONABLE_DATA_MODES
                 and has_complete_provenance(contract))

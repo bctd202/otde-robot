@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { PaperPosition, ParlayCandidate, ParlayResponse, StrategyView } from '../types';
 import { parseApiTimestamp } from '../lib/dates';
+import { isVerifiedLiveContract } from '../lib/contracts';
 import { PaperPositions } from './PaperPositions';
 import { ParlayTicket } from './ParlayTicket';
 import { ProviderStatus } from './ProviderStatus';
@@ -14,7 +15,7 @@ export function ParlaySkeleton() {
 interface ParlayBoardProps { data:ParlayResponse;selectedStrategy?:StrategyView;updated:Date|null;refreshing:boolean;stale:boolean;onRetry:()=>void;positions?:PaperPosition[];positionsStale?:boolean;onPaperEnter?:(candidate:ParlayCandidate)=>void;onPaperExit?:(position:PaperPosition)=>void;enteringSymbol?:string|null;scannerControlBusy?:boolean;scannerFeedback?:string;onScannerControl?:(action:'HOLD'|'RESUME')=>void }
 
 const lifecycleIsCurrent=(item:ParlayCandidate)=>item.lifecycle_status==null||(['BUY','WATCH'].includes(item.lifecycle_status)&&item.lifecycle_status===item.signal_status&&(parseApiTimestamp(item.valid_until)?.getTime()??0)>Date.now());
-const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&lifecycleIsCurrent(item)&&item.actionable===true&&item.contract?.actionable===true&&item.contract.verification_status==='verified'&&item.contract.provider==='tradier'&&item.contract.data_mode==='live'&&Boolean(item.contract.normalized_symbol)&&Boolean(item.contract.bid_timestamp)&&Boolean(item.contract.ask_timestamp)&&Boolean(item.contract.timestamp);
+const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&lifecycleIsCurrent(item)&&item.actionable===true&&isVerifiedLiveContract(item.contract);
 
 export function ParlayBoard({data,selectedStrategy='ALL',updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol,scannerControlBusy=false,scannerFeedback='',onScannerControl}:ParlayBoardProps) {
   const visible=useMemo(()=>data.candidates.filter(item=>selectedStrategy==='ALL'||item.strategy_mode===selectedStrategy),[data.candidates,selectedStrategy]);
