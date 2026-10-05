@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes import router
+from app.core.config import get_settings
 from app.db.models import LotteryQuoteSnapshot, LotteryTracker
 from app.db.session import Base, get_db
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
-from app.services.lottery_tracker import (close_lottery_trackers, serialize_tracker,
-                                          track_lottery_scan, tracker_points)
+from app.services.lottery_tracker import (close_lottery_trackers, lottery_cash_tracker,
+                                          serialize_tracker, track_lottery_scan,
+                                          tracker_points)
 
 NY = ZoneInfo("America/New_York")
 NOW = datetime(2026, 9, 2, 10, 5, tzinfo=NY)
@@ -85,6 +87,25 @@ def test_tracker_records_each_scan_and_keeps_marking_after_contract_stops_qualif
         assert summary["exit_scenarios"]["take_2x"]["target_hit"] is True
         assert summary["exit_scenarios"]["take_2x"]["exit_value"] == 45
         assert summary["exit_scenarios"]["take_5x"]["exit_reason"] == "OPEN_MARK"
+        assert summary["collection_interrupted"] is False
+
+
+def test_cash_tracker_uses_one_entry_per_wave_and_enforces_daily_debit_cap(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "lottery_paper_starting_cash", 100.0)
+    monkeypatch.setattr(settings, "lottery_paper_daily_debit_cap", 25.0)
+    base = {"trading_date": NOW.date(), "first_seen_at": NOW, "entry_wave_id": "wave-1",
+            "setup_score": 80, "entry_cost": 20, "option_symbol": "A",
+            "status": "CLOSED", "exit_scenarios": {
+                "take_2x": {"exit_value": 40}, "take_5x": {"exit_value": 0}}}
+    rows = [base, {**base, "option_symbol": "B", "setup_score": 70, "entry_cost": 10},
+            {**base, "entry_wave_id": "wave-2", "option_symbol": "C", "setup_score": 90}]
+    result = lottery_cash_tracker(rows)
+    two_x = result["portfolios"][0]
+    assert two_x["positions_taken"] == 1
+    assert two_x["skipped_daily_cap"] == 1
+    assert two_x["book_equity"] == 120
+    assert result["historical_records_changed"] is False
 
 
 def test_same_completed_candle_cannot_duplicate_a_chart_point():
@@ -146,6 +167,9 @@ def test_tracker_api_exposes_the_summary_and_scan_points():
     assert listing.json()["summary"]["entry_wave_count"] == 1
     assert listing.json()["summary"]["total_entry_cost"] == 20
     assert listing.json()["summary"]["rule_comparisons"][0]["key"] == "hold_to_last"
+    assert listing.json()["summary"]["collection_health"]["status"] == "COMPLETE"
+    assert listing.json()["cash_tracker"]["starting_cash"] == 500
+    assert len(listing.json()["cash_tracker"]["portfolios"]) == 2
     latest_listing = client.get("/api/lottery-trackers")
     assert latest_listing.status_code == 200
     assert latest_listing.json()["trading_date"] == "2026-09-02"

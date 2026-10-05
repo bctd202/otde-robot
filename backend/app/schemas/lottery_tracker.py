@@ -69,6 +69,8 @@ class LotteryTrackerSummaryOut(BaseModel):
     hit_5x_at: datetime | None = None
     hit_10x_at: datetime | None = None
     point_count: int
+    max_quote_gap_minutes: float
+    collection_interrupted: bool
     entry_wave_id: str
     exit_scenarios: LotteryExitScenariosOut
     currently_qualified: bool
@@ -87,6 +89,13 @@ class LotteryRuleComparisonOut(BaseModel):
     return_percent: float | None = None
 
 
+class LotteryCollectionHealthOut(BaseModel):
+    status: str
+    interrupted_contracts: int
+    max_quote_gap_minutes: float
+    message: str
+
+
 class LotterySessionSummaryOut(BaseModel):
     contract_count: int
     entry_wave_count: int
@@ -96,6 +105,51 @@ class LotterySessionSummaryOut(BaseModel):
     hit_10x_count: int
     best_observed_multiple: float
     rule_comparisons: list[LotteryRuleComparisonOut] = Field(default_factory=list)
+    collection_health: LotteryCollectionHealthOut
+
+
+class LotteryCashDailyOut(BaseModel):
+    trading_date: date
+    entries: int
+    closed: int
+    skipped: int
+    daily_realized_pnl: float
+    cumulative_realized_pnl: float
+    cash: float
+    book_equity: float
+
+
+class LotteryCashPortfolioOut(BaseModel):
+    key: str
+    label: str
+    starting_cash: float
+    daily_debit_cap: float
+    cash_available: float
+    book_equity: float
+    pnl: float
+    return_percent: float
+    maximum_drawdown: float
+    positions_taken: int
+    closed_positions: int
+    active_positions: int
+    skipped_insufficient_cash: int
+    skipped_daily_cap: int
+    wins: int
+    losses: int
+    daily: list[LotteryCashDailyOut] = Field(default_factory=list)
+
+
+class LotteryCashTrackerOut(BaseModel):
+    starting_cash: float
+    daily_debit_cap: float
+    quantity_per_entry: int
+    selection_rule: str
+    portfolios: list[LotteryCashPortfolioOut] = Field(default_factory=list)
+    entry_basis: str
+    exit_basis: str
+    forward_only: bool
+    historical_records_changed: bool
+    paper_only: bool
 
 
 class LotteryTrackerListOut(BaseModel):
@@ -103,6 +157,7 @@ class LotteryTrackerListOut(BaseModel):
     available_dates: list[date] = Field(default_factory=list)
     summary: LotterySessionSummaryOut
     trackers: list[LotteryTrackerSummaryOut] = Field(default_factory=list)
+    cash_tracker: LotteryCashTrackerOut
     entry_basis: str = "First qualifying ask"
     performance_basis: str = "Subsequent sellable bid"
     accounting_note: str = (

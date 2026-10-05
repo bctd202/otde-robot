@@ -54,6 +54,12 @@ def test_unknown_and_delayed_data_modes_are_explicitly_non_actionable():
     assert delayed.reason == "Delayed Tradier data is research-only and not actionable"
 
 
+def test_verified_live_tastytrade_contract_uses_the_same_fail_closed_policy():
+    result = validate_contract(contract(provider="tastytrade", data_mode="live"), "IWN", now=NOW)
+    assert result.authentic and result.actionable
+    assert "tastytrade" in result.reason
+
+
 def test_strategy_specific_dte_window_preserves_authenticity_and_controls_actionability():
     future = contract(option_symbol="IWN260812C00250000", expiration=date(2026, 8, 12))
     same_day_policy = validate_contract(future, "IWN", now=NOW)

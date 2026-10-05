@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ParlayPaperPosition
 from app.schemas.paper_positions import PaperPositionCreate, PaperPositionOut
-from app.services.contracts import ACCEPTED_ACTIONABLE_DATA_MODES, is_verified_actionable_contract
+from app.services.contracts import (ACCEPTED_ACTIONABLE_DATA_MODES,
+                                    ACCEPTED_ACTIONABLE_PROVIDERS,
+                                    is_verified_actionable_contract)
 from app.services.parlay import latest_completed_candle_at, rank_parlays
 from app.services.structured_intraday import rank_structured_intraday
 
@@ -52,8 +54,9 @@ def create_position(db: Session, payload: PaperPositionCreate, provider: Any) ->
     if payload.signal_status != "BUY":
         raise ValueError("Only qualified BUY candidates can be paper entered")
     status = provider.status()
-    if status.provider != "tradier" or status.mode not in ACCEPTED_ACTIONABLE_DATA_MODES or status.status != "healthy":
-        raise ValueError("Paper entry requires a verified current Tradier contract")
+    if (status.provider not in ACCEPTED_ACTIONABLE_PROVIDERS or
+            status.mode not in ACCEPTED_ACTIONABLE_DATA_MODES or status.status != "healthy"):
+        raise ValueError("Paper entry requires a verified current live-provider contract")
     symbol = payload.symbol.upper()
     # Never trust a BUY card that was rendered earlier. Re-run the complete
     # underlying setup and contract selection at click time on the server.
@@ -77,7 +80,7 @@ def create_position(db: Session, payload: PaperPositionCreate, provider: Any) ->
         raise ValueError("An active paper position already exists for this option symbol")
     if (contract.expiration != payload.expiration or contract.strike != payload.strike or
             contract.right != payload.direction):
-        raise ValueError("Paper entry contract identity does not match the current Tradier chain")
+        raise ValueError("Paper entry contract identity does not match the current provider chain")
     if candidate.underlying_price is None:
         raise ValueError("Paper entry requires a current server-derived underlying quote")
     server_now = datetime.now(timezone.utc)

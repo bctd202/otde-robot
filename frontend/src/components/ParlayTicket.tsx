@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ParlayCandidate } from '../types';
 import { formatDateOnly, formatEasternTime, parseApiTimestamp } from '../lib/dates';
+import { isVerifiedLiveContract } from '../lib/contracts';
 import { DirectionBadge } from './DirectionBadge';
 
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
@@ -12,7 +13,7 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
   const validUntil=parseApiTimestamp(candidate.valid_until)?.getTime()??null;
   const secondsRemaining=validUntil==null?null:Math.max(0,Math.ceil((validUntil-now)/1000));
   const lifecycleCurrent=candidate.lifecycle_status==null||(candidate.lifecycle_status==='BUY'&&secondsRemaining!==null&&secondsRemaining>0);
-  const verifiedActionable=lifecycleCurrent&&candidate.actionable===true&&contract?.actionable===true&&contract.verification_status==='verified'&&contract.provider==='tradier'&&contract.data_mode==='live'&&Boolean(contract.normalized_symbol)&&Boolean(contract.bid_timestamp)&&Boolean(contract.ask_timestamp)&&Boolean(contract.timestamp);
+  const verifiedActionable=lifecycleCurrent&&candidate.actionable===true&&isVerifiedLiveContract(contract);
   const action=candidate.signal_status==='BUY'&&verifiedActionable?'BUY NOW':'WAIT';
   return <article className={`parlay-ticket decision-ticket decision-${candidate.signal_status.toLowerCase()}`}>
     <div className={`strategy-pill ${candidate.strategy_mode==='STRUCTURED_INTRADAY'?'structured':'fast'}`}><b>{candidate.strategy_mode==='STRUCTURED_INTRADAY'?'Structured Intraday':'1-Min / 0DTE'}</b><span>{candidate.timeframe_context} · {candidate.target_dte} · {candidate.strategy_version}</span></div>

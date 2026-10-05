@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     tradier_base_url: str = "https://api.tradier.com/v1"
     tradier_data_mode: str = "unknown"
     tradier_request_budget_per_minute: int = 100
+    tastytrade_client_id: str | None = None
+    tastytrade_client_secret: str | None = None
+    tastytrade_refresh_token: str | None = None
+    tastytrade_base_url: str = "https://api.tastyworks.com"
+    tastytrade_user_agent: str = "parlay-research/1.0"
+    tastytrade_request_budget_per_minute: int = 120
+    tastytrade_stream_timeout_seconds: float = 4.0
     market_quote_cache_seconds: int = 10
     market_candle_cache_seconds: int = 45
     market_chain_cache_seconds: int = 20
@@ -42,6 +49,9 @@ class Settings(BaseSettings):
     automated_option_shadow_enabled: bool = True
     automated_option_max_quote_lag_seconds: int = 180
     automated_option_request_reserve: int = 20
+    lottery_paper_starting_cash: float = 500.0
+    lottery_paper_daily_debit_cap: float = 100.0
+    lottery_collection_gap_minutes: int = 3
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

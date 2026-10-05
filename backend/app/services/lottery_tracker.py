@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import LotteryQuoteSnapshot, LotteryTracker
+from app.core.config import get_settings
 from app.schemas.market import LotteryOut, OptionContractOut, Quote
 from app.services.contracts import annotate_chain
 from app.services.indicators import spread_pct
@@ -247,6 +248,11 @@ def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -
     latest_multiple = row.latest_bid / entry if row.latest_bid is not None and entry > 0 else None
     peak_multiple = row.peak_bid / entry if entry > 0 else 0
     latest_point = points[-1] if points else None
+    stamps = [_utc(row.first_seen_at), *[_utc(point.observed_at) for point in points]]
+    if row.status == "CLOSED":
+        stamps.append(datetime.combine(row.trading_date, time(16, 0), NY).astimezone(timezone.utc))
+    max_gap = max(((right-left).total_seconds()/60 for left, right in zip(stamps, stamps[1:])), default=0)
+    gap_limit = max(1, get_settings().lottery_collection_gap_minutes)
     return {
         "id": row.id, "trading_date": row.trading_date, "symbol": row.symbol,
         "option_symbol": row.option_symbol, "expiration": row.expiration,
@@ -267,6 +273,8 @@ def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -
         "peak_bid_at": row.peak_bid_at, "hit_2x_at": row.hit_2x_at,
         "hit_5x_at": row.hit_5x_at, "hit_10x_at": row.hit_10x_at,
         "point_count": len(points),
+        "max_quote_gap_minutes": round(max_gap, 1),
+        "collection_interrupted": max_gap > gap_limit,
         "entry_wave_id": (
             f"{row.trading_date}:{row.symbol}:{row.first_seen_at.strftime('%H:%M:%S')}"
         ),
@@ -318,6 +326,118 @@ def lottery_session_summary(trackers: list[dict]) -> dict:
         "hit_10x_count": sum(row["hit_10x_at"] is not None for row in trackers),
         "best_observed_multiple": max((row["peak_multiple"] for row in trackers), default=0),
         "rule_comparisons": rules,
+        "collection_health": lottery_collection_health(trackers),
+    }
+
+
+def lottery_collection_health(trackers: list[dict]) -> dict:
+    interrupted = [row for row in trackers if row["collection_interrupted"]]
+    max_gap = max((row["max_quote_gap_minutes"] for row in trackers), default=0)
+    return {
+        "status": "INTERRUPTED" if interrupted else "COMPLETE",
+        "interrupted_contracts": len(interrupted),
+        "max_quote_gap_minutes": max_gap,
+        "message": (
+            f"Quote collection has a gap as long as {max_gap:.0f} minutes. Treat rule outcomes as incomplete."
+            if interrupted else "No material quote-collection gap was detected while these contracts were tracked."
+        ),
+    }
+
+
+def _one_contract_per_wave(trackers: list[dict]) -> list[dict]:
+    """Choose only entry-time information: highest score, then cheapest ask, then OCC symbol."""
+    waves: dict[str, list[dict]] = {}
+    for row in trackers:
+        waves.setdefault(row["entry_wave_id"], []).append(row)
+    return sorted(
+        (sorted(rows, key=lambda row: (-row["setup_score"], row["entry_cost"], row["option_symbol"]))[0]
+         for rows in waves.values()),
+        key=lambda row: (_utc(row["first_seen_at"]), row["option_symbol"]),
+    )
+
+
+def _cash_portfolio(trackers: list[dict], scenario_key: str, label: str,
+                    starting_cash: float, daily_cap: float) -> dict:
+    cash = starting_cash
+    peak_equity = starting_cash
+    max_drawdown = 0.0
+    daily_spent: dict[date, float] = {}
+    daily_rows: dict[date, dict] = {}
+    positions = closed = active = wins = losses = 0
+    skipped_cash = skipped_cap = 0
+    for row in _one_contract_per_wave(trackers):
+        day = row["trading_date"]
+        if isinstance(day, str):
+            day = date.fromisoformat(day)
+        cost = row["entry_cost"]
+        if daily_spent.get(day, 0) + cost > daily_cap + 1e-9:
+            skipped_cap += 1
+            daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
+                "skipped": 0, "realized_pnl": 0.0})["skipped"] += 1
+            continue
+        if cost > cash + 1e-9:
+            skipped_cash += 1
+            daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
+                "skipped": 0, "realized_pnl": 0.0})["skipped"] += 1
+            continue
+        positions += 1
+        daily_spent[day] = daily_spent.get(day, 0) + cost
+        cash -= cost
+        day_row = daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
+            "skipped": 0, "realized_pnl": 0.0})
+        day_row["entries"] += 1
+        scenario = row["exit_scenarios"][scenario_key]
+        value = float(scenario["exit_value"] or 0)
+        if row["status"] == "CLOSED":
+            cash += value
+            closed += 1
+            pnl = value - cost
+            day_row["closed"] += 1
+            day_row["realized_pnl"] += pnl
+            wins += pnl > 0
+            losses += pnl < 0
+        else:
+            active += 1
+        book_equity = cash + (value if row["status"] != "CLOSED" else 0)
+        peak_equity = max(peak_equity, book_equity)
+        max_drawdown = max(max_drawdown, peak_equity - book_equity)
+        day_row["cash"] = cash
+        day_row["book_equity"] = book_equity
+    daily = []
+    cumulative = 0.0
+    for day, row in sorted(daily_rows.items()):
+        cumulative += row["realized_pnl"]
+        daily.append({**row, "daily_realized_pnl": round(row["realized_pnl"], 2),
+                      "cumulative_realized_pnl": round(cumulative, 2),
+                      "cash": round(row.get("cash", cash), 2),
+                      "book_equity": round(row.get("book_equity", cash), 2)})
+        daily[-1].pop("realized_pnl", None)
+    ending_equity = daily[-1]["book_equity"] if daily else starting_cash
+    return {
+        "key": scenario_key, "label": label, "starting_cash": round(starting_cash, 2),
+        "daily_debit_cap": round(daily_cap, 2), "cash_available": round(cash, 2),
+        "book_equity": round(ending_equity, 2), "pnl": round(ending_equity-starting_cash, 2),
+        "return_percent": round((ending_equity/starting_cash-1)*100, 1) if starting_cash else 0,
+        "maximum_drawdown": round(max_drawdown, 2), "positions_taken": positions,
+        "closed_positions": closed, "active_positions": active,
+        "skipped_insufficient_cash": skipped_cash, "skipped_daily_cap": skipped_cap,
+        "wins": wins, "losses": losses, "daily": daily,
+    }
+
+
+def lottery_cash_tracker(trackers: list[dict]) -> dict:
+    settings = get_settings()
+    starting = max(0, settings.lottery_paper_starting_cash)
+    cap = max(0, settings.lottery_paper_daily_debit_cap)
+    return {
+        "starting_cash": starting, "daily_debit_cap": cap, "quantity_per_entry": 1,
+        "selection_rule": "One contract per scanner wave: highest entry-time setup score, then lowest ask.",
+        "portfolios": [
+            _cash_portfolio(trackers, "take_2x", "Take first 2× bid", starting, cap),
+            _cash_portfolio(trackers, "take_5x", "Take first 5× bid", starting, cap),
+        ],
+        "entry_basis": "First qualifying ask", "exit_basis": "First target bid, else last saved bid",
+        "forward_only": True, "historical_records_changed": False, "paper_only": True,
     }
 
 

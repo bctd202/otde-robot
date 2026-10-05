@@ -11,7 +11,7 @@ export interface LotteryTrackerSummary {
   latest_return_percent:number|null;peak_bid:number;peak_sellable_value:number;peak_multiple:number;
   peak_return_percent:number;peak_bid_at:string|null;hit_2x_at:string|null;hit_5x_at:string|null;hit_10x_at:string|null;
   point_count:number;entry_wave_id:string;exit_scenarios:LotteryExitScenarios;currently_qualified:boolean;provider:string;data_mode:string;verification_status:string;
-  verification_reason:string;actionable:boolean;
+  verification_reason:string;actionable:boolean;max_quote_gap_minutes:number;collection_interrupted:boolean;
 }
 export interface LotteryExitScenario {
   target_multiple:number|null;target_hit:boolean;exit_reason:'TARGET_2X'|'TARGET_5X'|'SESSION_END'|'OPEN_MARK'|'NO_QUOTES';
@@ -22,7 +22,11 @@ export interface LotteryRuleComparison {key:string;label:string;ending_value:num
 export interface LotterySessionSummary {
   contract_count:number;entry_wave_count:number;total_entry_cost:number;hit_2x_count:number;hit_5x_count:number;
   hit_10x_count:number;best_observed_multiple:number;rule_comparisons:LotteryRuleComparison[];
+  collection_health:{status:'COMPLETE'|'INTERRUPTED';interrupted_contracts:number;max_quote_gap_minutes:number;message:string};
 }
+export interface LotteryCashDaily {trading_date:string;entries:number;closed:number;skipped:number;daily_realized_pnl:number;cumulative_realized_pnl:number;cash:number;book_equity:number}
+export interface LotteryCashPortfolio {key:'take_2x'|'take_5x';label:string;starting_cash:number;daily_debit_cap:number;cash_available:number;book_equity:number;pnl:number;return_percent:number;maximum_drawdown:number;positions_taken:number;closed_positions:number;active_positions:number;skipped_insufficient_cash:number;skipped_daily_cap:number;wins:number;losses:number;daily:LotteryCashDaily[]}
+export interface LotteryCashTracker {starting_cash:number;daily_debit_cap:number;quantity_per_entry:1;selection_rule:string;portfolios:LotteryCashPortfolio[];entry_basis:string;exit_basis:string;forward_only:true;historical_records_changed:false;paper_only:true}
 export interface LotteryTrackerPoint {
   observed_at:string;quote_timestamp:string;bid_timestamp:string|null;ask_timestamp:string|null;
   bid:number;ask:number;midpoint:number;last:number;bid_value:number;ask_value:number;
@@ -30,7 +34,7 @@ export interface LotteryTrackerPoint {
 }
 export interface LotteryTrackerList {
   trading_date:string;available_dates:string[];summary:LotterySessionSummary;trackers:LotteryTrackerSummary[];
-  entry_basis:string;performance_basis:string;accounting_note:string;paper_only:boolean;
+  cash_tracker:LotteryCashTracker;entry_basis:string;performance_basis:string;accounting_note:string;paper_only:boolean;
 }
 export interface LotteryTrackerDetail {
   tracker:LotteryTrackerSummary;points:LotteryTrackerPoint[];entry_basis:string;performance_basis:string;paper_only:boolean;

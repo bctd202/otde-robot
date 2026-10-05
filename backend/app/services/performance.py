@@ -9,7 +9,8 @@ from app.core.config import get_settings
 from app.db.models import (AutomatedOptionMark, LiveWaitCandidate,
                            ParlayPaperPosition, SignalPerformance)
 from app.schemas.market import OptionContractOut
-from app.services.contracts import (is_verified_actionable_contract,
+from app.services.contracts import (ACCEPTED_ACTIONABLE_PROVIDERS,
+                                    is_verified_actionable_contract,
                                     validate_exit_quote)
 from app.services.parlay import PRODUCTION_TIMEFRAME
 
@@ -170,21 +171,21 @@ def _record_option_exits(db: Session, provider, provider_status) -> None:
 
         event_at = _utc(row.exit_at)
         deadline = event_at + timedelta(seconds=settings.automated_option_max_quote_lag_seconds)
-        reason = "Exact selected contract was absent from the Tradier chain response"
+        reason = "Exact selected contract was absent from the provider chain response"
         chain: list[OptionContractOut] | None = None
         if hasattr(provider, "cached_option_chain"):
             chain = provider.cached_option_chain(entry.ticker, entry.expiration)
         if chain is None:
-            can_request = (provider_status.provider == "tradier" and provider_status.mode == "live" and
+            can_request = (provider_status.provider in ACCEPTED_ACTIONABLE_PROVIDERS and provider_status.mode == "live" and
                            provider_status.status == "healthy")
             if not can_request:
-                reason = "Live Tradier exit data was unavailable"
+                reason = "Live provider exit data was unavailable"
             if can_request and hasattr(provider, "budget_status"):
                 budget = provider.budget_status()
                 remaining = budget.get("remaining")
                 if remaining is not None and remaining <= settings.automated_option_request_reserve:
                     can_request = False
-                    reason = "Tradier request reserve protected the scanner"
+                    reason = "Provider request reserve protected the scanner"
             if can_request:
                 chain = _option_chain(provider, entry.ticker, entry.expiration)
 
@@ -256,7 +257,7 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
         verified_contract = (candidate.actionable is True and
                              is_verified_actionable_contract(candidate.contract))
         structured_underlying = (candidate.strategy_mode == "STRUCTURED_INTRADAY" and
-            provider_status is not None and provider_status.provider == "tradier" and
+            provider_status is not None and provider_status.provider in ACCEPTED_ACTIONABLE_PROVIDERS and
             provider_status.mode == "live" and provider_status.status == "healthy" and
             candidate.signal_status in {"WATCH", "MISSED"})
         if (candidate.signal_status not in {"WATCH", "BUY", "MISSED"} or
