@@ -73,10 +73,36 @@ class DXLinkSnapshotClient:
         self.timeout = max(1.0, timeout)
 
     @staticmethod
-    def _rows(data: Any) -> Iterable[list[Any]]:
+    def _events(data: Any, requested: dict[str, list[str]]) -> Iterable[dict[str, Any]]:
+        """Decode DXLink COMPACT packets, including batched flat event arrays.
+
+        A FEED_DATA payload names an event type and then supplies one or more
+        arrays. Each array may contain several records concatenated together,
+        rather than one nested array per record.
+        """
         if not isinstance(data, list):
             return []
-        return [item for item in data if isinstance(item, list) and item]
+        output: list[dict[str, Any]] = []
+        event_type: str | None = None
+        for item in data:
+            if isinstance(item, str) and item in requested:
+                event_type = item
+                continue
+            if event_type is None or not isinstance(item, list):
+                continue
+            fields = requested[event_type]
+            width = len(fields)
+            if not width:
+                continue
+            rows = item if item and isinstance(item[0], list) else [item]
+            for packed in rows:
+                if not isinstance(packed, list):
+                    continue
+                for offset in range(0, len(packed), width):
+                    row = packed[offset:offset + width]
+                    if len(row) == width:
+                        output.append(dict(zip(fields, row)))
+        return output
 
     def snapshot(self, subscriptions: list[dict[str, Any]], event_types: set[str]) -> list[dict[str, Any]]:
         from websockets.sync.client import connect
@@ -110,11 +136,7 @@ class DXLinkSnapshotClient:
                     ws.send(json.dumps({"type": "FEED_SUBSCRIPTION", "channel": 3,
                                         "reset": True, "add": subscriptions}))
                 elif kind == "FEED_DATA":
-                    for row in self._rows(message.get("data")):
-                        event = row[0]
-                        fields = requested.get(event)
-                        if fields:
-                            output.append(dict(zip(fields, row)))
+                    output.extend(self._events(message.get("data"), requested))
         return output
 
 
