@@ -2,7 +2,7 @@ from datetime import date
 
 import httpx
 
-from app.market_data.tastytrade import TastytradeMarketDataProvider
+from app.market_data.tastytrade import DXLinkSnapshotClient, TastytradeMarketDataProvider
 
 
 class FakeStreamer:
@@ -72,3 +72,16 @@ def test_tastytrade_never_labels_sandbox_market_data_healthy():
                                           "https://api.cert.tastyworks.com", "parlay/1.0")
     assert market.status().status == "unavailable"
     assert "sandbox" in market.status().message.lower()
+
+
+def test_dxlink_compact_decoder_keeps_every_packed_record():
+    fields = {"Candle": ["eventType", "eventSymbol", "time", "open", "high", "low", "close"]}
+    packed = [
+        "Candle", "SPY{=m}", 1788351000000, 100, 101, 99, 100.5,
+        "Candle", "SPY{=m}", 1788351060000, 100.5, 102, 100, 101.5,
+    ]
+
+    events = list(DXLinkSnapshotClient._events(["Candle", packed], fields))
+
+    assert [event["time"] for event in events] == [1788351000000, 1788351060000]
+    assert [event["close"] for event in events] == [100.5, 101.5]
