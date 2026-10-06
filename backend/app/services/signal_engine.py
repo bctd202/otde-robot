@@ -366,6 +366,9 @@ def background_scan_once(*, now: datetime | None = None) -> None:
         if session != "regular":
             expire_stale_lifecycles(db, scan_now)
             close_lottery_trackers(db, scan_now)
+            if _BACKGROUND_PROVIDER is not None and hasattr(_BACKGROUND_PROVIDER, "close"):
+                _BACKGROUND_PROVIDER.close()
+                _BACKGROUND_PROVIDER = None
             runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
             runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(scan_now)
             runtime.last_error = None
@@ -391,3 +394,25 @@ def background_scan_once(*, now: datetime | None = None) -> None:
                 evaluation_at=latest_completed_candle_at(scan_now))
         except Exception:
             logger.exception("Background Parlay signal scan failed")
+
+
+def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
+    """Repair persisted runtime and end-of-session state after an interrupted host."""
+    started_at = now or datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        runtime = _runtime(db)
+        session = market_session(started_at)
+        runtime.heartbeat_at = started_at
+        runtime.last_error = None
+        if session != "regular":
+            expire_stale_lifecycles(db, started_at)
+            close_lottery_trackers(db, started_at)
+            runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
+            runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(started_at)
+        elif runtime.operator_hold:
+            runtime.status = "held_by_operator"
+            runtime.next_evaluation_at = None
+        else:
+            runtime.status = "resume_pending"
+            runtime.next_evaluation_at = latest_completed_candle_at(started_at) + timedelta(minutes=1)
+        db.commit()

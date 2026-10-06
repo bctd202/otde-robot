@@ -2,7 +2,9 @@ from datetime import date
 
 import httpx
 
-from app.market_data.tastytrade import DXLinkSnapshotClient, TastytradeMarketDataProvider
+from app.market_data.tastytrade import (DXLinkCandleStreamClient,
+                                        DXLinkSnapshotClient,
+                                        TastytradeMarketDataProvider)
 
 
 class FakeStreamer:
@@ -20,6 +22,31 @@ class FakeStreamer:
              "volatility": .33, "delta": .16, "gamma": .05, "theta": -.08, "vega": .02},
             {"eventType": "Summary", "eventSymbol": ".SPY260902C102", "openInterest": 1500},
         ]
+
+
+class FakeCandleStream:
+    def __init__(self, url, token, symbols, start, on_events, timeout):
+        self.symbols = symbols
+        self.on_events = on_events
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        if self.started:
+            return
+        self.started = True
+        self.on_events([
+            {"eventType": "Candle", "eventSymbol": "SPY{=m}",
+             "time": 1788360660000, "open": 100, "high": 101,
+             "low": 99.5, "close": 100.5, "volume": 5000},
+        ])
+
+    def stop(self):
+        self.stopped = True
+
+    def health(self):
+        return {"connected": self.started and not self.stopped, "last_event_at": None,
+                "last_error": None, "subscription_count": len(self.symbols)}
 
 
 def provider(handler):
@@ -85,3 +112,33 @@ def test_dxlink_compact_decoder_keeps_every_packed_record():
 
     assert [event["time"] for event in events] == [1788351000000, 1788351060000]
     assert [event["close"] for event in events] == [100.5, 101.5]
+
+
+def test_dxlink_snapshot_method_belongs_to_bounded_snapshot_client():
+    assert callable(DXLinkSnapshotClient.snapshot)
+    assert not hasattr(DXLinkCandleStreamClient, "snapshot")
+
+
+def test_tastytrade_persistent_candle_stream_populates_quality_and_can_close():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/token":
+            return httpx.Response(200, json={"access_token": "access", "expires_in": 900})
+        if request.url.path == "/api-quote-tokens":
+            return httpx.Response(200, json={"data": {
+                "token": "quote-token", "dxlink-url": "wss://quotes.example"}})
+        raise AssertionError(request.url)
+
+    market = TastytradeMarketDataProvider(
+        "client", "secret", "refresh", "https://api.tastyworks.com", "parlay-test/1.0",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        streamer_factory=FakeStreamer, candle_stream_factory=FakeCandleStream,
+    )
+
+    rows = market.candles("SPY")
+    quality = market.data_quality_status()
+
+    assert len(rows) == 1 and rows[0].close == 100.5
+    assert quality["connected"] is True
+    assert quality["symbols_with_candles"] == 1
+    market.close()
+    assert market.data_quality_status()["connected"] is False

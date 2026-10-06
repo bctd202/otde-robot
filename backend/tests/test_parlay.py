@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -149,6 +149,19 @@ def test_one_bad_quote_does_not_block_other_symbols():
 
     assert by_symbol["BROKEN"].unavailable_reason == "Quote unavailable"
     assert by_symbol["SPY"].unavailable_reason is None
+
+
+def test_stale_candle_history_cannot_become_a_signal():
+    class StaleCandles(MockMarketDataProvider):
+        def candles(self, symbol, timeframe="1m"):
+            return super().candles(symbol, timeframe)[:-2]
+
+    completed_at = FIXED_SESSION_TIME.replace(second=0, microsecond=0) - timedelta(minutes=1)
+    candidate = rank_parlays(StaleCandles(now=FIXED_SESSION_TIME), ["SPY"],
+                             completed_at=completed_at)[0]
+
+    assert candidate.signal_status == "UNAVAILABLE"
+    assert candidate.unavailable_reason == "Latest completed candle unavailable"
 
 
 def test_parlay_endpoint_returns_ranked_paper_board(monkeypatch):

@@ -9,6 +9,7 @@ from app.market_data.cached import aggregate_candles
 from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.contracts import annotate_chain
 from app.services.indicators import spread_pct, vwap
+from app.services.parlay import completed_candle_history_ready, session_candle_requirement
 
 NY = ZoneInfo("America/New_York")
 STRATEGY_MODE: Literal["STRUCTURED_INTRADAY"] = "STRUCTURED_INTRADAY"
@@ -186,6 +187,12 @@ def rank_structured_intraday(provider: Any, symbols: list[str], *,
             candles = provider.candles(symbol, "1m")
         except (AttributeError, KeyError, TypeError, ValueError):
             candles = []
+        candles = [candle for candle in candles if _utc(candle.timestamp) <= _utc(completed_at)]
+        required = session_candle_requirement(completed_at, 60)
+        if not completed_candle_history_ready(candles, completed_at, required):
+            reason = ("Candles unavailable" if len(candles) < required
+                      else "Latest completed candle unavailable")
+            output.append(_unavailable(symbol, reason, quote.timestamp)); continue
         setup = evaluate_structured_setup(candles, quote.price, completed_at)
         base = dict(symbol=symbol, direction=setup.direction or "none", score=setup.score,
             score_label="PLAY" if setup.score >= 85 else "WATCH CLOSELY" if setup.score >= 70 else "PASS",

@@ -83,8 +83,12 @@ class CachedMarketDataProvider:
             if not self._fresh(entry, ttl):
                 rows = _completed_one_minute_candles(
                     self.provider.candles(symbol, "1m"), self.status().latest_timestamp)
-                entry = _CacheEntry(rows, datetime.now(timezone.utc))
-                self._candles[symbol] = entry
+                # An empty transient read must never erase the last good session history.
+                # Keep the prior entry expired so the next consumer retries upstream, while
+                # readiness checks reject it if its newest completed bar is stale.
+                if rows or entry is None:
+                    entry = _CacheEntry(rows, datetime.now(timezone.utc))
+                    self._candles[symbol] = entry
             assert entry is not None
             rows = list(entry.value)
         if timeframe == "1m":
@@ -144,6 +148,19 @@ class CachedMarketDataProvider:
         return {"safety_limit": None, "used_last_minute": None, "remaining": None,
                 "provider_allowed": None, "provider_used": None, "provider_available": None,
                 "resets_at": None, "paused": False}
+
+    def data_quality_status(self) -> dict[str, Any]:
+        if hasattr(self.provider, "data_quality_status"):
+            return self.provider.data_quality_status()
+        return {}
+
+    def start(self) -> None:
+        if hasattr(self.provider, "start"):
+            self.provider.start()
+
+    def close(self) -> None:
+        if hasattr(self.provider, "close"):
+            self.provider.close()
 
     def clear(self) -> None:
         with self._lock:
