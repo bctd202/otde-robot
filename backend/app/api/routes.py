@@ -190,6 +190,8 @@ def parlays(db: Session = Depends(get_db)):
             last_failure=runtime.last_error if runtime else None,
             runtime_duration_ms=_runtime_duration_ms(runtime),
             api_budget=provider.budget_status() if hasattr(provider, "budget_status") else {},
+            data_quality=(provider.data_quality_status()
+                          if hasattr(provider, "data_quality_status") else {}),
             operator_hold=runtime.operator_hold if runtime else False,
             control_updated_at=runtime.control_updated_at if runtime else None,
             market_session=session,
@@ -416,7 +418,17 @@ def health(): return {"status":"ok","paper_only": True}
 @router.get("/dashboard", response_model=DashboardOut)
 def dashboard():
     settings=get_settings(); provider=get_provider(); symbols=settings.symbol_list
-    status=provider.status(); quotes=provider.quotes(symbols)
+    status=provider.status(); session=market_session(datetime.now(timezone.utc))
+    if session != "regular" and status.mode != "mock":
+        return DashboardOut(provider_status=status, quotes=[], market_session=session,
+            volatility_proxy=None, levels={}, directional_bias={},
+            news_warning="Market closed. Live provider requests are paused until the regular session.",
+            normal_setups=[], lottery_setups=[], no_trade=True,
+            paper_account={"mode":"PAPER ONLY", "equity": settings.paper_account_size,
+                           "kill_switch": False,
+                           "structured_risk_percent": settings.structured_risk_percent,
+                           "lottery_daily_limit": 40})
+    quotes=provider.quotes(symbols)
     levels={}; bias={}; setups=[]; lottos=[]
     for q in quotes:
         try: candles=provider.candles(q.symbol,"1m")
@@ -424,14 +436,20 @@ def dashboard():
         if len(candles) < 12: continue
         try:
             from app.services.contracts import annotate_chain
-            raw_chain=provider.option_chain(q.symbol)
+            # The dashboard is a read view, not another market-data engine. Only use
+            # option chains already warmed by the scanner so opening a browser cannot
+            # stall scans or create a burst of upstream requests.
+            current_expiration = q.timestamp.astimezone(q.timestamp.tzinfo).date()
+            raw_chain = (provider.cached_option_chain(q.symbol, current_expiration) or []
+                         if hasattr(provider, "cached_option_chain")
+                         else provider.option_chain(q.symbol))
             chain=annotate_chain(raw_chain,q.symbol,provider.status().latest_timestamp)
         except (KeyError, TypeError, ValueError): chain=[]
         levels[q.symbol]=levels_for(candles)
         bias[q.symbol]="bullish" if candles[-1].close > levels[q.symbol]["vwap"] else "neutral"
         setups += structured_setups(q.symbol,candles,q,chain,status)
         lottos += lottery_candidates(q.symbol,candles,q,chain,status)
-    return DashboardOut(provider_status=status, quotes=quotes, market_session=market_session(status.latest_timestamp), volatility_proxy=14.2, levels=levels, directional_bias=bias, news_warning="Economic calendar adapter unavailable in Phase 1; no events fabricated.", normal_setups=setups, lottery_setups=sorted(lottos, key=lambda x: x.setup_score, reverse=True)[:3], no_trade=(not setups and not lottos), paper_account={"mode":"PAPER ONLY", "equity": settings.paper_account_size, "kill_switch": False, "structured_risk_percent": settings.structured_risk_percent, "lottery_daily_limit": 40})
+    return DashboardOut(provider_status=status, quotes=quotes, market_session=session, volatility_proxy=14.2, levels=levels, directional_bias=bias, news_warning="Economic calendar adapter unavailable in Phase 1; no events fabricated.", normal_setups=setups, lottery_setups=sorted(lottos, key=lambda x: x.setup_score, reverse=True)[:3], no_trade=(not setups and not lottos), paper_account={"mode":"PAPER ONLY", "equity": settings.paper_account_size, "kill_switch": False, "structured_risk_percent": settings.structured_risk_percent, "lottery_daily_limit": 40})
 
 @router.get("/candles/{symbol}")
 def candles(symbol: str, timeframe: str="1m"):

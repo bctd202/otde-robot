@@ -196,6 +196,7 @@ class ScannerHealth(BaseModel):
     last_failure: str | None = None
     runtime_duration_ms: int | None = None
     api_budget: dict = Field(default_factory=dict)
+    data_quality: dict = Field(default_factory=dict)
     operator_hold: bool = False
     control_updated_at: datetime | None = None
     market_session: str = "unknown"

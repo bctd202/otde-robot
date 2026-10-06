@@ -122,6 +122,23 @@ def latest_completed_candle_at(latest: datetime) -> datetime:
     return _utc(latest).replace(second=0, microsecond=0) - timedelta(minutes=1)
 
 
+def completed_candle_history_ready(candles: list[CandleOut], completed_at: datetime | None,
+                                   minimum: int) -> bool:
+    """Require enough history and the exact latest completed minute before evaluation."""
+    if len(candles) < minimum:
+        return False
+    if completed_at is None:
+        return True
+    return max(_utc(candle.timestamp) for candle in candles) >= _utc(completed_at)
+
+
+def session_candle_requirement(completed_at: datetime, maximum: int) -> int:
+    """Number of regular-session bars a model can legitimately require so far."""
+    local = completed_at.astimezone(NY)
+    elapsed = (local.hour * 60 + local.minute) - (9 * 60 + 30) + 1
+    return min(maximum, max(1, elapsed))
+
+
 def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | None = None) -> list[ParlayCandidateOut]:
     """Build complete, deterministic paper-research plans without predicting outcomes."""
     provider_status = provider.status()
@@ -153,8 +170,10 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
             candles = []
         if completed_at is not None:
             candles = [candle for candle in candles if _utc(candle.timestamp) <= _utc(completed_at)]
-        if len(candles) < 8:
-            output.append(_unavailable(symbol, "Candles unavailable", quote.timestamp))
+        if not completed_candle_history_ready(candles, completed_at, 8):
+            reason = ("Candles unavailable" if len(candles) < 8
+                      else "Latest completed candle unavailable")
+            output.append(_unavailable(symbol, reason, quote.timestamp))
             continue
         setup = evaluate_underlying_setup(candles, quote.price)
         direction, checks, reasons = setup.direction, setup.checks, setup.reasons

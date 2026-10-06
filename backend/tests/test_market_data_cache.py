@@ -60,3 +60,16 @@ def test_cache_never_promotes_a_forming_candle_to_completed():
     upstream.now += timedelta(minutes=1)
     # The partial row was never cached, so it cannot silently become completed.
     assert provider.candles("SPY") == []
+
+
+def test_empty_transient_candle_read_does_not_erase_last_good_history(monkeypatch):
+    upstream = CountingProvider()
+    provider = CachedMarketDataProvider(upstream)
+    first = provider.candles("SPY")
+    assert first
+    upstream.candles = lambda symbol, timeframe="1m": []
+    monkeypatch.setattr("app.market_data.cached.get_settings", lambda: type("S", (), {
+        "market_candle_cache_seconds": 0,
+    })())
+
+    assert provider.candles("SPY") == first

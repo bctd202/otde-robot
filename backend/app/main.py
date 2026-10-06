@@ -11,11 +11,12 @@ from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import OperationalError
 
 from app.api.routes import router
 from app.core.config import get_settings
 from app.services.market_calendar import next_scanner_run
-from app.services.signal_engine import background_scan_once
+from app.services.signal_engine import background_scan_once, reconcile_runtime_on_startup
 
 logger = logging.getLogger(__name__)
 startup_logger = logging.getLogger("uvicorn.error")
@@ -57,6 +58,12 @@ def add_scanner_job(scheduler: AsyncIOScheduler, scan_callable=background_scan_o
 async def lifespan(application: FastAPI):
     scanner_scheduler = None
     if settings.parlay_background_scanner_enabled:
+        try:
+            reconcile_runtime_on_startup()
+        except OperationalError:
+            # The container entrypoint normally migrates first. Keep local/test app
+            # startup diagnosable when pointed at an intentionally stale fixture DB.
+            startup_logger.exception("Scanner startup reconciliation skipped; database schema is not current")
         scanner_scheduler = AsyncIOScheduler(timezone=settings.timezone)
         add_scanner_job(scanner_scheduler)
         scanner_scheduler.start()

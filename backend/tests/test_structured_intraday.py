@@ -1,8 +1,8 @@
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from app.schemas.market import CandleOut
-from app.services.structured_intraday import evaluate_structured_setup
+from app.schemas.market import CandleOut, ProviderStatus, Quote
+from app.services.structured_intraday import evaluate_structured_setup, rank_structured_intraday
 
 NY = ZoneInfo("America/New_York")
 
@@ -66,3 +66,23 @@ def test_structured_breakout_requires_a_later_retest_candle():
     result = evaluate_structured_setup(rows, rows[-1].close, rows[-1].timestamp)
     assert result.status == "WATCH"
     assert any("controlled retest" in reason for reason in result.rejection_reasons)
+
+
+def test_structured_rank_marks_missing_candles_unavailable_instead_of_pass():
+    completed_at = datetime(2026, 8, 5, 11, 0, tzinfo=NY)
+
+    class MissingCandles:
+        def status(self):
+            return ProviderStatus(provider="tastytrade", mode="live", status="healthy",
+                delay_seconds=0, latest_timestamp=completed_at, message="test")
+
+        def quotes(self, symbols):
+            return [Quote(symbol=symbol, price=100, timestamp=completed_at) for symbol in symbols]
+
+        def candles(self, symbol, timeframe="1m"):
+            return []
+
+    candidate = rank_structured_intraday(MissingCandles(), ["SPY"], completed_at=completed_at)[0]
+
+    assert candidate.signal_status == "UNAVAILABLE"
+    assert candidate.unavailable_reason == "Candles unavailable"

@@ -102,6 +102,8 @@ def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch)
     monkeypatch.setattr(signal_engine, "market_session", lambda _now: "closed")
     monkeypatch.setattr(signal_engine, "run_signal_scan",
                         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")))
+    closed = []
+    signal_engine._BACKGROUND_PROVIDER = type("Provider", (), {"close": lambda self: closed.append(True)})()
 
     signal_engine.background_scan_once()
 
@@ -112,6 +114,33 @@ def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch)
         assert runtime.heartbeat_at is not None
         assert runtime.last_error is None
         assert runtime.next_evaluation_at is not None
+    assert closed == [True]
+    assert signal_engine._BACKGROUND_PROVIDER is None
+
+
+def test_startup_reconciliation_repairs_stale_scanning_state(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    local = lambda: Session(engine)  # noqa: E731
+    with Session(engine) as db:
+        db.add(ScannerRuntime(key=signal_engine.ENGINE_KEY, status="scanning", heartbeat_at=NOW,
+                              last_scan_started_at=NOW, operator_hold=False))
+        db.commit()
+    monkeypatch.setattr(signal_engine, "SessionLocal", local)
+    monkeypatch.setattr(signal_engine, "market_session", lambda _now: "closed")
+    housekeeping = []
+    monkeypatch.setattr(signal_engine, "close_lottery_trackers",
+                        lambda _db, at: housekeeping.append(at) or 0)
+
+    signal_engine.reconcile_runtime_on_startup(now=NOW + timedelta(hours=8))
+
+    with Session(engine) as db:
+        runtime = db.get(ScannerRuntime, signal_engine.ENGINE_KEY)
+        assert runtime is not None
+        assert runtime.status == "idle_market_closed"
+        assert runtime.last_error is None
+        assert runtime.next_evaluation_at is not None
+    assert housekeeping == [NOW + timedelta(hours=8)]
 
 
 def test_background_scanner_operator_hold_blocks_regular_session_provider_work(monkeypatch):

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     tastytrade_user_agent: str = "parlay-research/1.0"
     tastytrade_request_budget_per_minute: int = 120
     tastytrade_stream_timeout_seconds: float = 4.0
+    tastytrade_stream_warmup_seconds: float = 12.0
     market_quote_cache_seconds: int = 10
     market_candle_cache_seconds: int = 45
     market_chain_cache_seconds: int = 20
