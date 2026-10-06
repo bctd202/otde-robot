@@ -2,7 +2,9 @@ from datetime import date
 
 import httpx
 
-from app.market_data.tastytrade import DXLinkSnapshotClient, TastytradeMarketDataProvider
+from app.market_data.tastytrade import (DXLinkCandleStreamClient,
+                                        DXLinkSnapshotClient,
+                                        TastytradeMarketDataProvider)
 
 
 class FakeStreamer:
@@ -110,6 +112,11 @@ def test_dxlink_compact_decoder_keeps_every_packed_record():
 
     assert [event["time"] for event in events] == [1788351000000, 1788351060000]
     assert [event["close"] for event in events] == [100.5, 101.5]
+
+
+def test_dxlink_snapshot_method_belongs_to_bounded_snapshot_client():
+    assert callable(DXLinkSnapshotClient.snapshot)
+    assert not hasattr(DXLinkCandleStreamClient, "snapshot")
 
 
 def test_tastytrade_persistent_candle_stream_populates_quality_and_can_close():

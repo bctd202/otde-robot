@@ -105,6 +105,41 @@ class DXLinkSnapshotClient:
                         output.append(dict(zip(fields, row)))
         return output
 
+    def snapshot(self, subscriptions: list[dict[str, Any]], event_types: set[str]) -> list[dict[str, Any]]:
+        from websockets.sync.client import connect
+        requested = {key: self.EVENT_FIELDS[key] for key in event_types}
+        output: list[dict[str, Any]] = []
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=self.timeout)
+        with connect(self.url, open_timeout=self.timeout, close_timeout=1) as ws:
+            ws.send(json.dumps({"type": "SETUP", "channel": 0, "version": "0.1-DXF-JS/0.3.0",
+                                "keepaliveTimeout": 60, "acceptKeepaliveTimeout": 60}))
+            authorized = opened = configured = False
+            while datetime.now(timezone.utc) < deadline:
+                remaining = max(.1, (deadline - datetime.now(timezone.utc)).total_seconds())
+                try:
+                    message = json.loads(ws.recv(timeout=remaining))
+                except TimeoutError:
+                    break
+                kind = message.get("type")
+                if kind == "AUTH_STATE" and message.get("state") == "UNAUTHORIZED":
+                    ws.send(json.dumps({"type": "AUTH", "channel": 0, "token": self.token}))
+                elif kind == "AUTH_STATE" and message.get("state") == "AUTHORIZED" and not authorized:
+                    authorized = True
+                    ws.send(json.dumps({"type": "CHANNEL_REQUEST", "channel": 3, "service": "FEED",
+                                        "parameters": {"contract": "AUTO"}}))
+                elif kind == "CHANNEL_OPENED" and not opened:
+                    opened = True
+                    ws.send(json.dumps({"type": "FEED_SETUP", "channel": 3,
+                                        "acceptAggregationPeriod": .1, "acceptDataFormat": "COMPACT",
+                                        "acceptEventFields": requested}))
+                elif kind == "FEED_CONFIG" and not configured:
+                    configured = True
+                    ws.send(json.dumps({"type": "FEED_SUBSCRIPTION", "channel": 3,
+                                        "reset": True, "add": subscriptions}))
+                elif kind == "FEED_DATA":
+                    output.extend(self._events(message.get("data"), requested))
+            return output
+
 
 class DXLinkCandleStreamClient:
     """One reconnecting DXLink session that continuously maintains candle history."""
@@ -207,41 +242,6 @@ class DXLinkCandleStreamClient:
                             self._last_event_at = datetime.now(timezone.utc)
                             self._last_error = None
             self._set_state(connected=False, error=None)
-
-    def snapshot(self, subscriptions: list[dict[str, Any]], event_types: set[str]) -> list[dict[str, Any]]:
-        from websockets.sync.client import connect
-        requested = {key: self.EVENT_FIELDS[key] for key in event_types}
-        output: list[dict[str, Any]] = []
-        deadline = datetime.now(timezone.utc) + timedelta(seconds=self.timeout)
-        with connect(self.url, open_timeout=self.timeout, close_timeout=1) as ws:
-            ws.send(json.dumps({"type": "SETUP", "channel": 0, "version": "0.1-DXF-JS/0.3.0",
-                                "keepaliveTimeout": 60, "acceptKeepaliveTimeout": 60}))
-            authorized = opened = configured = False
-            while datetime.now(timezone.utc) < deadline:
-                remaining = max(.1, (deadline - datetime.now(timezone.utc)).total_seconds())
-                try:
-                    message = json.loads(ws.recv(timeout=remaining))
-                except TimeoutError:
-                    break
-                kind = message.get("type")
-                if kind == "AUTH_STATE" and message.get("state") == "UNAUTHORIZED":
-                    ws.send(json.dumps({"type": "AUTH", "channel": 0, "token": self.token}))
-                elif kind == "AUTH_STATE" and message.get("state") == "AUTHORIZED" and not authorized:
-                    authorized = True
-                    ws.send(json.dumps({"type": "CHANNEL_REQUEST", "channel": 3, "service": "FEED",
-                                        "parameters": {"contract": "AUTO"}}))
-                elif kind == "CHANNEL_OPENED" and not opened:
-                    opened = True
-                    ws.send(json.dumps({"type": "FEED_SETUP", "channel": 3,
-                                        "acceptAggregationPeriod": .1, "acceptDataFormat": "COMPACT",
-                                        "acceptEventFields": requested}))
-                elif kind == "FEED_CONFIG" and not configured:
-                    configured = True
-                    ws.send(json.dumps({"type": "FEED_SUBSCRIPTION", "channel": 3,
-                                        "reset": True, "add": subscriptions}))
-                elif kind == "FEED_DATA":
-                    output.extend(self._events(message.get("data"), requested))
-        return output
 
 
 class TastytradeMarketDataProvider:
