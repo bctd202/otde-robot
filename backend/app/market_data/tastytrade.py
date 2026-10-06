@@ -366,7 +366,11 @@ class TastytradeMarketDataProvider:
                 self._error = "Tastytrade DXLink credentials were unavailable."
                 return None
             self._quote_expires_at = now + timedelta(hours=23)
-        return self._quote_url, self._quote_token
+        url = self._quote_url
+        token = self._quote_token
+        if not url or not token:
+            return None
+        return url, token
 
     def _streamer(self) -> DXLinkSnapshotClient | None:
         credentials = self._quote_credentials()
@@ -426,13 +430,14 @@ class TastytradeMarketDataProvider:
             return
         url, token = credentials
         start = datetime.combine(trading_day, time(9, 30), NY)
-        self._candle_stream = self.candle_stream_factory(
+        stream = self.candle_stream_factory(
             url, token, get_settings().parlay_symbol_list, start,
             self._accept_candle_events, get_settings().tastytrade_stream_timeout_seconds,
         )
+        self._candle_stream = stream
         self._candle_stream_day = trading_day
         self._candle_warmup_attempted = False
-        self._candle_stream.start()
+        stream.start()
 
     def data_quality_status(self) -> dict[str, Any]:
         stream = self._candle_stream
