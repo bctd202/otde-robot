@@ -297,7 +297,15 @@ def run_signal_scan(db: Session, provider, universe: list[str], *, force: bool =
 
 
 def latest_scan(db: Session) -> SignalScan | None:
-    return db.scalar(select(SignalScan).order_by(SignalScan.scanned_at.desc(), SignalScan.id.desc()))
+    # The scan ledger contains a JSON candidate snapshot for every minute. Without
+    # an explicit LIMIT, SQLite sorts and returns the entire ledger even though
+    # Session.scalar() exposes only the first row, causing dashboard polling to
+    # retain gigabytes once the ledger has grown large.
+    return db.scalar(
+        select(SignalScan)
+        .order_by(SignalScan.scanned_at.desc(), SignalScan.id.desc())
+        .limit(1)
+    )
 
 
 def cached_candidates(scan: SignalScan, db: Session | None = None) -> list[ParlayCandidateOut]:

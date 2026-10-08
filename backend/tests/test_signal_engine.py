@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyWatchSymbol, ScannerRuntime, SignalAlert, SignalLifecycle
+from app.db.models import (DailyWatchSymbol, ScannerRuntime, SignalAlert,
+                           SignalLifecycle, SignalScan)
 from app.db.session import Base
 from app.schemas.market import ParlayCandidateOut, ProviderStatus
 from app.services import signal_engine
@@ -92,6 +93,33 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
         assert first is not None and second is not None and first.id == second.id
         assert calls == 1
         assert signal_engine.cached_candidates(second)[0].symbol == "SPY"
+
+
+def test_latest_scan_query_fetches_only_one_ledger_row():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    statements: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _many):
+        if "FROM signal_scans" in statement:
+            statements.append(statement)
+
+    with Session(engine) as db:
+        for minute in range(3):
+            stamp = NOW + timedelta(minutes=minute)
+            db.add(SignalScan(
+                trading_date=stamp.date(), scanned_at=stamp,
+                evaluation_candle_at=stamp - timedelta(minutes=1),
+                provider_status={}, universe=["SPY"],
+                candidates=[{"minute": minute}],
+            ))
+        db.commit()
+
+        latest = signal_engine.latest_scan(db)
+
+    assert latest is not None and latest.candidates == [{"minute": 2}]
+    assert statements and "LIMIT" in statements[-1].upper()
 
 
 def test_background_scanner_stays_idle_outside_regular_market_hours(monkeypatch):
