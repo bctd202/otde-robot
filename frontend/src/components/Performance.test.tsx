@@ -34,6 +34,17 @@ const response=(strategy:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY',signals:Performanc
     cumulative_pnl_dollars:0,average_pnl_dollars:0,average_return_percent:0,
     entry_basis:'Ask at automated BUY',exit_basis:'First verified bid after underlying exit',forward_only:true,
     headline_metrics:false,fees_modeled:false,additional_slippage_modeled:false,paper_only:true},
+  execution_cost_analysis:{closed_with_quote:1,
+    observed:{pnl_dollars:-50,average_pnl_dollars:-50,wins:0,losses:1,breakeven:0},
+    net_after_costs:{pnl_dollars:-51,average_pnl_dollars:-51,wins:0,losses:1,breakeven:0},
+    stress:{pnl_dollars:-53,average_pnl_dollars:-53,wins:0,losses:1,breakeven:0},
+    assumptions:{commission_per_contract_dollars:1,additional_fees_per_contract_dollars:0,
+      extra_slippage_per_side_option_dollars:.01,round_trip_fixed_cost_dollars:1,
+      observed_fill_basis:'Verified entry ask to verified exit bid',
+      stress_fill_basis:'Entry ask plus slippage; exit bid minus slippage'},
+    by_ticker:[{label:'SPY',closed_with_quote:1,observed_pnl_dollars:-50,net_pnl_dollars:-51,stress_pnl_dollars:-53}],
+    by_exit_reason:[{label:'TIMED_EXIT',closed_with_quote:1,observed_pnl_dollars:-50,net_pnl_dollars:-51,stress_pnl_dollars:-53}],
+    forward_only:true,historical_records_changed:false,paper_only:true},
   paper_money_tracker:{starting_cash_dollars:25000,quantity_per_entry:1,entry_basis:'One contract at verified ask',
     exit_basis:'First verified bid after underlying exit',open_value_basis:'Original debit; unrealized option value is not estimated',
     fees_modeled:false,additional_slippage_modeled:false,forward_only:true,historical_records_changed:false,paper_only:true,
@@ -98,6 +109,13 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
   expect(screen.getByRole('region',{name:'Core and experimental cohort comparison'})).toBeInTheDocument();
+  const execution=screen.getByRole('region',{name:'Strategy and execution comparison'});
+  expect(within(execution).getByText('Does the underlying edge survive option execution?')).toBeInTheDocument();
+  expect(within(execution).getByText('After fixed costs').closest('article')).toHaveTextContent('-$51.00');
+  expect(within(execution).getByText(/immutable marks/)).toBeInTheDocument();
+  expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('commission_per_contract=1'))).toBe(true);
+  fireEvent.click(within(execution).getByRole('button',{name:'2¢'}));
+  await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('extra_slippage_per_side=0.02'))).toBe(true));
   const money=screen.getByRole('region',{name:'Paper money tracker'});
   expect(within(money).getByText('What would the account balance look like?')).toBeInTheDocument();
   expect(within(money).getByLabelText('Paper account equity comparison')).toBeInTheDocument();

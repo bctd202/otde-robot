@@ -33,7 +33,8 @@ from app.services.paper_positions import (create_position, market_mark,
 from app.services.backtest import run_backtest
 from app.services.performance import (analytics_exclusion_reason,
                                       deduplicate_positions,
-                                      link_paper_position, market_movement_data, metrics,
+                                      execution_cost_analysis, link_paper_position,
+                                      market_movement_data, metrics,
                                       option_shadow_results,
                                       paper_portfolio_results, performance_chart_data,
                                       research_breakdowns)
@@ -325,9 +326,19 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
                 max_score: float | None = None, deduplicate: bool = True, view: str = "ALL",
                 page: int = 1, page_size: int = 25, paper_starting_cash: float | None = None,
+                commission_per_contract: float = 1.0,
+                additional_fees_per_contract: float = 0.0,
+                extra_slippage_per_side: float = 0.01,
                 db: Session = Depends(get_db)):
     if paper_starting_cash is not None and not 50 <= paper_starting_cash <= 1_000_000:
         raise HTTPException(status_code=422, detail="Paper starting cash must be between $50 and $1,000,000")
+    for label, value, maximum in (
+        ("Commission per contract", commission_per_contract, 100),
+        ("Additional fees per contract", additional_fees_per_contract, 100),
+        ("Extra slippage per side", extra_slippage_per_side, 5),
+    ):
+        if not 0 <= value <= maximum:
+            raise HTTPException(status_code=422, detail=f"{label} must be between 0 and {maximum}")
     query = select(SignalPerformance).order_by(
         SignalPerformance.triggered_at.asc(), SignalPerformance.signal_id.asc())
     for condition in (SignalPerformance.source == source if source != "ALL" else None,
@@ -369,6 +380,9 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
         "option_shadow_metrics": option_shadow_metrics,
+        "execution_cost_analysis": execution_cost_analysis(
+            rows, option_shadows, commission_per_contract,
+            additional_fees_per_contract, extra_slippage_per_side),
         "paper_money_tracker": paper_portfolio_results(
             db, rows, paper_starting_cash if paper_starting_cash is not None
             else get_settings().paper_money_starting_cash),

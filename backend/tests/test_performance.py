@@ -9,7 +9,8 @@ from app.db.session import Base
 from app.schemas.market import (CandleOut, OptionContractOut, ParlayCandidateOut,
                                 ProviderStatus)
 from app.services.performance import (analytics_exclusion_reason, deduplicate_positions,
-                                      evaluate_open_signals, market_movement_data, metrics,
+                                      evaluate_open_signals, execution_cost_analysis,
+                                      market_movement_data, metrics,
                                       option_shadow_results, paper_portfolio_results,
                                       performance_chart_data, research_breakdowns, track_candidates,
                                       update_outcome)
@@ -143,6 +144,36 @@ def test_research_breakdowns_compare_cohorts_and_option_evidence_without_mutatio
     assert (spy.result_r, tsla.result_r) == (2, -1)
 
 
+def test_execution_cost_analysis_stresses_immutable_ask_to_bid_marks():
+    spy = row(signal_id="spy", ticker="SPY")
+    spy.exit_reason = "TARGET"
+    tsla = row(signal_id="tsla", ticker="TSLA")
+    tsla.exit_reason = "STOP"
+    shadows = {
+        "spy": {"status": "CLOSED", "entry_ask": .45, "exit_bid": .75,
+                "contract_multiplier": 100, "exit_reason": "TARGET"},
+        "tsla": {"status": "CLOSED", "entry_ask": .80, "exit_bid": .40,
+                 "contract_multiplier": 100, "exit_reason": "STOP"},
+    }
+    analysis = execution_cost_analysis(
+        [spy, tsla], shadows, commission_per_contract=1,
+        additional_fees_per_contract=.50, extra_slippage_per_side=.01)
+    assert analysis["observed"] == {
+        "pnl_dollars": -10, "average_pnl_dollars": -5,
+        "wins": 1, "losses": 1, "breakeven": 0,
+    }
+    assert analysis["net_after_costs"]["pnl_dollars"] == -13
+    assert analysis["stress"]["pnl_dollars"] == -17
+    assert analysis["assumptions"]["round_trip_fixed_cost_dollars"] == 1.5
+    assert analysis["by_exit_reason"] == [
+        {"label": "TARGET", "closed_with_quote": 1, "observed_pnl_dollars": 30.0,
+         "net_pnl_dollars": 28.5, "stress_pnl_dollars": 26.5},
+        {"label": "STOP", "closed_with_quote": 1, "observed_pnl_dollars": -40.0,
+         "net_pnl_dollars": -41.5, "stress_pnl_dollars": -43.5},
+    ]
+    assert analysis["historical_records_changed"] is False
+
+
 def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():
     local=database()
     with local() as db:
@@ -157,6 +188,14 @@ def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():
         assert [item["signal_id"] for item in payload["signals"]]==["first"]
         assert payload["raw_metrics"]["total_triggered_signals"]==2
         assert payload["metrics"]["total_triggered_signals"]==1
+        assert payload["execution_cost_analysis"]["assumptions"] == {
+            "commission_per_contract_dollars": 1.0,
+            "additional_fees_per_contract_dollars": 0.0,
+            "extra_slippage_per_side_option_dollars": .01,
+            "round_trip_fixed_cost_dollars": 1.0,
+            "observed_fill_basis": "Verified entry ask to verified exit bid",
+            "stress_fill_basis": "Entry ask plus slippage; exit bid minus slippage",
+        }
         custom_cash=performance(paper_starting_cash=250,db=db)
         assert custom_cash["paper_money_tracker"]["starting_cash_dollars"]==250
 

@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {getPerformance} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
-import type {OptionShadowBreakdown,PaperMoneyPortfolio,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
+import type {ExecutionCostAnalysis,OptionShadowBreakdown,PaperMoneyPortfolio,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
 
 type OutcomeUnit='R'|'DIRECTIONAL'|'RAW';
 type PerformanceStrategy='ONE_MIN_0DTE'|'STRUCTURED_INTRADAY';
@@ -13,7 +13,7 @@ const dollars=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
 const strategyName=(mode:PerformanceStrategy)=>mode==='STRUCTURED_INTRADAY'?'Structured Intraday · 5–14 DTE':'1-Min · true 0DTE';
 const shortDate=(value:string)=>new Date(`${value}T12:00:00`).toLocaleDateString('en-US',{month:'short',day:'numeric'});
 const humanize=(value:string)=>value.replaceAll('_',' ').replaceAll('-',' ');
-const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Array.isArray(value?.research_breakdowns?.cohorts)&&Array.isArray(value?.paper_money_tracker?.portfolios)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
+const validResponse=(value:PerformanceResponse)=>Array.isArray(value?.signals)&&Array.isArray(value?.chart_data?.daily)&&Array.isArray(value?.market_movement?.daily)&&Array.isArray(value?.research_breakdowns?.cohorts)&&Array.isArray(value?.paper_money_tracker?.portfolios)&&Boolean(value?.execution_cost_analysis)&&Boolean(value?.pagination)&&Boolean(value?.metrics);
 
 function signed(value:number,digits=2,suffix=''):string{
   return `${value>0?'+':''}${value.toFixed(digits)}${suffix}`;
@@ -141,6 +141,28 @@ function CohortComparison({cohorts}:{cohorts:ResearchCohort[]}){
   return <section className="research-breakdown" aria-label="Core and experimental cohort comparison"><header><div><span>UNIVERSE COHORTS</span><h3>Where the strategy R is coming from</h3></div><strong>Observation only</strong></header><div className="cohort-grid">{cohorts.map(cohort=><article key={cohort.key}><div><span>{cohort.key}</span><h4>{cohort.label}</h4><small>{cohort.tickers.length?cohort.tickers.join(' · '):'No tickers in this result set'}</small></div><ResultBar value={cohort.total_r} max={maximum} unit="R"/><dl><div><dt>Resolved</dt><dd>{cohort.resolved_plays}</dd></div><div><dt>Avg.</dt><dd>{signed(cohort.average_r,3,'R')}</dd></div><div><dt>Win rate</dt><dd>{cohort.win_rate}%</dd></div><div><dt>Profit factor</dt><dd>{cohort.profit_factor?.toFixed(2)??'N/A'}</dd></div></dl></article>)}</div><p>Core is SPY, QQQ, and IWM. Experimental contains every other configured ticker. This comparison does not remove tickers or alter prior plays.</p></section>;
 }
 
+function ExecutionEvidencePanel({data,onCommissionChange,onFeesChange,onSlippageChange,loading}:{data:PerformanceResponse;onCommissionChange:(value:number)=>void;onFeesChange:(value:number)=>void;onSlippageChange:(value:number)=>void;loading:boolean}){
+  const analysis:ExecutionCostAnalysis=data.execution_cost_analysis;
+  const assumptions=analysis.assumptions;
+  const divergent=data.metrics.cumulative_r>0&&analysis.net_after_costs.pnl_dollars<0;
+  const explanation=analysis.closed_with_quote===0?'The comparison begins after a verified option exit.':divergent?
+    `The underlying rules are positive at ${signed(data.metrics.cumulative_r,2,'R')}, but the verified option result is ${dollars.format(analysis.net_after_costs.pnl_dollars)} after the selected costs.`:
+    `The underlying rules and verified option evidence currently point ${data.metrics.cumulative_r>=0&&analysis.net_after_costs.pnl_dollars>=0?'in the same positive direction':'in the same non-positive direction'}.`;
+  const scenarios=[
+    {label:'Strategy signal',value:signed(data.metrics.cumulative_r,2,'R'),detail:`${data.metrics.resolved_signals} resolved underlying plays`,className:data.metrics.cumulative_r>=0?'positive-text':'negative-text'},
+    {label:'Observed execution',value:dollars.format(analysis.observed.pnl_dollars),detail:'Saved entry ask → exit bid',className:analysis.observed.pnl_dollars>=0?'positive-text':'negative-text'},
+    {label:'After fixed costs',value:dollars.format(analysis.net_after_costs.pnl_dollars),detail:`${dollars.format(assumptions.round_trip_fixed_cost_dollars)} per contract`,className:analysis.net_after_costs.pnl_dollars>=0?'positive-text':'negative-text'},
+    {label:'Stress case',value:dollars.format(analysis.stress.pnl_dollars),detail:`${(assumptions.extra_slippage_per_side_option_dollars*100).toFixed(0)}¢ extra slippage each side`,className:analysis.stress.pnl_dollars>=0?'positive-text':'negative-text'},
+  ];
+  return <section className="execution-evidence" aria-label="Strategy and execution comparison"><header><div><span>SIGNAL QUALITY ≠ TRADABLE OUTCOME</span><h3>Does the underlying edge survive option execution?</h3></div><strong>{analysis.closed_with_quote} quoted exits</strong></header>
+    <div className="execution-scenario-grid">{scenarios.map(item=><article key={item.label}><span>{item.label}</span><strong className={item.className}>{item.value}</strong><small>{item.detail}</small></article>)}</div>
+    <p className={divergent?'execution-warning':''}>{explanation}</p>
+    <div className="execution-assumptions"><strong>Cost assumptions</strong><label><span>Commission / contract</span><b>$</b><input type="number" min="0" max="100" step=".05" value={assumptions.commission_per_contract_dollars} disabled={loading} onChange={event=>onCommissionChange(event.currentTarget.valueAsNumber)} aria-label="Commission per contract"/></label><label><span>Other fees / contract</span><b>$</b><input type="number" min="0" max="100" step=".01" value={assumptions.additional_fees_per_contract_dollars} disabled={loading} onChange={event=>onFeesChange(event.currentTarget.valueAsNumber)} aria-label="Additional fees per contract"/></label><div className="slippage-control"><span>Extra slippage / side</span>{[0,.01,.02,.05].map(value=><button type="button" className={assumptions.extra_slippage_per_side_option_dollars===value?'active':''} disabled={loading} onClick={()=>onSlippageChange(value)} key={value}>{(value*100).toFixed(0)}¢</button>)}</div></div>
+    <div className="execution-exit-grid"><div className="execution-exit-head"><span>Underlying exit</span><span>Quoted</span><span>Observed</span><span>Net</span><span>Stress</span></div>{analysis.by_exit_reason.map(row=><div className="execution-exit-row" key={row.label}><strong>{humanize(row.label)}</strong><span>{row.closed_with_quote}</span><span>{dollars.format(row.observed_pnl_dollars)}</span><span>{dollars.format(row.net_pnl_dollars)}</span><span>{dollars.format(row.stress_pnl_dollars)}</span></div>)}</div>
+    <small className="execution-boundary">Observed execution already includes the displayed bid/ask spread. Cost and slippage scenarios are read-only overlays on immutable marks; they do not rewrite trades, R, or selection rules.</small>
+  </section>;
+}
+
 function ShadowBreakdownGraph({title,rows}:{title:string;rows:OptionShadowBreakdown[]}){
   const maximum=Math.max(1,...rows.map(row=>Math.abs(row.pnl_dollars)));
   return <div className="shadow-breakdown"><h4>{title}</h4>{rows.length===0?<p>No closed option quotes in this group yet.</p>:<div>{rows.map(row=><div className="shadow-breakdown-row" key={row.label}><span>{humanize(row.label)}</span><ResultBar value={row.pnl_dollars} max={maximum} unit="DOLLARS"/><small>{row.closed_with_quote} quoted · {row.wins}W/{row.losses}L</small></div>)}</div>}</div>;
@@ -180,10 +202,13 @@ export function Performance(){
   const [page,setPage]=useState(1);
   const [pageSize,setPageSize]=useState(25);
   const [paperStartingCash,setPaperStartingCash]=useState(2000);
+  const [commissionPerContract,setCommissionPerContract]=useState(1);
+  const [additionalFeesPerContract,setAdditionalFeesPerContract]=useState(0);
+  const [extraSlippagePerSide,setExtraSlippagePerSide]=useState(.01);
   const [expanded,setExpanded]=useState('');
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
-  useEffect(()=>{let cancelled=false;setLoading(true);setError('');void getPerformance(strategy,{page,pageSize,view,paperStartingCash}).then(result=>{if(cancelled)return;if(!validResponse(result))throw new Error('Performance response was incomplete');setData(result);setPage(result.pagination.page)}).catch(reason=>{if(!cancelled)setError(reason instanceof Error?reason.message:'Unable to load performance')}).finally(()=>{if(!cancelled)setLoading(false)});return()=>{cancelled=true}},[strategy,view,page,pageSize,paperStartingCash]);
+  useEffect(()=>{let cancelled=false;setLoading(true);setError('');void getPerformance(strategy,{page,pageSize,view,paperStartingCash,commissionPerContract,additionalFeesPerContract,extraSlippagePerSide}).then(result=>{if(cancelled)return;if(!validResponse(result))throw new Error('Performance response was incomplete');setData(result);setPage(result.pagination.page)}).catch(reason=>{if(!cancelled)setError(reason instanceof Error?reason.message:'Unable to load performance')}).finally(()=>{if(!cancelled)setLoading(false)});return()=>{cancelled=true}},[strategy,view,page,pageSize,paperStartingCash,commissionPerContract,additionalFeesPerContract,extraSlippagePerSide]);
   const metrics=data?.metrics;
   const movement=data?.market_movement;
   const graphData=useMemo(()=>data?graphPoints(data,unit):[],[data,unit]);
@@ -237,6 +262,7 @@ export function Performance(){
     {loading&&!data&&<div className="performance-loading">Building performance graphs…</div>}
     {data&&<>
       <div className="selection-summary"><span>Every engine fire</span><strong>{data.raw_metrics.total_triggered_signals} raw BUY alerts</strong><i>→</i><span>Account-like view</span><strong>{data.metrics.total_triggered_signals} first ticker-day plays</strong></div>
+      <ExecutionEvidencePanel data={data} loading={loading} onCommissionChange={value=>{if(Number.isFinite(value)&&value>=0&&value<=100)setCommissionPerContract(value)}} onFeesChange={value=>{if(Number.isFinite(value)&&value>=0&&value<=100)setAdditionalFeesPerContract(value)}} onSlippageChange={setExtraSlippagePerSide}/>
       <section className={`performance-at-glance ${unit==='R'?'strategy-glance':'market-glance'}`} aria-label="At a Glance"><header><span>AT A GLANCE</span><strong>{unit==='R'?'Strategy Performance':'Market Movement'}</strong></header><div className="glance-stats">{glanceCards.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><p>{glanceText}</p></section>
       <section className={`performance-measure-panel ${unit==='R'?'strategy-measure':'market-measure'}`} aria-label={unit==='R'?'Strategy Performance metrics':'Market Movement metrics'}><div className="performance-measure-heading"><span>{unit==='R'?'STRATEGY PERFORMANCE':'MARKET MOVEMENT'}</span><h3>{unit==='R'?'Risk-normalized play results':unit==='DIRECTIONAL'?'Direction-adjusted underlying price movement':'Raw underlying price movement'}</h3><p>{unit==='R'?`Each resolved play is measured against its original entry-to-stop risk. Win Rate counts positive-R plays; Profit Factor compares positive and negative R; Max Drawdown is the largest fall from a prior R peak. ${metrics?.quality_exclusions??0} selected plays are quality-excluded.`:unit==='DIRECTIONAL'?'Calls keep the underlying price move; puts reverse its sign. This is not option P/L or portfolio return.':"Shows price movement of the underlying, not the option trade's return. Calls and puts are not direction-adjusted in this view."}</p></div><div className="performance-metrics headline-metrics">{metricCards.map(([label,value])=><div className="metric" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div></section>
       <div className={`performance-chart-grid ${unit==='R'?'strategy-charts':'market-charts'}`}>
