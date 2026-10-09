@@ -27,7 +27,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t otde-ci .
+      - name: Build container image with registry retry
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if docker build -t otde-ci .; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Container build failed after $attempt attempts"
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "Container build attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+          done
       - name: Mock provider with demo contracts disabled
         run: |
           set -euo pipefail
