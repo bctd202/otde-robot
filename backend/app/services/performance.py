@@ -443,6 +443,100 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
     return summary, payloads
 
 
+def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[str, dict],
+                            commission_per_contract: float = 1.0,
+                            additional_fees_per_contract: float = 0.0,
+                            extra_slippage_per_side: float = 0.01) -> dict:
+    """Stress immutable ask-to-bid marks without changing the saved option evidence.
+
+    Observed P/L already crosses the displayed spread by entering at ask and exiting
+    at bid. The net scenario subtracts explicit per-contract costs. The stress
+    scenario then assumes a worse fill on both sides of the same saved quotes.
+    """
+    commission = max(0.0, float(commission_per_contract))
+    fees = max(0.0, float(additional_fees_per_contract))
+    slippage = max(0.0, float(extra_slippage_per_side))
+    round_trip_cost = commission + fees
+    scenarios: dict[str, list[float]] = {"observed": [], "net": [], "stress": []}
+    grouped: dict[str, dict[str, dict[str, float | int | str]]] = {
+        "by_ticker": {}, "by_exit_reason": {},
+    }
+
+    for row in rows:
+        shadow = option_shadows.get(row.signal_id)
+        if (not shadow or shadow.get("status") != "CLOSED"
+                or shadow.get("entry_ask") is None or shadow.get("exit_bid") is None):
+            continue
+        multiplier = int(shadow.get("contract_multiplier") or 100)
+        entry_ask = float(shadow["entry_ask"])
+        exit_bid = float(shadow["exit_bid"])
+        observed = (exit_bid-entry_ask)*multiplier
+        net = observed-round_trip_cost
+        stressed_entry = entry_ask+slippage
+        stressed_exit = max(0.0, exit_bid-slippage)
+        stress = (stressed_exit-stressed_entry)*multiplier-round_trip_cost
+        values = {"observed": observed, "net": net, "stress": stress}
+        for key, value in values.items():
+            scenarios[key].append(value)
+        for group_name, label in (
+            ("by_ticker", row.ticker),
+            ("by_exit_reason", str(shadow.get("exit_reason") or row.exit_reason)),
+        ):
+            item = grouped[group_name].setdefault(label, {
+                "label": label, "closed_with_quote": 0,
+                "observed_pnl_dollars": 0.0, "net_pnl_dollars": 0.0,
+                "stress_pnl_dollars": 0.0,
+            })
+            item["closed_with_quote"] = int(item["closed_with_quote"])+1
+            item["observed_pnl_dollars"] = float(item["observed_pnl_dollars"])+observed
+            item["net_pnl_dollars"] = float(item["net_pnl_dollars"])+net
+            item["stress_pnl_dollars"] = float(item["stress_pnl_dollars"])+stress
+
+    def summarize(values: list[float]) -> dict:
+        total = round(sum(values), 2)
+        return {
+            "pnl_dollars": total,
+            "average_pnl_dollars": round(total/len(values), 2) if values else 0,
+            "wins": sum(value > 0 for value in values),
+            "losses": sum(value < 0 for value in values),
+            "breakeven": sum(abs(value) < 1e-9 for value in values),
+        }
+
+    def finish(group: dict[str, dict[str, float | int | str]]) -> list[dict]:
+        return [
+            {
+                **item,
+                "observed_pnl_dollars": round(float(item["observed_pnl_dollars"]), 2),
+                "net_pnl_dollars": round(float(item["net_pnl_dollars"]), 2),
+                "stress_pnl_dollars": round(float(item["stress_pnl_dollars"]), 2),
+            }
+            for item in sorted(
+                group.values(),
+                key=lambda value: (-float(value["observed_pnl_dollars"]), str(value["label"])),
+            )
+        ]
+
+    return {
+        "closed_with_quote": len(scenarios["observed"]),
+        "observed": summarize(scenarios["observed"]),
+        "net_after_costs": summarize(scenarios["net"]),
+        "stress": summarize(scenarios["stress"]),
+        "assumptions": {
+            "commission_per_contract_dollars": round(commission, 2),
+            "additional_fees_per_contract_dollars": round(fees, 2),
+            "extra_slippage_per_side_option_dollars": round(slippage, 4),
+            "round_trip_fixed_cost_dollars": round(round_trip_cost, 2),
+            "observed_fill_basis": "Verified entry ask to verified exit bid",
+            "stress_fill_basis": "Entry ask plus slippage; exit bid minus slippage",
+        },
+        "by_ticker": finish(grouped["by_ticker"]),
+        "by_exit_reason": finish(grouped["by_exit_reason"]),
+        "forward_only": True,
+        "historical_records_changed": False,
+        "paper_only": True,
+    }
+
+
 def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
                             starting_cash: float) -> dict:
     """Replay immutable option marks through two clearly labeled paper cash accounts.

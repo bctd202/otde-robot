@@ -1,4 +1,7 @@
-FROM node:22-alpine AS frontend-builder
+ARG NODE_IMAGE=node:22-alpine
+ARG PYTHON_IMAGE=python:3.12-slim
+
+FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -9,7 +12,7 @@ RUN test -f /build/frontend/dist/index.html \
     && test -d /build/frontend/dist/assets \
     && find /build/frontend/dist -maxdepth 2 -type f -print | sort
 
-FROM python:3.12-slim AS runtime
+FROM ${PYTHON_IMAGE} AS runtime
 WORKDIR /app
 ENV PYTHONPATH=/app \
     DATABASE_URL=sqlite:////data/liquidity_hunter.db \

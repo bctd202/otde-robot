@@ -98,6 +98,16 @@ export interface AutomatedOptionShadowMetrics {
   average_pnl_dollars:number;average_return_percent:number;entry_basis:string;exit_basis:string;forward_only:true;
   headline_metrics:false;fees_modeled:false;additional_slippage_modeled:false;paper_only:true;
 }
+export interface ExecutionScenarioMetrics {pnl_dollars:number;average_pnl_dollars:number;wins:number;losses:number;breakeven:number}
+export interface ExecutionCostBreakdown {label:string;closed_with_quote:number;observed_pnl_dollars:number;net_pnl_dollars:number;stress_pnl_dollars:number}
+export interface ExecutionCostAnalysis {
+  closed_with_quote:number;observed:ExecutionScenarioMetrics;net_after_costs:ExecutionScenarioMetrics;
+  stress:ExecutionScenarioMetrics;by_ticker:ExecutionCostBreakdown[];by_exit_reason:ExecutionCostBreakdown[];
+  assumptions:{commission_per_contract_dollars:number;additional_fees_per_contract_dollars:number;
+    extra_slippage_per_side_option_dollars:number;round_trip_fixed_cost_dollars:number;
+    observed_fill_basis:string;stress_fill_basis:string};
+  forward_only:true;historical_records_changed:false;paper_only:true;
+}
 export interface PaperMoneyDailyPoint {trading_date:string;entries:number;closed:number;skipped:number;daily_realized_pnl_dollars:number;cash_dollars:number;capital_at_cost_dollars:number;book_equity_dollars:number;cumulative_realized_pnl_dollars:number}
 export interface PaperMoneyPortfolio {
   key:'ALL'|'CORE';label:string;starting_cash_dollars:number;cash_available_dollars:number;
@@ -121,5 +131,5 @@ export interface MarketMovementData {resolved_with_prices:number;average_directi
 export interface PerformanceOutcomePoint {outcome:string;count:number}
 export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:PerformanceOutcomePoint[]}
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
-export interface PerformanceResponse {metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
+export interface PerformanceResponse {metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
