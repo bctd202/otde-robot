@@ -85,6 +85,22 @@ function mockResponses(zeroDte:PerformanceResponse,structured:PerformanceRespons
   ),{status:200,headers:{'Content-Type':'application/json'}})));
 }
 
+test('shows cash separately from unpriced historical contracts and discloses selection repair',async()=>{
+  const data=response('ONE_MIN_0DTE',[signal({})]);
+  data.selection_integrity={basis:'AUTOMATED_ORIGIN_INCLUDING_JOURNAL_LINKS',legacy_linked_rows_included:6,historical_records_changed:false};
+  data.paper_money_tracker.portfolios[0]={...data.paper_money_tracker.portfolios[0],cash_available_dollars:1410,
+    book_equity_dollars:1813,unpriced_exit_cost_dollars:403,active_capital_at_cost_dollars:0,
+    equity_excluding_unpriced_exits_dollars:1410,liquidation_value_dollars:null};
+  mockResponses(data,response('STRUCTURED_INTRADAY',[]));
+  render(<Performance/>);
+  const panel=await screen.findByRole('region',{name:'Paper money tracker'});
+  const all=within(panel).getByRole('heading',{name:'All tracked tickers'}).closest('article')!;
+  expect(within(all).getByText('Unpriced exit exposure').nextElementSibling).toHaveTextContent('$403.00');
+  expect(within(all).getByText('Book equity at cost').nextElementSibling).toHaveTextContent('$1,813.00');
+  expect(within(all).getByText('If unpriced exits are worth $0').nextElementSibling).toHaveTextContent('$1,410.00');
+  expect(screen.getByText(/6 original automated plays/)).toBeInTheDocument();
+});
+
 test('shows visual strategy graphs and expandable play cards',async()=>{
   const excluded=signal({signal_id:'excluded',ticker:'IWM',exit_reason:'TARGET',result_r:50,
     analytics_eligible:false,analytics_exclusion_reason:'CROSS_SESSION_EXIT'});
@@ -120,7 +136,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(money).getByText('What would the account balance look like?')).toBeInTheDocument();
   expect(within(money).getByLabelText('Paper account equity comparison')).toBeInTheDocument();
   expect(within(money).getAllByText('Core only · SPY / QQQ / IWM')).toHaveLength(2);
-  expect(within(money).getByText(/Open or unpriced positions are carried at original cost/)).toBeInTheDocument();
+  expect(within(money).getByText(/Missing exit prices leave cash tied up/)).toBeInTheDocument();
   fireEvent.click(within(money).getByRole('button',{name:'$250.00'}));
   await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=250'))).toBe(true));
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);

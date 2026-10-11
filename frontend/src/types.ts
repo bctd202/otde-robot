@@ -17,7 +17,7 @@ export interface LotteryExitScenario {
   target_multiple:number|null;target_hit:boolean;exit_reason:'TARGET_2X'|'TARGET_5X'|'SESSION_END'|'OPEN_MARK'|'NO_QUOTES';
   exit_at:string|null;exit_bid:number|null;exit_value:number|null;multiple:number|null;return_percent:number|null;
 }
-export interface LotteryExitScenarios {hold_to_last:LotteryExitScenario;take_2x:LotteryExitScenario;take_5x:LotteryExitScenario}
+export interface LotteryExitScenarios {hold_to_last:LotteryExitScenario;take_2x:LotteryExitScenario;take_5x:LotteryExitScenario;limit_2x?:LotteryExitScenario;limit_5x?:LotteryExitScenario}
 export interface LotteryRuleComparison {key:string;label:string;ending_value:number;pnl:number;return_percent:number|null}
 export interface LotterySessionSummary {
   contract_count:number;entry_wave_count:number;total_entry_cost:number;hit_2x_count:number;hit_5x_count:number;
@@ -25,8 +25,8 @@ export interface LotterySessionSummary {
   collection_health:{status:'COMPLETE'|'INTERRUPTED';interrupted_contracts:number;max_quote_gap_minutes:number;message:string};
 }
 export interface LotteryCashDaily {trading_date:string;entries:number;closed:number;skipped:number;daily_realized_pnl:number;cumulative_realized_pnl:number;cash:number;book_equity:number}
-export interface LotteryCashPortfolio {key:'take_2x'|'take_5x';label:string;starting_cash:number;daily_debit_cap:number;cash_available:number;book_equity:number;pnl:number;return_percent:number;maximum_drawdown:number;positions_taken:number;closed_positions:number;active_positions:number;skipped_insufficient_cash:number;skipped_daily_cap:number;wins:number;losses:number;daily:LotteryCashDaily[]}
-export interface LotteryCashTracker {starting_cash:number;daily_debit_cap:number;quantity_per_entry:1;selection_rule:string;portfolios:LotteryCashPortfolio[];entry_basis:string;exit_basis:string;forward_only:true;historical_records_changed:false;paper_only:true}
+export interface LotteryCashPortfolio {key:string;label:string;starting_cash:number;daily_debit_cap:number;cash_available:number;book_equity:number;pnl:number;return_percent:number;maximum_drawdown:number;positions_taken:number;closed_positions:number;active_positions:number;unpriced_positions?:number;unpriced_cost?:number;skipped_insufficient_cash:number;skipped_daily_cap:number;wins:number;losses:number;daily:LotteryCashDaily[]}
+export interface LotteryCashTracker {starting_cash:number;daily_debit_cap:number;quantity_per_entry:1;selection_rule:string;portfolios:LotteryCashPortfolio[];sensitivity_portfolios?:LotteryCashPortfolio[];accounting_note?:string;entry_basis:string;exit_basis:string;forward_only:true;historical_records_changed:false;paper_only:true}
 export interface LotteryTrackerPoint {
   observed_at:string;quote_timestamp:string;bid_timestamp:string|null;ask_timestamp:string|null;
   bid:number;ask:number;midpoint:number;last:number;bid_value:number;ask_value:number;
@@ -93,6 +93,7 @@ export interface AutomatedOptionShadow {
   fees_modeled:false;additional_slippage_modeled:false;paper_only:true;
 }
 export interface AutomatedOptionShadowMetrics {
+  selected_positions?:number;selected_quote_coverage_percent?:number;
   tracked_positions:number;closed_with_quote:number;quote_gaps:number;active_positions:number;exit_pending:number;
   untracked_selected_positions:number;quote_coverage_percent:number;wins:number;losses:number;cumulative_pnl_dollars:number;
   average_pnl_dollars:number;average_return_percent:number;entry_basis:string;exit_basis:string;forward_only:true;
@@ -101,6 +102,7 @@ export interface AutomatedOptionShadowMetrics {
 export interface ExecutionScenarioMetrics {pnl_dollars:number;average_pnl_dollars:number;wins:number;losses:number;breakeven:number}
 export interface ExecutionCostBreakdown {label:string;closed_with_quote:number;observed_pnl_dollars:number;net_pnl_dollars:number;stress_pnl_dollars:number}
 export interface ExecutionCostAnalysis {
+  matched_underlying_metrics?:PerformanceMetrics;
   closed_with_quote:number;observed:ExecutionScenarioMetrics;net_after_costs:ExecutionScenarioMetrics;
   stress:ExecutionScenarioMetrics;by_ticker:ExecutionCostBreakdown[];by_exit_reason:ExecutionCostBreakdown[];
   assumptions:{commission_per_contract_dollars:number;additional_fees_per_contract_dollars:number;
@@ -110,6 +112,8 @@ export interface ExecutionCostAnalysis {
 }
 export interface PaperMoneyDailyPoint {trading_date:string;entries:number;closed:number;skipped:number;daily_realized_pnl_dollars:number;cash_dollars:number;capital_at_cost_dollars:number;book_equity_dollars:number;cumulative_realized_pnl_dollars:number}
 export interface PaperMoneyPortfolio {
+  active_capital_at_cost_dollars?:number;unpriced_exit_cost_dollars?:number;
+  equity_excluding_unpriced_exits_dollars?:number;liquidation_value_dollars?:number|null;
   key:'ALL'|'CORE';label:string;starting_cash_dollars:number;cash_available_dollars:number;
   capital_at_cost_dollars:number;book_equity_dollars:number;realized_pnl_dollars:number;return_percent:number;
   maximum_drawdown_dollars:number;maximum_drawdown_percent:number;total_entry_debits_dollars:number;
@@ -121,6 +125,13 @@ export interface PaperMoneyTracker {
   exit_basis:string;open_value_basis:string;fees_modeled:false;additional_slippage_modeled:false;
   forward_only:true;historical_records_changed:false;paper_only:true;
 }
+export interface OptionPathResearch {
+  definition:{version:string;code_fingerprint:string;maximum_hold_minutes:number[];collection:string};
+  observations:number;quoted_observations:number;gap_observations:number;observed_plays:number;
+  fixed_cost_per_contract:number;additional_requests:number;note:string;
+  scenarios:{maximum_hold_minutes:number;matched_plays:number;incomplete_plays:number;
+    baseline_net_dollars:number;alternative_net_dollars:number;difference_dollars:number}[];
+}
 export interface ResearchCohort {key:'CORE'|'EXPERIMENTAL';label:string;tickers:string[];selected_plays:number;resolved_plays:number;total_r:number;average_r:number;win_rate:number;profit_factor:number|null;maximum_drawdown_r:number}
 export interface OptionShadowBreakdown {label:string;closed_with_quote:number;wins:number;losses:number;pnl_dollars:number}
 export interface ResearchBreakdowns {cohorts:ResearchCohort[];option_shadow_by_ticker:OptionShadowBreakdown[];option_shadow_by_exit_reason:OptionShadowBreakdown[];cohort_definition:string;historical_records_changed:false}
@@ -131,5 +142,5 @@ export interface MarketMovementData {resolved_with_prices:number;average_directi
 export interface PerformanceOutcomePoint {outcome:string;count:number}
 export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:PerformanceOutcomePoint[]}
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
-export interface PerformanceResponse {metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
+export interface PerformanceResponse {option_path_research?:OptionPathResearch;selection_integrity?:{basis:string;legacy_linked_rows_included:number;historical_records_changed:false};metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}

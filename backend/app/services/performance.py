@@ -13,6 +13,7 @@ from app.services.contracts import (ACCEPTED_ACTIONABLE_PROVIDERS,
                                     is_verified_actionable_contract,
                                     validate_exit_quote)
 from app.services.parlay import PRODUCTION_TIMEFRAME
+from app.services.option_research import research_definition
 
 NY = ZoneInfo("America/New_York")
 SESSION_CUTOFF = time(15, 45)
@@ -72,6 +73,18 @@ def deduplicate_positions(rows: list[SignalPerformance]) -> list[SignalPerforman
             continue
         selected.setdefault((row.trading_date, row.ticker), row)
     return list(selected.values())
+
+
+def automated_origin(row: SignalPerformance) -> bool:
+    """Recognize legacy automated rows linked to a manual paper-position journal.
+
+    No historical flag is rewritten. A journal link is not an execution origin.
+    Unproven manually flagged rows remain excluded.
+    """
+    return not row.user_entered or (
+        row.source == "LIVE" and row.paper_position_id is not None
+        and row.dedupe_key.startswith(f"{row.strategy_mode}:{row.ticker}:{row.direction.lower()}:")
+    )
 
 
 def _mark_data_gap(row: SignalPerformance, observed_at: datetime) -> None:
@@ -295,7 +308,8 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 setup_type=("structured-liquidity" if candidate.strategy_mode == "STRUCTURED_INTRADAY"
                             else "directional-liquidity"), strategy_mode=candidate.strategy_mode,
                 strategy_version=candidate.strategy_version,
-                strategy_snapshot={**STRATEGY_SNAPSHOT, "strategy_mode": candidate.strategy_mode,
+                strategy_snapshot={**STRATEGY_SNAPSHOT, "origin": "AUTOMATED",
+                                   "option_research": research_definition(), "strategy_mode": candidate.strategy_mode,
                                    "strategy_version": candidate.strategy_version,
                                    "timeframe_context": candidate.timeframe_context,
                                    "target_dte": candidate.target_dte},
@@ -367,7 +381,7 @@ def link_paper_position(db: Session, position: ParlayPaperPosition) -> None:
         SignalPerformance.exit_reason == "OPEN")
         .order_by(SignalPerformance.triggered_at.desc()))
     if row:
-        row.user_entered = True
+        # This journals an existing automatic signal, not a new manual-origin signal.
         row.paper_position_id = position.id
         row.updated_at = datetime.now(timezone.utc)
         db.commit()
@@ -432,6 +446,8 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
         "active_positions": active, "exit_pending": pending,
         "untracked_selected_positions": max(0, len(rows)-len(payloads)),
         "quote_coverage_percent": round(100*quoted/terminal, 1) if terminal else 0,
+        "selected_positions": len(rows),
+        "selected_quote_coverage_percent": round(100*quoted/len(rows), 1) if rows else 0,
         "wins": sum(value > 0 for value in pnl_values), "losses": sum(value < 0 for value in pnl_values),
         "cumulative_pnl_dollars": round(sum(pnl_values), 2),
         "average_pnl_dollars": round(sum(pnl_values)/len(pnl_values), 2) if pnl_values else 0,
@@ -458,6 +474,7 @@ def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[
     slippage = max(0.0, float(extra_slippage_per_side))
     round_trip_cost = commission + fees
     scenarios: dict[str, list[float]] = {"observed": [], "net": [], "stress": []}
+    matched_rows: list[SignalPerformance] = []
     grouped: dict[str, dict[str, dict[str, float | int | str]]] = {
         "by_ticker": {}, "by_exit_reason": {},
     }
@@ -468,6 +485,7 @@ def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[
                 or shadow.get("entry_ask") is None or shadow.get("exit_bid") is None):
             continue
         multiplier = int(shadow.get("contract_multiplier") or 100)
+        matched_rows.append(row)
         entry_ask = float(shadow["entry_ask"])
         exit_bid = float(shadow["exit_bid"])
         observed = (exit_bid-entry_ask)*multiplier
@@ -497,8 +515,8 @@ def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[
         return {
             "pnl_dollars": total,
             "average_pnl_dollars": round(total/len(values), 2) if values else 0,
-            "wins": sum(value > 0 for value in values),
-            "losses": sum(value < 0 for value in values),
+            "wins": sum(value >= 1e-9 for value in values),
+            "losses": sum(value <= -1e-9 for value in values),
             "breakeven": sum(abs(value) < 1e-9 for value in values),
         }
 
@@ -518,6 +536,7 @@ def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[
 
     return {
         "closed_with_quote": len(scenarios["observed"]),
+        "matched_underlying_metrics": metrics(matched_rows),
         "observed": summarize(scenarios["observed"]),
         "net_after_costs": summarize(scenarios["net"]),
         "stress": summarize(scenarios["stress"]),
@@ -567,30 +586,36 @@ def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
             entry = pair["ENTRY"]
             if entry.mark_status != "QUOTED" or entry.selected_price is None:
                 continue
-            events.append((_utc(entry.event_at), 1, signal_id, entry))
+            events.append((max(_utc(entry.event_at), _utc(entry.observed_at)), 1, signal_id, entry))
             exit_mark = pair.get("EXIT")
             if (exit_mark is not None and exit_mark.mark_status == "QUOTED" and
                     exit_mark.selected_price is not None):
-                events.append((_utc(exit_mark.event_at), 0, signal_id, exit_mark))
+                events.append((max(_utc(exit_mark.event_at), _utc(exit_mark.observed_at)), 2, signal_id, exit_mark))
+            elif exit_mark is not None:
+                events.append((max(_utc(exit_mark.event_at), _utc(exit_mark.observed_at)), 3, signal_id, exit_mark))
+            elif rows_by_id[signal_id].exit_reason != "OPEN":
+                events.append((max(_utc(entry.observed_at), _utc(rows_by_id[signal_id].updated_at)),
+                               3, signal_id, entry))
         events.sort(key=lambda event: (event[0], event[1], event[2]))
 
         cash = initial_cash
         realized_pnl = 0.0
         accepted: set[str] = set()
         open_costs: dict[str, float] = {}
+        unpriced: set[str] = set()
         total_entry_debits = 0.0
         positions_taken = closed_positions = skipped_entries = wins = losses = 0
         daily: dict[date, dict] = {}
         equity_path = [initial_cash]
 
-        for event_at, _, signal_id, mark in events:
+        for event_at, kind, signal_id, mark in events:
             event_date = _eastern_date(event_at)
             point = daily.setdefault(event_date, {
                 "trading_date": event_date.isoformat(), "entries": 0, "closed": 0,
                 "skipped": 0, "daily_realized_pnl_dollars": 0.0,
             })
             value = round(float(mark.selected_price or 0) * mark.contract_multiplier, 2)
-            if mark.mark_type == "ENTRY":
+            if kind == 1:
                 if value <= 0 or value > cash + 1e-9:
                     skipped_entries += 1
                     point["skipped"] += 1
@@ -601,6 +626,8 @@ def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
                     total_entry_debits = round(total_entry_debits+value, 2)
                     positions_taken += 1
                     point["entries"] += 1
+            elif kind == 3 and signal_id in open_costs:
+                unpriced.add(signal_id)
             elif signal_id in accepted and signal_id in open_costs:
                 entry_cost = open_costs.pop(signal_id)
                 pnl = round(value-entry_cost, 2)
@@ -615,6 +642,9 @@ def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
             point["cash_dollars"] = cash
             point["capital_at_cost_dollars"] = round(sum(open_costs.values()), 2)
             point["book_equity_dollars"] = round(cash+sum(open_costs.values()), 2)
+            point["unpriced_exit_cost_dollars"] = round(sum(open_costs.get(key, 0) for key in unpriced), 2)
+            point["equity_excluding_unpriced_exits_dollars"] = round(
+                point["book_equity_dollars"] - point["unpriced_exit_cost_dollars"], 2)
             point["cumulative_realized_pnl_dollars"] = realized_pnl
             equity_path.append(point["book_equity_dollars"])
 
@@ -640,11 +670,17 @@ def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
             else:
                 exit_pending += 1
         capital_at_cost = round(sum(open_costs.values()), 2)
+        unpriced_cost = round(sum(cost for key, cost in open_costs.items()
+                                 if rows_by_id[key].exit_reason != "OPEN"), 2)
         book_equity = round(cash+capital_at_cost, 2)
         return {
             "key": key, "label": label, "starting_cash_dollars": initial_cash,
             "cash_available_dollars": cash, "capital_at_cost_dollars": capital_at_cost,
             "book_equity_dollars": book_equity, "realized_pnl_dollars": realized_pnl,
+            "active_capital_at_cost_dollars": round(capital_at_cost-unpriced_cost, 2),
+            "unpriced_exit_cost_dollars": unpriced_cost,
+            "equity_excluding_unpriced_exits_dollars": round(book_equity-unpriced_cost, 2),
+            "liquidation_value_dollars": cash if not open_costs else None,
             "return_percent": round(100*realized_pnl/initial_cash, 2) if initial_cash else 0,
             "maximum_drawdown_dollars": round(maximum_drawdown, 2),
             "maximum_drawdown_percent": round(maximum_drawdown_percent, 2),
@@ -664,6 +700,8 @@ def paper_portfolio_results(db: Session, rows: list[SignalPerformance],
         "entry_basis": "One contract at verified ask",
         "exit_basis": "First verified bid after underlying exit",
         "open_value_basis": "Original debit; unrealized option value is not estimated",
+        "accounting_note": "Book equity includes unpriced contracts at cost. Cash is separate. "
+                           "The zero-value sensitivity removes unpriced exits without inventing fills.",
         "fees_modeled": False, "additional_slippage_modeled": False,
         "forward_only": True, "historical_records_changed": False, "paper_only": True,
     }
@@ -883,6 +921,7 @@ def metrics(rows: list[SignalPerformance]) -> dict:
         "average_win_r": round(sum(wins)/len(wins), 3) if wins else 0,
         "average_loss_r": round(sum(losses)/len(losses), 3) if losses else 0,
         "maximum_drawdown_r": round(drawdown, 3),
+        "drawdown_order": "ENTRY_TIME",
         "average_return_pct": round(sum(returns)/len(returns), 3) if returns else 0,
         "cumulative_return_pct": round(sum(returns), 3),
         "maximum_drawdown_pct": round(return_drawdown, 3),

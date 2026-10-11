@@ -61,7 +61,7 @@ def test_tracker_records_each_scan_and_keeps_marking_after_contract_stops_qualif
     Base.metadata.create_all(engine)
     provider = LiveLotteryProvider()
     with Session(engine) as db:
-        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1))
+        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1), now=provider.now)
         db.commit()
         tracker = db.scalar(select(LotteryTracker))
         assert tracker is not None
@@ -73,7 +73,7 @@ def test_tracker_records_each_scan_and_keeps_marking_after_contract_stops_qualif
         provider.now += timedelta(minutes=1)
         provider.bid = .45
         provider.ask = .48  # Above the lotto filter, but the exact contract must keep tracking.
-        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1))
+        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1), now=provider.now)
         db.commit()
 
         points = tracker_points(db, tracker.id)
@@ -97,7 +97,10 @@ def test_cash_tracker_uses_one_entry_per_wave_and_enforces_daily_debit_cap(monke
     base = {"trading_date": NOW.date(), "first_seen_at": NOW, "entry_wave_id": "wave-1",
             "setup_score": 80, "entry_cost": 20, "option_symbol": "A",
             "status": "CLOSED", "exit_scenarios": {
-                "take_2x": {"exit_value": 40}, "take_5x": {"exit_value": 0}}}
+                "take_2x": {"exit_value": 40, "exit_at": NOW+timedelta(minutes=10)},
+                "take_5x": {"exit_value": 0, "exit_at": NOW+timedelta(minutes=10)},
+                "limit_2x": {"exit_value": 40, "exit_at": NOW+timedelta(minutes=10)},
+                "limit_5x": {"exit_value": 0, "exit_at": NOW+timedelta(minutes=10)}}}
     rows = [base, {**base, "option_symbol": "B", "setup_score": 70, "entry_cost": 10},
             {**base, "entry_wave_id": "wave-2", "option_symbol": "C", "setup_score": 90}]
     result = lottery_cash_tracker(rows)
@@ -114,9 +117,9 @@ def test_same_completed_candle_cannot_duplicate_a_chart_point():
     provider = LiveLotteryProvider()
     evaluation_at = provider.now - timedelta(minutes=1)
     with Session(engine) as db:
-        track_lottery_scan(db, provider, ["SPY"], evaluation_at)
+        track_lottery_scan(db, provider, ["SPY"], evaluation_at, now=provider.now)
         db.commit()
-        track_lottery_scan(db, provider, ["SPY"], evaluation_at)
+        track_lottery_scan(db, provider, ["SPY"], evaluation_at, now=provider.now)
         db.commit()
         assert len(db.scalars(select(LotteryQuoteSnapshot)).all()) == 1
 
@@ -126,7 +129,7 @@ def test_trackers_close_after_the_regular_session_without_fabricating_a_close_qu
     Base.metadata.create_all(engine)
     provider = LiveLotteryProvider()
     with Session(engine) as db:
-        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1))
+        track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1), now=provider.now)
         db.commit()
         tracker = db.scalar(select(LotteryTracker))
         assert tracker is not None and tracker.status == "ACTIVE"
@@ -145,7 +148,7 @@ def test_tracker_api_exposes_the_summary_and_scan_points():
     Base.metadata.create_all(engine)
     provider = LiveLotteryProvider()
     with Session(engine) as db:
-        trackers = track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1))
+        trackers = track_lottery_scan(db, provider, ["SPY"], provider.now - timedelta(minutes=1), now=provider.now)
         db.commit()
         tracker_id = trackers[0].id
 

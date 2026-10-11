@@ -459,6 +459,25 @@ class AutomatedOptionMark(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AutomatedOptionObservation(Base):
+    """Bounded forward-only quote observations, separate from entry/exit marks."""
+    __tablename__ = "automated_option_observations"
+    __table_args__ = (UniqueConstraint("signal_id", "minute_at", name="uq_option_observation_minute"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("signal_performance.signal_id"), index=True)
+    minute_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    option_symbol: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(255))
+    bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ask_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    cohort: Mapped[str] = mapped_column(String(64))
+
+
 class TradeOutcome(Base):
     __tablename__ = "trade_outcomes"
     id: Mapped[int] = mapped_column(primary_key=True)

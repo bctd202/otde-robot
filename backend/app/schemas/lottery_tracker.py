@@ -35,6 +35,8 @@ class LotteryExitScenariosOut(BaseModel):
     hold_to_last: LotteryExitScenarioOut
     take_2x: LotteryExitScenarioOut
     take_5x: LotteryExitScenarioOut
+    limit_2x: LotteryExitScenarioOut
+    limit_5x: LotteryExitScenarioOut
 
 
 class LotteryTrackerSummaryOut(BaseModel):
@@ -132,6 +134,10 @@ class LotteryCashPortfolioOut(BaseModel):
     positions_taken: int
     closed_positions: int
     active_positions: int
+    unpriced_positions: int
+    unpriced_cost: float
+    fixed_cost_per_contract: float
+    extra_slippage_per_side: float
     skipped_insufficient_cash: int
     skipped_daily_cap: int
     wins: int
@@ -145,6 +151,8 @@ class LotteryCashTrackerOut(BaseModel):
     quantity_per_entry: int
     selection_rule: str
     portfolios: list[LotteryCashPortfolioOut] = Field(default_factory=list)
+    sensitivity_portfolios: list[LotteryCashPortfolioOut] = Field(default_factory=list)
+    accounting_note: str
     entry_basis: str
     exit_basis: str
     forward_only: bool

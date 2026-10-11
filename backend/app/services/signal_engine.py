@@ -20,6 +20,7 @@ from app.services.lottery_tracker import close_lottery_trackers, track_lottery_s
 from app.services.paper_positions import refresh_position
 from app.services.parlay import latest_completed_candle_at, rank_parlays
 from app.services.performance import track_candidates
+from app.services.option_research import record_option_observations
 from app.services.structured_intraday import rank_structured_intraday
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,7 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         apply_lifecycle(db, candidates, evaluation_at)
         track_candidates(db, candidates, provider)
         track_lottery_scan(db, provider, get_settings().symbol_list, evaluation_at)
+        record_option_observations(db, provider)
         _position_alerts(db, provider)
         _performance_alerts(db)
         if hasattr(provider, "budget_status"):
