@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import (BacktestRun, DailyWatchSymbol, LotteryTracker, ParlayPaperPosition,
@@ -31,7 +31,8 @@ from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
-from app.services.performance import (analytics_exclusion_reason,
+from app.services.option_research import option_path_research
+from app.services.performance import (analytics_exclusion_reason, automated_origin,
                                       deduplicate_positions,
                                       execution_cost_analysis, link_paper_position,
                                       market_movement_data, metrics,
@@ -347,13 +348,16 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
         SignalPerformance.setup_type == setup_type if setup_type else None,
         SignalPerformance.strategy_mode == strategy_mode if strategy_mode != "ALL" else None,
         SignalPerformance.exit_reason == exit_reason if exit_reason else None,
-        SignalPerformance.user_entered == user_entered,
+        or_(SignalPerformance.user_entered.is_(True), SignalPerformance.paper_position_id.is_not(None))
+        if user_entered else None,
         SignalPerformance.backend_status == "BUY",
         SignalPerformance.trading_date >= start if start else None, SignalPerformance.trading_date <= end if end else None,
         SignalPerformance.score >= min_score if min_score is not None else None,
         SignalPerformance.score <= max_score if max_score is not None else None):
         if condition is not None: query = query.where(condition)
     raw_rows = list(db.scalars(query).all())
+    if not user_entered:
+        raw_rows = [row for row in raw_rows if automated_origin(row)]
     rows = deduplicate_positions(raw_rows) if deduplicate else raw_rows
     paper_ids = {row.paper_position_id for row in rows if row.paper_position_id is not None}
     paper_positions = ({position.id: position for position in db.scalars(
@@ -379,6 +383,13 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     page_start = (bounded_page-1)*bounded_page_size
     page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
+        "selection_integrity": {
+            "basis": "AUTOMATED_ORIGIN_INCLUDING_JOURNAL_LINKS" if not user_entered else "MANUAL_JOURNAL",
+            "legacy_linked_rows_included": sum(bool(row.user_entered) for row in rows) if not user_entered else 0,
+            "historical_records_changed": False,
+        },
+        "option_path_research": option_path_research(
+            db, rows, fixed_cost=commission_per_contract+additional_fees_per_contract),
         "option_shadow_metrics": option_shadow_metrics,
         "execution_cost_analysis": execution_cost_analysis(
             rows, option_shadows, commission_per_contract,
@@ -395,7 +406,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
             _ledger(
                 row,
                 paper_positions.get(row.paper_position_id)
-                if row.paper_position_id is not None
+                if user_entered and row.paper_position_id is not None
                 else None,
                 option_shadows.get(row.signal_id),
             )

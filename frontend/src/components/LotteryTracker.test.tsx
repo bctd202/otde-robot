@@ -50,3 +50,15 @@ test('shows a clear empty state when no lottery play was tracked',async()=>{
   expect(await screen.findByText('No lottery contracts logged for this session')).toBeInTheDocument();
   expect(screen.getByText(/Choose another saved date above/i)).toBeInTheDocument();
 });
+
+test('separates exact-target cost sensitivity from gross lotto bankroll curves',async()=>{
+  const payload={...list,cash_tracker:{...cashTracker,accounting_note:'$1 costs are assumptions, not broker charges.',
+    sensitivity_portfolios:[{...cashTracker.portfolios[0],key:'limit_2x',label:'Exactly 2× · $1 cost',
+      cash_available:402,pnl:-98,unpriced_positions:0}]}};
+  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(payload),{status:200,headers:{'Content-Type':'application/json'}}));
+  render(<LotteryLab/>);
+  expect(await screen.findByRole('region',{name:'Lotto execution assumptions'})).toBeInTheDocument();
+  expect(screen.getByText('Exactly 2× · $1 cost')).toBeInTheDocument();
+  expect(screen.getByText('$-98.00')).toBeInTheDocument();
+  expect(screen.getByText(/headline bankroll curves above remain before fees/)).toBeInTheDocument();
+});

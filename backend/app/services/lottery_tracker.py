@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import math
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models import LotteryQuoteSnapshot, LotteryTracker
 from app.core.config import get_settings
 from app.schemas.market import LotteryOut, OptionContractOut, Quote
-from app.services.contracts import annotate_chain
+from app.services.contracts import annotate_chain, validate_exit_quote
 from app.services.indicators import spread_pct
 from app.services.setup_engine import lottery_candidates
 
@@ -98,7 +99,12 @@ def _new_tracker(candidate: LotteryOut, quote: Quote, trading_day: date,
 
 def _record_point(db: Session, tracker: LotteryTracker, contract: OptionContractOut,
                   underlying: Quote | None, candidate: LotteryOut | None,
-                  observed_at: datetime) -> None:
+                  observed_at: datetime, quote_now: datetime | None = None) -> None:
+    now = _utc(quote_now or observed_at)
+    decision = validate_exit_quote(contract, tracker.symbol,
+        tracker.normalized_option_symbol or tracker.option_symbol, now-timedelta(seconds=120), 120)
+    if not decision.actionable or not math.isfinite(contract.bid) or not math.isfinite(contract.ask):
+        return
     exists = db.scalar(select(LotteryQuoteSnapshot.id).where(
         LotteryQuoteSnapshot.tracker_id == tracker.id,
         LotteryQuoteSnapshot.observed_at == observed_at,
@@ -140,7 +146,8 @@ def _record_point(db: Session, tracker: LotteryTracker, contract: OptionContract
             tracker.hit_10x_at = observed_at
 
 
-def track_lottery_scan(db: Session, provider, symbols: list[str], evaluation_at: datetime) -> list[LotteryTracker]:
+def track_lottery_scan(db: Session, provider, symbols: list[str], evaluation_at: datetime,
+                       *, now: datetime | None = None) -> list[LotteryTracker]:
     """Persist the displayed lotto shortlist, then mark every active contract once per scan."""
     observed_at = _observed_at(evaluation_at)
     trading_day = observed_at.astimezone(NY).date()
@@ -187,7 +194,7 @@ def track_lottery_scan(db: Session, provider, symbols: list[str], evaluation_at:
         if contract is None:
             continue
         _record_point(db, tracker, contract, quotes.get(tracker.symbol),
-                      candidate_by_contract.get(key), observed_at)
+                      candidate_by_contract.get(key), observed_at, now or datetime.now(timezone.utc))
     db.flush()
     return tracked
 
@@ -219,7 +226,7 @@ def tracker_points(db: Session, tracker_id: str) -> list[LotteryQuoteSnapshot]:
 
 
 def _exit_scenario(points: list[LotteryQuoteSnapshot], entry: float, status: str,
-                   target_multiple: float | None = None) -> dict:
+                   target_multiple: float | None = None, *, cap_target: bool = False) -> dict:
     """Replay a deterministic one-contract exit against saved, sellable bids."""
     target = next((point for point in points
                    if target_multiple is not None and point.bid >= entry * target_multiple), None)
@@ -230,15 +237,16 @@ def _exit_scenario(points: list[LotteryQuoteSnapshot], entry: float, status: str
             "exit_at": None, "exit_bid": None, "exit_value": None,
             "multiple": None, "return_percent": None,
         }
-    multiple = selected.bid / entry
+    exit_bid = min(selected.bid, entry*target_multiple) if cap_target and target is not None and target_multiple else selected.bid
+    multiple = exit_bid / entry
     if target is not None:
         reason = f"TARGET_{target_multiple:g}X"
     else:
         reason = "SESSION_END" if status == "CLOSED" else "OPEN_MARK"
     return {
         "target_multiple": target_multiple, "target_hit": target is not None,
-        "exit_reason": reason, "exit_at": selected.observed_at,
-        "exit_bid": selected.bid, "exit_value": round(selected.bid * 100, 2),
+        "exit_reason": reason, "exit_at": max(_utc(selected.observed_at), _utc(selected.bid_timestamp or selected.quote_timestamp)),
+        "exit_bid": exit_bid, "exit_value": round(exit_bid * 100, 2),
         "multiple": round(multiple, 3), "return_percent": round((multiple - 1) * 100, 1),
     }
 
@@ -282,6 +290,8 @@ def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -
             "hold_to_last": _exit_scenario(points, entry, row.status),
             "take_2x": _exit_scenario(points, entry, row.status, 2),
             "take_5x": _exit_scenario(points, entry, row.status, 5),
+            "limit_2x": _exit_scenario(points, entry, row.status, 2, cap_target=True),
+            "limit_5x": _exit_scenario(points, entry, row.status, 5, cap_target=True),
         },
         "currently_qualified": bool(latest_point and latest_point.is_qualified),
         "provider": row.provider, "data_mode": row.data_mode,
@@ -357,52 +367,65 @@ def _one_contract_per_wave(trackers: list[dict]) -> list[dict]:
 
 
 def _cash_portfolio(trackers: list[dict], scenario_key: str, label: str,
-                    starting_cash: float, daily_cap: float) -> dict:
+                    starting_cash: float, daily_cap: float, *, fixed_cost: float = 0,
+                    slippage: float = 0) -> dict:
     cash = starting_cash
     peak_equity = starting_cash
     max_drawdown = 0.0
     daily_spent: dict[date, float] = {}
     daily_rows: dict[date, dict] = {}
+    held: dict[str, float] = {}
+    unresolved: set[str] = set()
     positions = closed = active = wins = losses = 0
     skipped_cash = skipped_cap = 0
+    events = []
     for row in _one_contract_per_wave(trackers):
-        day = row["trading_date"]
-        if isinstance(day, str):
-            day = date.fromisoformat(day)
-        cost = row["entry_cost"]
-        if daily_spent.get(day, 0) + cost > daily_cap + 1e-9:
-            skipped_cap += 1
-            daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
-                "skipped": 0, "realized_pnl": 0.0})["skipped"] += 1
-            continue
-        if cost > cash + 1e-9:
-            skipped_cash += 1
-            daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
-                "skipped": 0, "realized_pnl": 0.0})["skipped"] += 1
-            continue
-        positions += 1
-        daily_spent[day] = daily_spent.get(day, 0) + cost
-        cash -= cost
+        key = row["entry_wave_id"]
+        events.append((_utc(row["first_seen_at"]), 0, key, row))
+        scenario = row["exit_scenarios"][scenario_key]
+        exit_at = scenario.get("exit_at")
+        if (exit_at is not None and scenario.get("exit_value") is not None
+                and (row["status"] == "CLOSED" or scenario.get("target_hit"))):
+            events.append((max(_utc(row["first_seen_at"]), _utc(exit_at)), 1, key, row))
+    for event_at, kind, key, row in sorted(events, key=lambda item: item[:3]):
+        day = event_at.astimezone(NY).date()
         day_row = daily_rows.setdefault(day, {"trading_date": day, "entries": 0, "closed": 0,
             "skipped": 0, "realized_pnl": 0.0})
-        day_row["entries"] += 1
-        scenario = row["exit_scenarios"][scenario_key]
-        value = float(scenario["exit_value"] or 0)
-        if row["status"] == "CLOSED":
-            cash += value
+        if kind == 0:
+            cost = round(row["entry_cost"] + slippage*100, 2)
+            if daily_spent.get(day, 0) + cost > daily_cap + 1e-9:
+                skipped_cap += 1
+                day_row["skipped"] += 1
+            elif cost <= 0 or cost+fixed_cost > cash + 1e-9:
+                skipped_cash += 1
+                day_row["skipped"] += 1
+            else:
+                positions += 1
+                daily_spent[day] = daily_spent.get(day, 0)+cost
+                cash = round(cash-cost-fixed_cost, 2)
+                held[key] = cost
+                day_row["entries"] += 1
+                day_row["realized_pnl"] -= fixed_cost
+                if row["status"] == "CLOSED" and (
+                        row["exit_scenarios"][scenario_key].get("exit_at") is None or
+                        row["exit_scenarios"][scenario_key].get("exit_value") is None):
+                    unresolved.add(key)
+        elif key in held:
+            value = round(max(0, float(row["exit_scenarios"][scenario_key]["exit_value"])-slippage*100), 2)
+            cost = held.pop(key)
+            cash = round(cash+value, 2)
             closed += 1
             pnl = value - cost
             day_row["closed"] += 1
             day_row["realized_pnl"] += pnl
-            wins += pnl > 0
-            losses += pnl < 0
-        else:
-            active += 1
-        book_equity = cash + (value if row["status"] != "CLOSED" else 0)
+            wins += pnl-fixed_cost > 0
+            losses += pnl-fixed_cost < 0
+        book_equity = cash + sum(held.values())
         peak_equity = max(peak_equity, book_equity)
         max_drawdown = max(max_drawdown, peak_equity - book_equity)
         day_row["cash"] = cash
         day_row["book_equity"] = book_equity
+    active = len(held)-len(unresolved)
     daily = []
     cumulative = 0.0
     for day, row in sorted(daily_rows.items()):
@@ -420,6 +443,9 @@ def _cash_portfolio(trackers: list[dict], scenario_key: str, label: str,
         "return_percent": round((ending_equity/starting_cash-1)*100, 1) if starting_cash else 0,
         "maximum_drawdown": round(max_drawdown, 2), "positions_taken": positions,
         "closed_positions": closed, "active_positions": active,
+        "unpriced_positions": len(unresolved),
+        "unpriced_cost": round(sum(held.get(key, 0) for key in unresolved), 2),
+        "fixed_cost_per_contract": fixed_cost, "extra_slippage_per_side": slippage,
         "skipped_insufficient_cash": skipped_cash, "skipped_daily_cap": skipped_cap,
         "wins": wins, "losses": losses, "daily": daily,
     }
@@ -436,6 +462,15 @@ def lottery_cash_tracker(trackers: list[dict]) -> dict:
             _cash_portfolio(trackers, "take_2x", "Take first 2× bid", starting, cap),
             _cash_portfolio(trackers, "take_5x", "Take first 5× bid", starting, cap),
         ],
+        "sensitivity_portfolios": [
+            _cash_portfolio(trackers, "take_2x", "First bid ≥2× · $1 cost", starting, cap, fixed_cost=1),
+            _cash_portfolio(trackers, "take_5x", "First bid ≥5× · $1 cost", starting, cap, fixed_cost=1),
+            _cash_portfolio(trackers, "limit_2x", "Exactly 2× · $1 cost", starting, cap, fixed_cost=1),
+            _cash_portfolio(trackers, "limit_5x", "Exactly 5× · $1 cost", starting, cap, fixed_cost=1),
+        ],
+        "accounting_note": "Entries and exits are processed chronologically. Active positions stay at cost; "
+                           "missing exit prices do not release cash. $1 costs are assumptions, not broker charges. "
+                           "First-bid targets may overshoot; exact-target scenarios cap that benefit.",
         "entry_basis": "First qualifying ask", "exit_basis": "First target bid, else last saved bid",
         "forward_only": True, "historical_records_changed": False, "paper_only": True,
     }
