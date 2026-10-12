@@ -478,6 +478,44 @@ class AutomatedOptionObservation(Base):
     cohort: Mapped[str] = mapped_column(String(64))
 
 
+class ForwardPaperAccount(Base):
+    __tablename__ = "forward_paper_accounts"
+    key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    mark_watermark: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    policy: Mapped[dict] = mapped_column(JSON)
+
+
+class ForwardPaperPosition(Base):
+    __tablename__ = "forward_paper_positions"
+    __table_args__ = (UniqueConstraint("account_key", "signal_id", name="uq_forward_account_signal"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("forward_paper_accounts.key"), index=True)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("signal_performance.signal_id"))
+    entry_mark_id: Mapped[int] = mapped_column(ForeignKey("automated_option_marks.id"))
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Mutable projection only; every cash change has immutable event evidence.
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
+class ForwardPaperEvent(Base):
+    __tablename__ = "forward_paper_events"
+    __table_args__ = (UniqueConstraint("account_key", "event_key", name="uq_forward_account_event"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("forward_paper_accounts.key"), index=True)
+    event_key: Mapped[str] = mapped_column(String(96))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(24))
+    settled_cents: Mapped[int] = mapped_column(Integer)
+    unsettled_cents: Mapped[int] = mapped_column(Integer)
+    fee_cents: Mapped[int] = mapped_column(Integer)
+    realized_cents: Mapped[int] = mapped_column(Integer)
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
 class TradeOutcome(Base):
     __tablename__ = "trade_outcomes"
     id: Mapped[int] = mapped_column(primary_key=True)

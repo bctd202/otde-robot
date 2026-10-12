@@ -144,3 +144,14 @@ export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:Pe
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
 export interface PerformanceResponse {option_path_research?:OptionPathResearch;selection_integrity?:{basis:string;legacy_linked_rows_included:number;historical_records_changed:false};metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
+export interface ForwardAccount {
+  status:'ACTIVE';paper_only:true;account_key:string;activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
+  policy:{starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
+  settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;
+  realized_cents:number;charged_fees_cents:number;open_entry_fees_cents:number;
+  known_liquidation_cents:number;unpriced_positions:number;unpriced_debit_cents:number;equity_cents:number|null;
+  daily:{date:string;cash_cents:number;realized_cents:number}[];
+  positions:{id:number;status:string;option_symbol:string;entry_debit_cents?:number;reason?:string;settles_at?:string|null;exit_requested_at?:string}[];
+  events:{id:number;kind:string;at:string;settled_cents:number;unsettled_cents:number;fee_cents:number;realized_cents:number;detail:{ticker?:string;reason?:string;[key:string]:unknown}}[];
+  pagination:{page:number;pages:number;total:number;page_size:number};
+}

@@ -32,6 +32,7 @@ from app.services.paper_positions import (create_position, market_mark,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
 from app.services.option_research import option_path_research
+from app.services.forward_account import account_summary
 from app.services.performance import (analytics_exclusion_reason, automated_origin,
                                       deduplicate_positions,
                                       execution_cost_analysis, link_paper_position,
@@ -44,6 +45,11 @@ from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
                                         run_signal_scan)
 
 router = APIRouter()
+
+
+@router.get("/forward-paper-account")
+def forward_paper_account(page: int = 1, db: Session = Depends(get_db)):
+    return account_summary(db, page=page)
 
 def _trading_date() -> date:
     from zoneinfo import ZoneInfo

@@ -41,3 +41,15 @@
 @media(max-width:800px){.lottery-money-flow{grid-template-columns:repeat(2,minmax(0,1fr))}.lottery-money-flow>b{display:none}.lottery-money-flow>div{border-bottom:1px solid #263348}.lottery-log-card>header{flex-direction:column}.lottery-peak-callout{justify-items:start;text-align:left}.lottery-log-card>footer{align-items:flex-start;flex-direction:column}.lottery-log-card>footer .lottery-chart-button{width:100%}}
 @media(max-width:600px){.lottery-log-controls{align-items:stretch;flex-direction:column}.lottery-log-controls>div{text-align:left}.lottery-log-controls select{width:100%}.lottery-rule-label{font-size:14px}.lottery-rule-value,.lottery-cost-label{font-size:13px}.lottery-scenario-grid{grid-template-columns:1fr}.lottery-scenario-grid>div{border-right:0;border-bottom:1px solid #263348}.lottery-money-flow{grid-template-columns:1fr}.lottery-threshold-legend{grid-template-columns:1fr}}
 .option-research-lab{margin:24px 0}.research-evidence-counts{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted,#9aafbe)}.option-research-lab svg{display:block;width:100%;max-height:260px}.research-table-scroll{overflow:auto}.research-table-scroll table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.research-table-scroll th,.research-table-scroll td{padding:10px;text-align:right;white-space:nowrap;border-bottom:1px solid #293d4b}.research-table-scroll th:first-child,.research-table-scroll td:first-child{text-align:left}.strategy-explainer{margin:18px 0}.strategy-explainer summary{cursor:pointer;font-weight:700}.strategy-explainer li{margin:12px 0}.research-legend{font-size:.85rem}
+.forward-account{margin:1.2rem 0 2rem;border:1px solid #25877e!important}
+.forward-account>p,.forward-account details p{line-height:1.6}
+.forward-account-dates{font-size:.82rem;opacity:.75}
+.forward-account summary{cursor:pointer;padding:.55rem 0}
+.forward-account h4{margin:1.3rem 0 .5rem}
+.forward-ledger-scroll{overflow-x:auto;max-width:100%}
+.forward-ledger-scroll table{width:100%;border-collapse:collapse;font-size:.85rem}
+.forward-ledger-scroll th,.forward-ledger-scroll td{text-align:left;padding:.75rem;border-bottom:1px solid #29414a;vertical-align:top}
+.forward-ledger-scroll pre{max-width:480px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.forward-pagination{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-top:1rem;flex-wrap:wrap}
+.forward-pagination button{padding:.65rem;border-radius:.5rem;cursor:pointer}
+.forward-pagination button:disabled{opacity:.45;cursor:default}
