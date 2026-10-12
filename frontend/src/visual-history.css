@@ -53,3 +53,11 @@
 .forward-pagination{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-top:1rem;flex-wrap:wrap}
 .forward-pagination button{padding:.65rem;border-radius:.5rem;cursor:pointer}
 .forward-pagination button:disabled{opacity:.45;cursor:default}
+.top-navigation a[aria-current="page"]{border-color:#2d6f66;background:#123d39;color:#5eead4}
+.workspace-tabs{display:flex;gap:.55rem;overflow-x:auto;margin:1.15rem 0;padding:.35rem;border:1px solid #2b3d50;border-radius:13px;background:#08111f;scrollbar-width:thin}
+.workspace-tabs button{flex:1 0 auto;min-height:42px;padding:.65rem 1rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb9c8;font:inherit;font-size:.76rem;font-weight:800;cursor:pointer}
+.workspace-tabs button:hover{color:#f3f7fb;background:#17243a}.workspace-tabs button[aria-current="page"]{border-color:#2d6f66;background:#123d39;color:#5eead4}
+.pagination-top{justify-content:flex-start;margin:.4rem 0 1rem}
+.lottery-archive-bar{display:flex;align-items:center;flex-wrap:wrap;gap:.8rem;margin:1rem 0;padding:1rem;border:1px solid #8b5a2b;border-radius:13px;background:linear-gradient(110deg,#251a10,#0b1322 75%)}
+.lottery-archive-bar>div:first-child{display:grid;gap:.15rem;margin-right:auto}.lottery-archive-bar span,.lottery-archive-bar label{color:#fbbf24;font-size:.68rem;font-weight:800}.lottery-archive-bar strong{font-size:1rem}.lottery-archive-bar label{display:grid;gap:.25rem}.lottery-archive-bar select{min-width:180px;padding:.6rem .75rem;border:1px solid #9a6b3b;border-radius:8px;background:#111c2e;color:#f3f7fb;font:inherit}.lottery-session-buttons{display:flex;gap:.4rem}.lottery-session-buttons button{padding:.6rem .75rem;border:1px solid #9a6b3b;border-radius:8px;background:#2a190e;color:#fed7aa;font:inherit;font-size:.72rem;cursor:pointer}.lottery-session-buttons button:disabled{opacity:.4;cursor:default}.lottery-archive-bar>small{flex-basis:100%;color:#aeb9c8;font-size:.68rem}
+@media(max-width:600px){.workspace-tabs button{padding:.6rem .8rem}.lottery-archive-bar label,.lottery-archive-bar select{width:100%}.lottery-session-buttons{width:100%}.lottery-session-buttons button{flex:1}}

@@ -16,6 +16,9 @@ import './visual-history.css';
 export const PARLAY_REFRESH_INTERVAL_MS = 15_000;
 
 const statusOrder:Record<ParlayCandidate['signal_status'],number>={BUY:0,WATCH:1,MISSED:2,PASS:3,UNAVAILABLE:4};
+type AppPage='parlay'|'lottery'|'performance'|'backtest-lab';
+const appPages:AppPage[]=['parlay','lottery','performance','backtest-lab'];
+function pageFromHash():AppPage {const hash=window.location.hash.slice(1);return appPages.includes(hash as AppPage)?hash as AppPage:'parlay'}
 
 export function stabilizeCandidateOrder(next:ParlayResponse,previous:ParlayResponse|null):ParlayResponse {
   if(!previous)return next;
@@ -30,6 +33,7 @@ export function stabilizeCandidateOrder(next:ParlayResponse,previous:ParlayRespo
 }
 
 export function App() {
+  const [activePage,setActivePage]=useState<AppPage>(pageFromHash);
   const [parlays,setParlays]=useState<ParlayResponse|null>(null);
   const [dailyWatch,setDailyWatch]=useState<DailyWatchResponse|null>(null);
   const [dailyWatchBusy,setDailyWatchBusy]=useState(false);
@@ -51,6 +55,7 @@ export function App() {
   const parlayRequest=useRef(false);
   const latestAlertId=useRef(0);
   const alertsInitialized=useRef(false);
+  useEffect(()=>{const syncPage=()=>setActivePage(pageFromHash());window.addEventListener('hashchange',syncPage);return()=>window.removeEventListener('hashchange',syncPage)},[]);
   useEffect(()=>{void getDailyWatch().then(setDailyWatch).catch(()=>setDailyWatchMessage('Watch Today is temporarily unavailable.'))},[]);
   const refreshParlays=useCallback(async()=>{if(parlayRequest.current)return;parlayRequest.current=true;setParlayRefreshing(true);try{
     const [boardResult,positionsResult,alertsResult]=await Promise.allSettled([getParlays(),getPaperPositions(),getSignalAlerts()]);
@@ -72,15 +77,17 @@ export function App() {
   const removeWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await removeDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} removed.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to remove ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const controlScanner=useCallback(async(action:'HOLD'|'RESUME')=>{if(action==='HOLD'&&!window.confirm('Hold automated scans? The dashboard and saved research will remain available.'))return;setScannerControlBusy(true);setScannerFeedback('');try{const result=await setScannerControl(action);setScannerFeedback(result.message);await refreshParlays()}catch(reason){setScannerFeedback(reason instanceof Error?reason.message:'Unable to update scanner control')}finally{setScannerControlBusy(false)}},[refreshParlays]);
   return <main>
-    <nav className="top-navigation" aria-label="Primary"><a href="#parlay">Trade Board</a><a href="#lottery">Lottery Plays</a><a href="#performance">Play History</a><a href="#backtest-lab">Backtests</a></nav>
+    <nav className="top-navigation" aria-label="Primary"><a href="#parlay" aria-current={activePage==='parlay'?'page':undefined} onClick={()=>setActivePage('parlay')}>Trade Board</a><a href="#lottery" aria-current={activePage==='lottery'?'page':undefined} onClick={()=>setActivePage('lottery')}>Lottery Plays</a><a href="#performance" aria-current={activePage==='performance'?'page':undefined} onClick={()=>setActivePage('performance')}>Play History</a><a href="#backtest-lab" aria-current={activePage==='backtest-lab'?'page':undefined} onClick={()=>setActivePage('backtest-lab')}>Backtests</a></nav>
+    <div hidden={activePage!=='parlay'}>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
     <StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>
     <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
     <SignalAlerts alerts={signalAlerts}/>
     {parlays?<ParlayBoard data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
-    <LotteryLab/>
-    <Performance/>
-    <BacktestLab/>
+    </div>
+    <div hidden={activePage!=='lottery'}><LotteryLab/></div>
+    <div hidden={activePage!=='performance'}><Performance/></div>
+    <div hidden={activePage!=='backtest-lab'}><BacktestLab/></div>
     <footer>Parlay paper-only research · No brokerage adapter or order-routing path exists.</footer>
   </main>;
 }

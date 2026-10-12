@@ -57,8 +57,26 @@ test('separates exact-target cost sensitivity from gross lotto bankroll curves',
       cash_available:402,pnl:-98,unpriced_positions:0}]}};
   vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(payload),{status:200,headers:{'Content-Type':'application/json'}}));
   render(<LotteryLab/>);
+  fireEvent.click(screen.getByRole('button',{name:'Money & charts'}));
   expect(await screen.findByRole('region',{name:'Lotto execution assumptions'})).toBeInTheDocument();
   expect(screen.getByText('Exactly 2× · $1 cost')).toBeInTheDocument();
   expect(screen.getByText('$-98.00')).toBeInTheDocument();
   expect(screen.getByText(/headline bankroll curves above remain before fees/)).toBeInTheDocument();
+});
+
+test('shows saved session archive before the log and loads an older date',async()=>{
+  const latest={...list,trading_date:'2026-09-03',available_dates:['2026-09-03','2026-09-02'],trackers:[],summary:{...list.summary,contract_count:0}};
+  const older={...list,available_dates:latest.available_dates};
+  const requests:string[]=[];
+  vi.spyOn(globalThis,'fetch').mockImplementation(async input=>{
+    requests.push(String(input));
+    return new Response(JSON.stringify(String(input).includes('trading_date=2026-09-02')?older:latest),{status:200,headers:{'Content-Type':'application/json'}});
+  });
+  render(<LotteryLab/>);
+  expect(await screen.findByText('2 dates on record')).toBeInTheDocument();
+  expect(screen.getByRole('combobox',{name:'Lottery log session'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'← Older'}));
+  await waitFor(()=>expect(requests.some(url=>url.includes('trading_date=2026-09-02'))).toBe(true));
+  expect(await screen.findByText(tracker.option_symbol)).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Newer →'})).toBeEnabled();
 });
