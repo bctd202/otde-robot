@@ -93,6 +93,7 @@ test('shows cash separately from unpriced historical contracts and discloses sel
     equity_excluding_unpriced_exits_dollars:1410,liquidation_value_dollars:null};
   mockResponses(data,response('STRUCTURED_INTRADAY',[]));
   render(<Performance/>);
+  fireEvent.click(screen.getByRole('button',{name:'Option execution'}));
   const panel=await screen.findByRole('region',{name:'Paper money tracker'});
   const all=within(panel).getByRole('heading',{name:'All tracked tickers'}).closest('article')!;
   expect(within(all).getByText('Unpriced exit exposure').nextElementSibling).toHaveTextContent('$403.00');
@@ -124,7 +125,9 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(strategyMetrics).getByText('Open Plays')).toBeInTheDocument();
   expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Research'}));
   expect(screen.getByRole('region',{name:'Core and experimental cohort comparison'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Option execution'}));
   const execution=screen.getByRole('region',{name:'Strategy and execution comparison'});
   expect(within(execution).getByText('Does the underlying edge survive option execution?')).toBeInTheDocument();
   expect(within(execution).getByText('After fixed costs').closest('article')).toHaveTextContent('-$51.00');
@@ -139,6 +142,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(money).getByText(/Missing exit prices leave cash tied up/)).toBeInTheDocument();
   fireEvent.click(within(money).getByRole('button',{name:'$250.00'}));
   await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=250'))).toBe(true));
+  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);
   expect(screen.getByText('Technical audit data')).toBeInTheDocument();
   expect(screen.getByText(/Raw repeated alerts remain visible only in aggregate counts/)).toBeInTheDocument();
@@ -169,8 +173,10 @@ test('keeps Strategy R primary and distinguishes directional from raw put moveme
   expect(within(directional).getByText('Average Directional Move').closest('.metric')).toHaveTextContent('+1.000%');
   expect(within(directional).getByText('Positive Direction Rate').closest('.metric')).toHaveTextContent('100%');
   expect(within(directional).getByText('Cumulative Directional Move').closest('.metric')).toHaveTextContent('+1.00%');
+  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
   expect(screen.getByText('Directional move').closest('div')).toHaveTextContent('+1.00%');
 
+  fireEvent.click(screen.getByRole('button',{name:'Overview'}));
   fireEvent.click(screen.getByRole('button',{name:'Raw Underlying'}));
   expect(screen.getByLabelText('Cumulative raw underlying move by trading day')).toBeInTheDocument();
   expect(screen.getByText('Raw Underlying Movement')).toBeInTheDocument();
@@ -178,6 +184,7 @@ test('keeps Strategy R primary and distinguishes directional from raw put moveme
   expect(within(raw).getByText('Net Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.00%');
   expect(within(raw).getByText('Avg. Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.000%');
   expect(screen.getByText("Shows price movement of the underlying, not the option trade's return. Calls and puts are not direction-adjusted in this view.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
   expect(screen.getByText('Raw underlying move').closest('div')).toHaveTextContent('-1.00%');
   expect(screen.queryByText('Total Underlying %')).not.toBeInTheDocument();
 });
@@ -188,6 +195,7 @@ test('keeps structured 5-14 DTE results in a separate dataset',async()=>{
   const structured=response('STRUCTURED_INTRADAY',[structuredSignal]);
   mockResponses(zero,structured);
   render(<Performance/>);
+  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
   await waitFor(()=>expect(screen.getByText(/SPY CALL/)).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button',{name:'Structured 5–14 DTE'}));
   await waitFor(()=>expect(screen.getByText(/QQQ CALL/)).toBeInTheDocument());
@@ -197,15 +205,17 @@ test('keeps structured 5-14 DTE results in a separate dataset',async()=>{
 
 test('requests the next server-side performance page',async()=>{
   const first=response('ONE_MIN_0DTE',[signal({ticker:'SPY'})]);
-  first.pagination={page:1,page_size:25,total_items:26,total_pages:2};
+  first.pagination={page:1,page_size:10,total_items:11,total_pages:2};
   const second=response('ONE_MIN_0DTE',[signal({ticker:'QQQ',signal_id:'page-2'})]);
-  second.pagination={page:2,page_size:25,total_items:26,total_pages:2};
+  second.pagination={page:2,page_size:10,total_items:11,total_pages:2};
   vi.spyOn(globalThis,'fetch').mockImplementation(input=>Promise.resolve(new Response(JSON.stringify(
     String(input).includes('page=2')?second:first
   ),{status:200,headers:{'Content-Type':'application/json'}})));
   render(<Performance/>);
+  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
   await waitFor(()=>expect(screen.getByText(/SPY CALL/)).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button',{name:'Next →'}));
+  expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('page_size=10'))).toBe(true);
+  fireEvent.click(within(screen.getByRole('navigation',{name:'Performance log quick pages'})).getByRole('button',{name:'Next page'}));
   await waitFor(()=>expect(screen.getByText(/QQQ CALL/)).toBeInTheDocument());
   expect(screen.queryByText(/SPY CALL/)).not.toBeInTheDocument();
   expect(screen.getByLabelText('Performance log pages')).toHaveTextContent('Page 2 of 2');
