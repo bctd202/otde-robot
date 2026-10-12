@@ -133,7 +133,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   fireEvent.click(within(execution).getByRole('button',{name:'2¢'}));
   await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('extra_slippage_per_side=0.02'))).toBe(true));
   const money=screen.getByRole('region',{name:'Paper money tracker'});
-  expect(within(money).getByText('What would the account balance look like?')).toBeInTheDocument();
+  expect(within(money).getByText('Historical what-if balance · before costs')).toBeInTheDocument();
   expect(within(money).getByLabelText('Paper account equity comparison')).toBeInTheDocument();
   expect(within(money).getAllByText('Core only · SPY / QQQ / IWM')).toHaveLength(2);
   expect(within(money).getByText(/Missing exit prices leave cash tied up/)).toBeInTheDocument();
