@@ -22,6 +22,7 @@ from app.services.parlay import latest_completed_candle_at, rank_parlays
 from app.services.performance import track_candidates
 from app.services.option_research import record_option_observations
 from app.services.forward_account import advance_account, ensure_account, refresh_account_quotes
+from app.services.lotto_trials import ensure_lotto_trials, advance_lotto_trials
 from app.services.structured_intraday import rank_structured_intraday
 
 logger = logging.getLogger(__name__)
@@ -228,6 +229,7 @@ def _performance_alerts(db: Session) -> None:
 def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool = False,
                      evaluation_at: datetime | None = None) -> SignalScan | None:
     ensure_account(db, datetime.now(timezone.utc))
+    ensure_lotto_trials(db, datetime.now(timezone.utc))
     runtime = _runtime(db)
     status = provider.status()
     evaluation_at = evaluation_at or latest_completed_candle_at(status.latest_timestamp)
@@ -250,6 +252,7 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         apply_lifecycle(db, candidates, evaluation_at)
         track_candidates(db, candidates, provider)
         track_lottery_scan(db, provider, get_settings().symbol_list, evaluation_at)
+        advance_lotto_trials(db)
         record_option_observations(db, provider)
         refresh_account_quotes(db, provider)
         advance_account(db, provider)
@@ -373,22 +376,12 @@ def background_scan_once(*, now: datetime | None = None) -> None:
     """Scheduler entrypoint. The server, not an open browser, owns scanning."""
     global _BACKGROUND_PROVIDER
     scan_now = now or datetime.now(timezone.utc)
+    if market_session(scan_now) != "regular":
+        session_close_housekeeping(now=scan_now)
+        return
     with SessionLocal() as db:
         runtime = _runtime(db)
         runtime.heartbeat_at = scan_now
-        session = market_session(scan_now)
-        if session != "regular":
-            advance_account(db, now=scan_now)
-            expire_stale_lifecycles(db, scan_now)
-            close_lottery_trackers(db, scan_now)
-            if _BACKGROUND_PROVIDER is not None and hasattr(_BACKGROUND_PROVIDER, "close"):
-                _BACKGROUND_PROVIDER.close()
-                _BACKGROUND_PROVIDER = None
-            runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
-            runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(scan_now)
-            runtime.last_error = None
-            db.commit()
-            return
         if runtime.operator_hold:
             runtime.status = "held_by_operator"
             runtime.next_evaluation_at = None
@@ -411,18 +404,37 @@ def background_scan_once(*, now: datetime | None = None) -> None:
             logger.exception("Background Parlay signal scan failed")
 
 
+def session_close_housekeeping(*, now: datetime | None = None) -> None:
+    """A separate job survives a final scan overrunning the scheduled close.
+
+    Serialize with scans, then use the actual clock after waiting. No new market
+    requests or synthetic exit quotes are made, even when an operator holds scans.
+    """
+    global _BACKGROUND_PROVIDER
+    with SCAN_LOCK:
+        closed_at = now or datetime.now(timezone.utc)
+        if market_session(closed_at) == "regular":
+            return
+        reconcile_runtime_on_startup(now=closed_at)
+        if _BACKGROUND_PROVIDER is not None and hasattr(_BACKGROUND_PROVIDER, "close"):
+            _BACKGROUND_PROVIDER.close()
+            _BACKGROUND_PROVIDER = None
+
+
 def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
     """Repair persisted runtime and end-of-session state after an interrupted host."""
     started_at = now or datetime.now(timezone.utc)
     with SessionLocal() as db:
         advance_account(db, now=started_at)
+        advance_lotto_trials(db, now=started_at)
         runtime = _runtime(db)
         session = market_session(started_at)
         runtime.heartbeat_at = started_at
         runtime.last_error = None
+        # Also catch prior-session rows when the host resumes during market hours.
+        close_lottery_trackers(db, started_at)
         if session != "regular":
             expire_stale_lifecycles(db, started_at)
-            close_lottery_trackers(db, started_at)
             runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
             runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(started_at)
         elif runtime.operator_hold:

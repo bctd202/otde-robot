@@ -4,6 +4,7 @@ export interface Contract { option_symbol:string; bid:number; ask:number; volume
 export interface Setup { symbol:string; name:string; direction:string; grade:string; score:number; entry_trigger:number; invalidation:number; target1:number; target2:number; reward_risk:number; contract:Contract|null; confluences:string[] }
 export interface Lottery { symbol:string; option_symbol:string; normalized_symbol:string|null; provider:string; data_mode:string; verification_status:string; verification_reason:string; bid_timestamp:string; ask_timestamp:string; quote_timestamp:string; actionable:boolean; right:string; strike:number; expiration:string; bid:number; ask:number; midpoint:number; total_debit:number; spread_percent:number; delta:number|null; gamma:number|null; underlying_trigger:number; underlying_invalidation:number; break_even:number; estimated_2x_underlying:number; estimated_5x_underlying:number; estimated_10x_underlying:number; setup_score:number; explanation:string; worthless_reasons:string[] }
 export interface LotteryTrackerSummary {
+  path_evidence?:{basis:string;size_available:boolean;thresholds:{multiple:number;distinct_quotes:number;minutes_to_first:number|null;lowest_before_hit_percent:number|null;longest_observed_span_seconds:number}[]};
   id:string;trading_date:string;symbol:string;option_symbol:string;expiration:string;right:string;strike:number;
   status:'ACTIVE'|'CLOSED';first_seen_at:string;last_qualified_at:string;last_quote_at:string|null;closed_at:string|null;
   entry_ask:number;entry_bid:number;entry_cost:number;entry_underlying_price:number;setup_score:number;
@@ -134,7 +135,7 @@ export interface OptionPathResearch {
 }
 export interface ResearchCohort {key:'CORE'|'EXPERIMENTAL';label:string;tickers:string[];selected_plays:number;resolved_plays:number;total_r:number;average_r:number;win_rate:number;profit_factor:number|null;maximum_drawdown_r:number}
 export interface OptionShadowBreakdown {label:string;closed_with_quote:number;wins:number;losses:number;pnl_dollars:number}
-export interface ResearchBreakdowns {cohorts:ResearchCohort[];option_shadow_by_ticker:OptionShadowBreakdown[];option_shadow_by_exit_reason:OptionShadowBreakdown[];cohort_definition:string;historical_records_changed:false}
+export interface ResearchBreakdowns {cohorts:ResearchCohort[];input_cohorts?:{label:string;selected_plays:number;resolved_plays:number;total_r:number}[];option_shadow_by_ticker:OptionShadowBreakdown[];option_shadow_by_exit_reason:OptionShadowBreakdown[];cohort_definition:string;historical_records_changed:false}
 export interface PerformanceSignal { signal_id:string;source:'LIVE'|'BACKTEST'|'UNKNOWN'|'LEGACY';ticker:string;direction:'CALL'|'PUT';setup_type:string;strategy_mode:StrategyMode;strategy_version:string;trading_date:string;triggered_at:string;entry_price:number;stop_price:number;target_price:number;exit_at:string|null;exit_price:number|null;exit_reason:string;result_r:number|null;result_return_pct:number|null;return_basis?:'UNDERLYING'|'PAPER_OPTION';paper_entry_option_price?:number|null;paper_exit_option_price?:number|null;initial_risk_points:number;initial_risk_pct:number;mfe_return_pct:number;mae_return_pct:number;duration_minutes:number|null;score:number;mfe_r:number;mae_r:number;user_entered:boolean;analytics_eligible:boolean;analytics_exclusion_reason:string|null;option_snapshot:Record<string,unknown>|null;strategy_snapshot:Record<string,unknown>;condition_snapshot:Record<string,unknown>;conservative_same_candle:boolean;automated_option_shadow:AutomatedOptionShadow|null }
 export interface PerformanceDailyPoint {trading_date:string;result_r:number;return_pct:number;cumulative_r:number;cumulative_return_pct:number;resolved:number;wins:number;losses:number;option_pnl_dollars:number;cumulative_option_pnl_dollars:number;option_closed:number}
 export interface MarketMovementDailyPoint {trading_date:string;raw_move_pct:number;directional_move_pct:number;cumulative_raw_move_pct:number;cumulative_directional_move_pct:number;resolved:number}
@@ -144,14 +145,41 @@ export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:Pe
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
 export interface PerformanceResponse {option_path_research?:OptionPathResearch;selection_integrity?:{basis:string;legacy_linked_rows_included:number;historical_records_changed:false};metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
+export interface AccountEquityPoint {
+  at:string;date:string;equity_cents:number|null;return_percent:number|null;unpriced_positions:number;
+}
+
+export interface PaperAccountChoice {key:string;label:string;archived:boolean}
+export interface PendingPaperAccount {
+  status:'NOT_STARTED'|'SCHEDULED';paper_only:true;account_key?:string;accounts?:PaperAccountChoice[];
+  scheduled_start?:string;starting_cash_cents?:number;
+}
 export interface ForwardAccount {
-  status:'ACTIVE';paper_only:true;account_key:string;activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
+  status:'ACTIVE'|'ARCHIVED';paper_only:true;account_key:string;accounts?:PaperAccountChoice[];activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
   policy:{starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
   settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;
   realized_cents:number;charged_fees_cents:number;open_entry_fees_cents:number;
   known_liquidation_cents:number;unpriced_positions:number;unpriced_debit_cents:number;equity_cents:number|null;
+  equity_history?:{baseline_cents:number;started_at:string|null;daily:AccountEquityPoint[];intraday:AccountEquityPoint[];basis:string};
   daily:{date:string;cash_cents:number;realized_cents:number}[];
   positions:{id:number;status:string;option_symbol:string;entry_debit_cents?:number;reason?:string;settles_at?:string|null;exit_requested_at?:string}[];
   events:{id:number;kind:string;at:string;settled_cents:number;unsettled_cents:number;fee_cents:number;realized_cents:number;detail:{ticker?:string;reason?:string;[key:string]:unknown}}[];
   pagination:{page:number;pages:number;total:number;page_size:number};
+  trades?:MoneyTrade[];
+  trade_pagination?:{page:number;pages:number;total:number};
 }
+
+export interface MoneyTrade {
+  id:number;status:string;option_symbol:string;entry_debit_cents?:number;
+  net_proceeds_cents?:number|null;estimated_net_proceeds_cents?:number|null;
+  net_pnl_cents?:number;entry_at?:string;exit_at?:string;exit_reason?:string;reason?:string;
+  valuation?:{bid_at:string;[key:string]:unknown};
+  tracker_id?:string;[key:string]:unknown;
+}
+
+export interface LottoTrialActive extends Pick<ForwardAccount,'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'> {
+  status:'ACTIVE';accounts:{key:string;label:string}[];policy:{starting_cash_cents:number;[key:string]:unknown};
+  settled_cents:number;unsettled_cents:number;realized_cents:number;unpriced_positions:number;
+  trades:MoneyTrade[];pagination:{page:number;pages:number;total:number};
+}
+export type LottoTrialResponse=LottoTrialActive|{status:'SCHEDULED'|'NOT_STARTED';accounts:{key:string;label:string}[];scheduled_start:string};

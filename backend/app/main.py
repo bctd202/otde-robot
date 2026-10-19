@@ -15,14 +15,26 @@ from sqlalchemy.exc import OperationalError
 
 from app.api.routes import router
 from app.core.config import get_settings
-from app.services.market_calendar import next_scanner_run
-from app.services.signal_engine import background_scan_once, reconcile_runtime_on_startup
+from app.services.market_calendar import next_scanner_run, next_session_housekeeping
+from app.services.signal_engine import (background_scan_once, reconcile_runtime_on_startup,
+                                        session_close_housekeeping)
 
 logger = logging.getLogger(__name__)
 startup_logger = logging.getLogger("uvicorn.error")
 settings = get_settings()
 
 SCANNER_JOB_ID = "parlay-signal-engine"
+CLOSE_JOB_ID = "parlay-session-close"
+
+
+class SessionCloseTrigger(BaseTrigger):
+    def get_next_fire_time(self, previous_fire_time, now):
+        return next_session_housekeeping(max(value for value in (previous_fire_time, now) if value is not None))
+
+
+def add_close_job(scheduler: AsyncIOScheduler, close_callable=session_close_housekeeping):
+    return scheduler.add_job(close_callable, SessionCloseTrigger(), id=CLOSE_JOB_ID,
+        replace_existing=True, max_instances=1, coalesce=True, misfire_grace_time=3600)
 
 
 class MarketHoursTrigger(BaseTrigger):
@@ -66,6 +78,7 @@ async def lifespan(application: FastAPI):
             startup_logger.exception("Scanner startup reconciliation skipped; database schema is not current")
         scanner_scheduler = AsyncIOScheduler(timezone=settings.timezone)
         add_scanner_job(scanner_scheduler)
+        add_close_job(scanner_scheduler)
         scanner_scheduler.start()
         application.state.scanner_scheduler = scanner_scheduler
         startup_logger.info(

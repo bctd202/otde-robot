@@ -35,6 +35,8 @@ test('opens a simple scan-by-scan option performance line chart',async()=>{
     return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
   });
   render(<LotteryLab/>);
+  fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
+  fireEvent.click(await screen.findByText(/related strike\(s\), one market idea/));
   const button=await screen.findByRole('button',{name:'View quote path'});
   fireEvent.click(button);
   await waitFor(()=>expect(screen.getByText('Minute-by-minute sellable value')).toBeInTheDocument());
@@ -45,8 +47,9 @@ test('opens a simple scan-by-scan option performance line chart',async()=>{
 });
 
 test('shows a clear empty state when no lottery play was tracked',async()=>{
-  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({...list,trackers:[]}),{status:200,headers:{'Content-Type':'application/json'}}));
+  vi.spyOn(globalThis,'fetch').mockImplementation(async()=>new Response(JSON.stringify({...list,trackers:[]}),{status:200,headers:{'Content-Type':'application/json'}}));
   render(<LotteryLab/>);
+  fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
   expect(await screen.findByText('No lottery contracts logged for this session')).toBeInTheDocument();
   expect(screen.getByText(/Choose another saved date above/i)).toBeInTheDocument();
 });
@@ -55,9 +58,10 @@ test('separates exact-target cost sensitivity from gross lotto bankroll curves',
   const payload={...list,cash_tracker:{...cashTracker,accounting_note:'$1 costs are assumptions, not broker charges.',
     sensitivity_portfolios:[{...cashTracker.portfolios[0],key:'limit_2x',label:'Exactly 2× · $1 cost',
       cash_available:402,pnl:-98,unpriced_positions:0}]}};
-  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(payload),{status:200,headers:{'Content-Type':'application/json'}}));
+  vi.spyOn(globalThis,'fetch').mockImplementation(async()=>new Response(JSON.stringify(payload),{status:200,headers:{'Content-Type':'application/json'}}));
   render(<LotteryLab/>);
-  fireEvent.click(screen.getByRole('button',{name:'Money & charts'}));
+  fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
+  fireEvent.click(screen.getByRole('button',{name:'Historical research'}));
   expect(await screen.findByRole('region',{name:'Lotto execution assumptions'})).toBeInTheDocument();
   expect(screen.getByText('Exactly 2× · $1 cost')).toBeInTheDocument();
   expect(screen.getByText('$-98.00')).toBeInTheDocument();
@@ -73,6 +77,7 @@ test('shows saved session archive before the log and loads an older date',async(
     return new Response(JSON.stringify(String(input).includes('trading_date=2026-09-02')?older:latest),{status:200,headers:{'Content-Type':'application/json'}});
   });
   render(<LotteryLab/>);
+  fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
   expect(await screen.findByText('2 dates on record')).toBeInTheDocument();
   expect(screen.getByRole('combobox',{name:'Lottery log session'})).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'← Older'}));

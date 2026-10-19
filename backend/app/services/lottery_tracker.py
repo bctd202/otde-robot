@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import math
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -14,6 +14,8 @@ from app.schemas.market import LotteryOut, OptionContractOut, Quote
 from app.services.contracts import annotate_chain, validate_exit_quote
 from app.services.indicators import spread_pct
 from app.services.setup_engine import lottery_candidates
+from app.services.session_candles import session_candles
+from app.services.market_calendar import market_close
 
 NY = ZoneInfo("America/New_York")
 
@@ -51,21 +53,21 @@ def _market_inputs(provider, symbols: list[str], trading_day: date, observed_at:
             rows = provider.candles(symbol, "1m")
         except (KeyError, TypeError, ValueError):
             rows = []
-        candles[symbol] = [row for row in rows if _utc(row.timestamp) <= _utc(evaluation_at)]
+        candles[symbol] = session_candles(rows, evaluation_at)
         raw_chain = _chain(provider, symbol, trading_day)
         chains[symbol] = annotate_chain(raw_chain, symbol, observed_at) if raw_chain else []
     return quotes, candles, chains
 
 
 def _discover(symbols: list[str], quotes: dict[str, Quote], candles: dict[str, list],
-              chains: dict[str, list[OptionContractOut]], provider_status) -> list[LotteryOut]:
+              chains: dict[str, list[OptionContractOut]], provider_status, *, right="call") -> list[LotteryOut]:
     candidates: list[LotteryOut] = []
     for symbol in symbols:
         quote = quotes.get(symbol)
         rows = candles.get(symbol, [])
         if quote is None or len(rows) < 12:
             continue
-        candidates.extend(lottery_candidates(symbol, rows, quote, chains.get(symbol, []), provider_status))
+        candidates.extend(lottery_candidates(symbol, rows, quote, chains.get(symbol, []), provider_status, right=right))
     return sorted(candidates, key=lambda item: item.setup_score, reverse=True)[:3]
 
 
@@ -115,6 +117,7 @@ def _record_point(db: Session, tracker: LotteryTracker, contract: OptionContract
     qualified = candidate is not None
     db.add(LotteryQuoteSnapshot(
         tracker_id=tracker.id, observed_at=observed_at,
+        received_at=now, provider=contract.provider, data_mode=contract.data_mode,
         quote_timestamp=_utc(contract.timestamp),
         bid_timestamp=_utc(contract.bid_timestamp) if contract.bid_timestamp else None,
         ask_timestamp=_utc(contract.ask_timestamp) if contract.ask_timestamp else None,
@@ -161,6 +164,12 @@ def track_lottery_scan(db: Session, provider, symbols: list[str], evaluation_at:
         provider, all_symbols, trading_day, observed_at, evaluation_at,
     )
     candidates = _discover(requested_symbols, quotes, candles, chains, provider.status())
+    # Separately tagged bearish experiment; no extra feed calls or CALL changes.
+    from app.services.lotto_trials import TRIAL_START
+    status = provider.status()
+    if (observed_at >= TRIAL_START and status.provider == "tastytrade"
+            and status.mode == "live" and status.status == "healthy"):
+        candidates += _discover(requested_symbols, quotes, candles, chains, status, right="put")
     candidate_by_contract = {item.option_symbol.strip().upper(): item for item in candidates}
 
     trackers_by_contract = {
@@ -208,7 +217,7 @@ def close_lottery_trackers(db: Session, now: datetime) -> int:
     closed = 0
     for row in rows:
         session_finished = row.trading_date < local_now.date() or (
-            row.trading_date == local_now.date() and local_now.time() >= time(16, 0)
+            row.trading_date == local_now.date() and local_now.time() >= market_close(row.trading_date)
         )
         if not session_finished:
             continue
@@ -251,6 +260,39 @@ def _exit_scenario(points: list[LotteryQuoteSnapshot], entry: float, status: str
     }
 
 
+def path_evidence(entry: float, points: list[LotteryQuoteSnapshot], first_seen: datetime) -> dict:
+    """Observed quote persistence, not continuous executable liquidity."""
+    seen: set[datetime] = set()
+    unique = []
+    for point in points:
+        stamp = _utc(point.bid_timestamp or point.quote_timestamp)
+        if stamp not in seen and stamp >= _utc(first_seen) and math.isfinite(point.bid):
+            seen.add(stamp)
+            unique.append((stamp, point))
+    unique.sort(key=lambda item: item[0])
+    results = []
+    for threshold in (2, 5):
+        first = next((stamp for stamp, point in unique if entry > 0 and point.bid >= entry*threshold), None)
+        run = longest = 0.0
+        prior: datetime | None = None
+        count = 0
+        for stamp, point in unique:
+            if entry > 0 and point.bid >= entry*threshold:
+                count += 1
+                run = run+(stamp-prior).total_seconds() if prior and (stamp-prior).total_seconds() <= 90 else 0
+                longest = max(longest, run)
+                prior = stamp
+            else:
+                run, prior = 0.0, None
+        before = [point.bid for stamp, point in unique if first and stamp <= first]
+        results.append({"multiple": threshold, "distinct_quotes": count,
+            "minutes_to_first": (first-_utc(first_seen)).total_seconds()/60 if first else None,
+            "lowest_before_hit_percent": (min(before)/entry-1)*100 if before and entry > 0 else None,
+            "longest_observed_span_seconds": longest})
+    return {"thresholds": results, "size_available": False,
+            "basis": "Distinct recorded bids relative to discovery ask; sampled spans do not prove continuous availability or fills."}
+
+
 def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -> dict:
     entry = row.entry_ask
     latest_multiple = row.latest_bid / entry if row.latest_bid is not None and entry > 0 else None
@@ -258,11 +300,13 @@ def serialize_tracker(row: LotteryTracker, points: list[LotteryQuoteSnapshot]) -
     latest_point = points[-1] if points else None
     stamps = [_utc(row.first_seen_at), *[_utc(point.observed_at) for point in points]]
     if row.status == "CLOSED":
-        stamps.append(datetime.combine(row.trading_date, time(16, 0), NY).astimezone(timezone.utc))
+        stamps.append(datetime.combine(row.trading_date, market_close(row.trading_date), NY).astimezone(timezone.utc))
     max_gap = max(((right-left).total_seconds()/60 for left, right in zip(stamps, stamps[1:])), default=0)
     gap_limit = max(1, get_settings().lottery_collection_gap_minutes)
     return {
         "id": row.id, "trading_date": row.trading_date, "symbol": row.symbol,
+        "input_evidence": (row.initial_snapshot or {}).get("input_evidence", {}),
+        "path_evidence": path_evidence(entry, points, row.first_seen_at),
         "option_symbol": row.option_symbol, "expiration": row.expiration,
         "right": row.right, "strike": row.strike, "status": row.status,
         "first_seen_at": row.first_seen_at, "last_qualified_at": row.last_qualified_at,

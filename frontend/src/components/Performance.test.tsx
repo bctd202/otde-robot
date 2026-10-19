@@ -117,6 +117,8 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
     average_return_pct:0,cumulative_return_pct:0}));
   mockResponses(zero,structured);
   render(<Performance/>);
+  expect(screen.queryByRole('button',{name:'Strategy R'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Research'}));
   await waitFor(()=>expect(screen.getByLabelText('Cumulative Strategy R by trading day')).toBeInTheDocument());
   expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=2000'))).toBe(true);
   const strategyMetrics=screen.getByRole('region',{name:'Strategy Performance metrics'});
@@ -142,7 +144,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(money).getByText(/Missing exit prices leave cash tied up/)).toBeInTheDocument();
   fireEvent.click(within(money).getByRole('button',{name:'$250.00'}));
   await waitFor(()=>expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('paper_starting_cash=250'))).toBe(true));
-  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
+  fireEvent.click(screen.getByRole('button',{name:'Signal log'}));
   fireEvent.click(screen.getAllByRole('button',{name:'See play details'})[0]);
   expect(screen.getByText('Technical audit data')).toBeInTheDocument();
   expect(screen.getByText(/Raw repeated alerts remain visible only in aggregate counts/)).toBeInTheDocument();
@@ -161,6 +163,8 @@ test('keeps Strategy R primary and distinguishes directional from raw put moveme
       cumulative_raw_move_pct:-1,cumulative_directional_move_pct:1,resolved:1}]};
   mockResponses(data,response('STRUCTURED_INTRADAY',[]));
   render(<Performance/>);
+  expect(screen.queryByRole('button',{name:'Strategy R'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Research'}));
   await waitFor(()=>expect(screen.getByLabelText('Cumulative Strategy R by trading day')).toBeInTheDocument());
   expect(screen.getByRole('button',{name:'Strategy R'})).toHaveAttribute('aria-pressed','true');
   expect(screen.getByText('Is the strategy growing?')).toBeInTheDocument();
@@ -173,10 +177,10 @@ test('keeps Strategy R primary and distinguishes directional from raw put moveme
   expect(within(directional).getByText('Average Directional Move').closest('.metric')).toHaveTextContent('+1.000%');
   expect(within(directional).getByText('Positive Direction Rate').closest('.metric')).toHaveTextContent('100%');
   expect(within(directional).getByText('Cumulative Directional Move').closest('.metric')).toHaveTextContent('+1.00%');
-  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
+  fireEvent.click(screen.getByRole('button',{name:'Signal log'}));
   expect(screen.getByText('Directional move').closest('div')).toHaveTextContent('+1.00%');
 
-  fireEvent.click(screen.getByRole('button',{name:'Overview'}));
+  fireEvent.click(screen.getByRole('button',{name:'Research'}));
   fireEvent.click(screen.getByRole('button',{name:'Raw Underlying'}));
   expect(screen.getByLabelText('Cumulative raw underlying move by trading day')).toBeInTheDocument();
   expect(screen.getByText('Raw Underlying Movement')).toBeInTheDocument();
@@ -184,7 +188,7 @@ test('keeps Strategy R primary and distinguishes directional from raw put moveme
   expect(within(raw).getByText('Net Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.00%');
   expect(within(raw).getByText('Avg. Raw Underlying Move').closest('.metric')).toHaveTextContent('-1.000%');
   expect(screen.getByText("Shows price movement of the underlying, not the option trade's return. Calls and puts are not direction-adjusted in this view.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
+  fireEvent.click(screen.getByRole('button',{name:'Signal log'}));
   expect(screen.getByText('Raw underlying move').closest('div')).toHaveTextContent('-1.00%');
   expect(screen.queryByText('Total Underlying %')).not.toBeInTheDocument();
 });
@@ -195,7 +199,7 @@ test('keeps structured 5-14 DTE results in a separate dataset',async()=>{
   const structured=response('STRUCTURED_INTRADAY',[structuredSignal]);
   mockResponses(zero,structured);
   render(<Performance/>);
-  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
+  fireEvent.click(screen.getByRole('button',{name:'Signal log'}));
   await waitFor(()=>expect(screen.getByText(/SPY CALL/)).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button',{name:'Structured 5–14 DTE'}));
   await waitFor(()=>expect(screen.getByText(/QQQ CALL/)).toBeInTheDocument());
@@ -212,7 +216,7 @@ test('requests the next server-side performance page',async()=>{
     String(input).includes('page=2')?second:first
   ),{status:200,headers:{'Content-Type':'application/json'}})));
   render(<Performance/>);
-  fireEvent.click(screen.getByRole('button',{name:'Play log'}));
+  fireEvent.click(screen.getByRole('button',{name:'Signal log'}));
   await waitFor(()=>expect(screen.getByText(/SPY CALL/)).toBeInTheDocument());
   expect(vi.mocked(globalThis.fetch).mock.calls.some(([input])=>String(input).includes('page_size=10'))).toBe(true);
   fireEvent.click(within(screen.getByRole('navigation',{name:'Performance log quick pages'})).getByRole('button',{name:'Next page'}));

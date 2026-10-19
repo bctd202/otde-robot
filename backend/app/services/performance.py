@@ -309,6 +309,7 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                             else "directional-liquidity"), strategy_mode=candidate.strategy_mode,
                 strategy_version=candidate.strategy_version,
                 strategy_snapshot={**STRATEGY_SNAPSHOT, "origin": "AUTOMATED",
+                                   "input_evidence": candidate.input_evidence,
                                    "option_research": research_definition(), "strategy_mode": candidate.strategy_mode,
                                    "strategy_version": candidate.strategy_version,
                                    "timeframe_context": candidate.timeframe_context,
@@ -756,8 +757,17 @@ def research_breakdowns(rows: list[SignalPerformance], option_shadows: dict[str,
             for item in sorted(bucket.values(), key=lambda value: (-value["pnl_dollars"], value["label"]))
         ]
 
+    from app.services.session_candles import INPUT_VERSION
+    corrected = [row for row in rows if (row.strategy_snapshot or {}).get("input_evidence", {}).get("input_version") == INPUT_VERSION]
+    corrected_ids = {row.signal_id for row in corrected}
+    legacy = [row for row in rows if row.signal_id not in corrected_ids]
+    input_cohorts = [{"label": label, "selected_plays": len(group),
+                      "resolved_plays": metrics(group)["resolved_signals"],
+                      "total_r": metrics(group)["cumulative_r"]}
+                     for label, group in (("Session-isolated inputs", corrected), ("Legacy inputs · not revalidated", legacy))]
     return {
         "cohorts": cohorts,
+        "input_cohorts": input_cohorts,
         "option_shadow_by_ticker": finish(by_ticker),
         "option_shadow_by_exit_reason": finish(by_exit_reason),
         "cohort_definition": "Core = SPY, QQQ, IWM; Experimental = every other configured ticker.",

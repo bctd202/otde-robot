@@ -56,6 +56,39 @@ class LiveLotteryProvider:
             bid_timestamp=self.now, ask_timestamp=self.now, provider="tradier", data_mode="live")]
 
 
+def test_bearish_discovery_is_separate_forward_tasty_experiment_and_quotes_have_provenance():
+    class BearishTasty(LiveLotteryProvider):
+        def status(self):
+            return super().status().model_copy(update={'provider':'tastytrade'})
+
+        def candles(self, symbol, timeframe='1m'):
+            return [c.model_copy(update={'open':200-c.open,'high':200-c.low,
+                'low':200-c.high,'close':200-c.close}) for c in super().candles(symbol,timeframe)]
+
+        def option_chain(self, symbol, expiration=None):
+            c = super().option_chain(symbol,expiration)[0]
+            return [c.model_copy(update={'provider':'tastytrade','right':'put','delta':-.15,'strike':98.,
+                'option_symbol':f'{symbol}{c.expiration:%y%m%d}P00098000'})]
+
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    provider = BearishTasty()
+    with Session(engine) as db:
+        provider.now = datetime(2026,10,16,10,5,tzinfo=NY)
+        track_lottery_scan(db,provider,['SPY'],provider.now-timedelta(minutes=1),now=provider.now)
+        assert db.scalar(select(LotteryTracker)) is None
+        provider.now = datetime(2026,10,19,10,5,tzinfo=NY)
+        track_lottery_scan(db,provider,['SPY'],provider.now-timedelta(minutes=1),now=provider.now)
+        db.flush()
+        row = db.scalar(select(LotteryTracker))
+        assert row is not None and row.right=='put'
+        assert row.initial_snapshot['input_evidence']['lottery_version']=='lotto-put-session-v2'
+        assert row.initial_snapshot['break_even'] == 97.8
+        point = db.scalar(select(LotteryQuoteSnapshot))
+        assert point.provider == 'tastytrade' and point.data_mode == 'live'
+        assert point.received_at is not None
+
+
 def test_tracker_records_each_scan_and_keeps_marking_after_contract_stops_qualifying():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -141,6 +174,50 @@ def test_trackers_close_after_the_regular_session_without_fabricating_a_close_qu
         assert tracker.status == "CLOSED"
         assert tracker.closed_at is not None
         assert tracker.last_quote_at == last_quote
+
+
+def test_independent_close_housekeeping_works_on_early_close_with_operator_hold(monkeypatch):
+    from app.services import signal_engine
+    from app.db.models import ScannerRuntime
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    market = LiveLotteryProvider()
+    market.now = datetime(2026, 11, 27, 10, 5, tzinfo=NY)
+    with Session(engine) as db:
+        tracked = track_lottery_scan(db, market, ["SPY"], market.now-timedelta(minutes=1), now=market.now)
+        assert len(tracked) == 1
+        tracker_id = tracked[0].id
+        db.add(ScannerRuntime(key="parlay", status="scanning", heartbeat_at=market.now, operator_hold=True))
+        db.commit()
+    monkeypatch.setattr(signal_engine, "SessionLocal", lambda: Session(engine))
+    monkeypatch.setattr(signal_engine, "_BACKGROUND_PROVIDER", None)
+    monkeypatch.setattr(signal_engine, "get_provider", lambda: (_ for _ in ()).throw(AssertionError("No feed work")))
+    close_at = market.now.replace(hour=13, minute=0, second=15)
+    signal_engine.session_close_housekeeping(now=close_at)
+    signal_engine.session_close_housekeeping(now=close_at)
+    with Session(engine) as db:
+        tracker = db.get(LotteryTracker, tracker_id)
+        assert tracker.status == "CLOSED"
+        assert len(tracker_points(db, tracker_id)) == 1  # No synthetic closing quote.
+        assert db.get(ScannerRuntime, "parlay").status == "held_by_operator"
+
+
+def test_close_job_waits_for_final_scan_before_reconciling(monkeypatch):
+    from app.services import signal_engine
+    calls = []
+
+    class ScanLock:
+        def __enter__(self):
+            calls.append("scan_finished")
+
+        def __exit__(self, *_):
+            calls.append("released")
+
+    monkeypatch.setattr(signal_engine, "SCAN_LOCK", ScanLock())
+    monkeypatch.setattr(signal_engine, "_BACKGROUND_PROVIDER", None)
+    monkeypatch.setattr(signal_engine, "reconcile_runtime_on_startup", lambda **_: calls.append("cleanup"))
+    signal_engine.session_close_housekeeping(now=NOW.replace(hour=16, minute=1))
+    assert calls == ["scan_finished", "cleanup", "released"]
 
 
 def test_tracker_api_exposes_the_summary_and_scan_points():

@@ -41,6 +41,8 @@ class LotteryExitScenariosOut(BaseModel):
 
 class LotteryTrackerSummaryOut(BaseModel):
     id: str
+    path_evidence: dict = Field(default_factory=dict)
+    input_evidence: dict = Field(default_factory=dict)
     trading_date: date
     symbol: str
     option_symbol: str

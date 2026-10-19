@@ -44,14 +44,27 @@
 .forward-account{margin:1.2rem 0 2rem;border:1px solid #25877e!important}
 .forward-account>p,.forward-account details p{line-height:1.6}
 .forward-account-dates{font-size:.82rem;opacity:.75}
+.account-equity{margin:1rem 0 1.5rem;padding:1.2rem 0;border-top:1px solid #29424d;border-bottom:1px solid #29424d}
+.account-equity-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.account-equity-heading span{font-size:.75rem;letter-spacing:.08em;color:#9fbdc9}
+.account-equity-heading h4{font-size:2.4rem!important;margin:.4rem 0!important}
+.account-equity-heading p{margin:.4rem 0}.account-equity small{color:#b5c5d3;line-height:1.6}
+.equity-controls{display:flex;flex-wrap:wrap;gap:.4rem;margin:.8rem 0}
+.equity-controls button,.equity-current{padding:.65rem .9rem;min-height:44px;background:#101e30;color:#d8e7ef;border:1px solid #385166;border-radius:8px;cursor:pointer}
+.equity-controls button[aria-pressed=true]{background:#143d3c;color:#79efe0;border-color:#39b6a6}
+.account-equity-svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.account-equity-svg text{font-size:12px}.equity-baseline{stroke:#8393a2;stroke-dasharray:4 5;opacity:.65}
+.equity-inspect{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.82rem;color:#b5c5d3}
+.equity-inspect input{flex:1;min-width:160px;min-height:44px;accent-color:#38ceb6}.equity-current{margin:.5rem 0}
+.equity-method,.equity-empty{color:#c3d1dc;line-height:1.6}
 .forward-account summary{cursor:pointer;padding:.55rem 0}
 .forward-account h4{margin:1.3rem 0 .5rem}
 .forward-ledger-scroll{overflow-x:auto;max-width:100%}
 .forward-ledger-scroll table{width:100%;border-collapse:collapse;font-size:.85rem}
 .forward-ledger-scroll th,.forward-ledger-scroll td{text-align:left;padding:.75rem;border-bottom:1px solid #29414a;vertical-align:top}
 .forward-ledger-scroll pre{max-width:480px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word}
-.forward-pagination{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-top:1rem;flex-wrap:wrap}
-.forward-pagination button{padding:.65rem;border-radius:.5rem;cursor:pointer}
+.forward-pagination{position:static;display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-top:1rem;flex-wrap:wrap;background:#0b1523;color:#c9d9e5;border:1px solid #304557;border-radius:10px;padding:10px;box-shadow:none}
+.forward-pagination button{padding:.65rem;border:1px solid #365368;background:#102333;color:#e4f3fa;border-radius:.5rem;cursor:pointer}
 .forward-pagination button:disabled{opacity:.45;cursor:default}
 .top-navigation a[aria-current="page"]{border-color:#2d6f66;background:#123d39;color:#5eead4}
 .workspace-tabs{display:flex;gap:.55rem;overflow-x:auto;margin:1.15rem 0;padding:.35rem;border:1px solid #2b3d50;border-radius:13px;background:#08111f;scrollbar-width:thin}
@@ -61,3 +74,19 @@
 .lottery-archive-bar{display:flex;align-items:center;flex-wrap:wrap;gap:.8rem;margin:1rem 0;padding:1rem;border:1px solid #8b5a2b;border-radius:13px;background:linear-gradient(110deg,#251a10,#0b1322 75%)}
 .lottery-archive-bar>div:first-child{display:grid;gap:.15rem;margin-right:auto}.lottery-archive-bar span,.lottery-archive-bar label{color:#fbbf24;font-size:.68rem;font-weight:800}.lottery-archive-bar strong{font-size:1rem}.lottery-archive-bar label{display:grid;gap:.25rem}.lottery-archive-bar select{min-width:180px;padding:.6rem .75rem;border:1px solid #9a6b3b;border-radius:8px;background:#111c2e;color:#f3f7fb;font:inherit}.lottery-session-buttons{display:flex;gap:.4rem}.lottery-session-buttons button{padding:.6rem .75rem;border:1px solid #9a6b3b;border-radius:8px;background:#2a190e;color:#fed7aa;font:inherit;font-size:.72rem;cursor:pointer}.lottery-session-buttons button:disabled{opacity:.4;cursor:default}.lottery-archive-bar>small{flex-basis:100%;color:#aeb9c8;font-size:.68rem}
 @media(max-width:600px){.workspace-tabs button{padding:.6rem .8rem}.lottery-archive-bar label,.lottery-archive-bar select{width:100%}.lottery-session-buttons{width:100%}.lottery-session-buttons button{flex:1}}
+.account-trial-selector {display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}
+.account-trial-selector select {max-width:100%;min-height:44px;background:#101f2d;color:#e3edf5;border:1px solid #355568;border-radius:8px;padding:8px;font:inherit}
+.trade-result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;margin-top:18px}
+.trade-result-card{padding:18px;border:1px solid var(--border,#304557);border-radius:16px;background:rgba(10,24,38,.5);min-width:0}
+.trade-result-card header{display:flex;flex-direction:column;gap:6px;overflow-wrap:anywhere}
+.trade-result-card header span,.trade-result-card small{color:#a5b8c8;font-size:.8rem}
+.trade-cash-flow{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;margin:22px 0}
+.trade-cash-flow span{font-size:.8rem;color:#a5b8c8}
+.trade-cash-flow strong{display:block;font-size:1.35rem;color:#edf6fa;margin-top:6px;overflow-wrap:anywhere}
+.trade-result-card h4{font-size:1.15rem;margin:12px 0}
+.trade-result-card details,.forward-account>details{margin-top:18px;font-size:.85rem}
+.trade-result-card pre,.forward-account pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:.75rem}
+.lottery-wave{min-width:0;border:1px solid #304557;border-radius:14px;padding:12px}
+.lottery-wave summary{cursor:pointer;padding:10px;color:#68e4d1;line-height:1.6}
+.lottery-wave .lottery-log-card{margin-top:14px}
+@media(max-width:380px){.trade-cash-flow{gap:8px}.trade-cash-flow strong{font-size:1.05rem;overflow-wrap:normal}}
