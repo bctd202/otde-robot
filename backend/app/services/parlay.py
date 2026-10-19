@@ -6,13 +6,14 @@ from zoneinfo import ZoneInfo
 from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.indicators import opening_range, spread_pct, vwap
 from app.services.contracts import annotate_chain
+from app.services.session_candles import session_candles, session_evidence
 
 Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
 NY = ZoneInfo("America/New_York")
 PRODUCTION_TIMEFRAME = "1m"
 STRATEGY_MODE: Literal["ONE_MIN_0DTE"] = "ONE_MIN_0DTE"
-STRATEGY_VERSION = "parlay-v1"
+STRATEGY_VERSION = "parlay-v1-session-v2"
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,7 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
             candidate.ranking_position = position
         return output
     quotes = {}
+    input_evidence = {}
     # Prefer one batched market-data request. Fall back to isolated calls when
     # the provider rejects a batch so one malformed flex symbol cannot block it.
     try:
@@ -168,8 +170,9 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
             candles = provider.candles(symbol, PRODUCTION_TIMEFRAME)
         except (KeyError, TypeError, ValueError):
             candles = []
-        if completed_at is not None:
-            candles = [candle for candle in candles if _utc(candle.timestamp) <= _utc(completed_at)]
+        boundary = completed_at or latest_completed_candle_at(quote.timestamp)
+        candles = session_candles(candles, boundary)
+        input_evidence[symbol] = session_evidence(candles, boundary)
         if not completed_candle_history_ready(candles, completed_at, 8):
             reason = ("Candles unavailable" if len(candles) < 8
                       else "Latest completed candle unavailable")
@@ -262,4 +265,6 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
     output.sort(key=lambda item: (order[item.signal_status], -item.score, item.symbol))
     for position, candidate in enumerate(output, 1):
         candidate.ranking_position = position
+        candidate.strategy_version = STRATEGY_VERSION
+        candidate.input_evidence = input_evidence.get(candidate.symbol, {})
     return output

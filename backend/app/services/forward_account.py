@@ -10,14 +10,19 @@ import math
 from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.db.models import (AutomatedOptionMark, ForwardPaperAccount,
-                           ForwardPaperEvent, ForwardPaperPosition, SignalPerformance)
+                           ForwardPaperEvent, ForwardPaperPosition, SignalPerformance,
+                           ForwardPaperEquitySnapshot)
 from app.services.contracts import validate_exit_quote
 from app.services.market_calendar import HOLIDAYS_BY_YEAR, NY, is_market_day, market_close, market_session
 from app.services.option_research import utc
+from app.services.session_candles import INPUT_VERSION
 
-KEY = "forward-cash-v1"
+LEGACY_KEY = "forward-cash-v1"
+# A permanent research identity, not a reset-on-restart or weekly-reset setting.
+KEY = "tasty-session-v2-20261019"
+TRIAL_START = datetime(2026, 10, 19, 9, 30, tzinfo=NY).astimezone(timezone.utc)
+STARTING_CASH = 2000
 HELD = ("OPEN", "UNPRICED")
 
 
@@ -33,16 +38,23 @@ def _event(db: Session, kind: str, key: str, now: datetime, *, settled: int = 0,
     db.flush()
 
 
-def ensure_account(db: Session, now: datetime) -> ForwardPaperAccount:
+def ensure_account(db: Session, now: datetime) -> ForwardPaperAccount | None:
     account = db.get(ForwardPaperAccount, KEY)
     if account is not None:
         return account
-    starting = get_settings().paper_money_starting_cash
+    if utc(now) < TRIAL_START:
+        return None
+    starting = STARTING_CASH
     if not math.isfinite(starting) or starting <= 0:
         raise ValueError("Forward starting cash must be finite and positive")
     account = ForwardPaperAccount(key=KEY, activated_at=utc(now), processed_at=utc(now), revision=0,
         mark_watermark=db.scalar(select(func.max(AutomatedOptionMark.id))) or 0,
         policy={"version": KEY, "starting_cash_cents": cents(starting), "quantity": 1,
+            "label": "Tastytrade · corrected trial", "scheduled_start": TRIAL_START.isoformat(),
+            "required_provider": "tastytrade", "required_input_version": INPUT_VERSION,
+            "strategy_versions": {"ONE_MIN_0DTE": "parlay-v1-session-v2",
+                                  "STRUCTURED_INTRADAY": "structured-intraday-v1-session-v2"},
+            "legacy_account": LEGACY_KEY,
             "max_positions": 3, "max_entry_cents": 10000,
             "opening_commission_cents": 100, "closing_commission_cents": 0,
             "fee_allowance_per_side_cents": 50, "slippage_premium_cents": 1,
@@ -55,6 +67,7 @@ def ensure_account(db: Session, now: datetime) -> ForwardPaperAccount:
     db.flush()
     _event(db, "FUNDING", "funding", utc(now), settled=cents(starting),
            detail={"reason": "New simulated capital; historical trades excluded", "policy": account.policy})
+    _record_equity_snapshot(db, account, utc(now))
     return account
 
 
@@ -93,7 +106,8 @@ def _quote(provider, mark: AutomatedOptionMark, now: datetime, earliest: datetim
     for quote in chain:
         decision = validate_exit_quote(quote, mark.ticker, mark.normalized_option_symbol,
             max(earliest, now-timedelta(seconds=policy["quote_age_seconds"])), policy["quote_age_seconds"])
-        if (decision.actionable and math.isfinite(quote.bid) and math.isfinite(quote.ask)
+        if (decision.actionable and quote.provider == policy["required_provider"]
+                and math.isfinite(quote.bid) and math.isfinite(quote.ask)
                 and quote.bid_timestamp is not None and quote.ask_timestamp is not None
                 and max(utc(quote.bid_timestamp), utc(quote.ask_timestamp)) <= now
                 and quote.expiration == mark.expiration and quote.strike == mark.strike
@@ -108,10 +122,10 @@ def _evidence(quote, now: datetime) -> dict:
         "provider": quote.provider, "data_mode": quote.data_mode, "option_symbol": quote.option_symbol}
 
 
-def _balance(db: Session) -> tuple[int, int]:
+def _balance(db: Session, account_key: str = KEY) -> tuple[int, int]:
     result = db.execute(select(func.coalesce(func.sum(ForwardPaperEvent.settled_cents), 0),
         func.coalesce(func.sum(ForwardPaperEvent.unsettled_cents), 0)).where(
-            ForwardPaperEvent.account_key == KEY)).one()
+            ForwardPaperEvent.account_key == account_key)).one()
     return int(result[0]), int(result[1])
 
 
@@ -161,6 +175,8 @@ def refresh_account_quotes(db: Session, provider, *, now: datetime | None = None
 def advance_account(db: Session, provider=None, *, now: datetime | None = None) -> None:
     now = utc(now or datetime.now(timezone.utc))
     account = ensure_account(db, now)
+    if account is None:
+        return
     # Acquire a writer lock before reading projections; events and state commit
     # atomically. The scanner also owns a process-wide lock.
     db.execute(update(ForwardPaperAccount).where(ForwardPaperAccount.key == KEY).values(
@@ -269,7 +285,13 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
         assert mark is not None and row is not None
         age = (now-utc(mark.created_at)).total_seconds()
         reason = None
-        if row.exit_reason != "OPEN":
+        evidence = (row.strategy_snapshot or {}).get("input_evidence", {})
+        if (mark.provider != policy["required_provider"] or mark.data_mode != "live"
+                or row.strategy_version != policy["strategy_versions"].get(mark.strategy_mode)
+                or evidence.get("input_version") != policy["required_input_version"]
+                or evidence.get("session_date") != mark.trading_date.isoformat()):
+            reason = "Outside corrected Tastytrade trial: provider, strategy version or session evidence does not match"
+        elif row.exit_reason != "OPEN":
             reason = "Underlying play already resolved before a simulated entry"
         elif age < 0 or age > policy["entry_deadline_seconds"]:
             reason = "Entry deadline missed; historical or downtime signals are not backfilled"
@@ -310,20 +332,100 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                 detail={"position_id": position.id, "ticker": detail["ticker"], "reason": reason})
         position.detail = detail
     db.flush()
+    _record_equity_snapshot(db, account, now)
 
 
-def account_summary(db: Session, *, page: int = 1, now: datetime | None = None) -> dict:
+def _valuation(active: list[ForwardPaperPosition], policy: dict, now: datetime, *, archived: bool = False) -> dict:
+    close_fee = policy["closing_commission_cents"]+policy["fee_allowance_per_side_cents"]
+    unknown = unknown_debit = known_value = reserve = open_fees = 0
+    for position in active:
+        if position.status not in HELD:
+            continue
+        reserve += close_fee
+        open_fees += position.detail["entry_fee_cents"]
+        valuation = position.detail.get("valuation")
+        if (not archived and position.status == "OPEN" and valuation and market_session(now) == "regular"
+                and all(0 <= (now-datetime.fromisoformat(valuation[key])).total_seconds()
+                        <= policy["quote_age_seconds"] for key in ("bid_at", "ask_at"))):
+            known_value += max(0, cents(valuation["bid"]*100)-policy["slippage_premium_cents"]*100)-close_fee
+        else:
+            unknown += 1
+            unknown_debit += position.detail["entry_debit_cents"]
+    return {"reserved_exit_fees_cents": reserve, "open_entry_fees_cents": open_fees,
+            "known_liquidation_cents": known_value, "unpriced_positions": unknown,
+            "unpriced_debit_cents": unknown_debit}
+
+
+def _record_equity_snapshot(db: Session, account: ForwardPaperAccount, now: datetime) -> None:
+    # Account writer lock is already held. Duplicate/replayed ticks cannot change
+    # previous observations; GET never calls this method or manufactures history.
+    if db.scalar(select(ForwardPaperEquitySnapshot.id).where(
+            ForwardPaperEquitySnapshot.account_key == account.key,
+            ForwardPaperEquitySnapshot.observed_at == now)) is not None:
+        return
+    held = list(db.scalars(select(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key == account.key, ForwardPaperPosition.status.in_(HELD))).all())
+    value = _valuation(held, account.policy, now)
+    settled, unsettled = _balance(db, account.key)
+    equity = None if value["unpriced_positions"] else settled+unsettled+value["known_liquidation_cents"]
+    db.add(ForwardPaperEquitySnapshot(account_key=account.key, observed_at=now,
+        trading_date=now.astimezone(NY).date(), cash_cents=settled+unsettled,
+        equity_cents=equity, unpriced_positions=value["unpriced_positions"],
+        detail={"basis": "CASH_PLUS_VERIFIED_BID_LESS_MODELED_EXIT_COSTS", "policy_version": account.policy["version"],
+                "positions": [{"id": p.id, "status": p.status, "valuation": p.detail.get("valuation"),
+                               "strategy_version": p.detail.get("strategy_version")} for p in held]}))
+    db.flush()
+
+
+def _equity_history(db: Session, account: ForwardPaperAccount) -> dict:
+    snapshots = ForwardPaperEquitySnapshot
+    # End-of-day points for long ranges; minute observations only for the most
+    # recent recorded day. Never pull all quote-evidence JSON into dashboard polls.
+    daily_ids = select(func.max(snapshots.id)).where(snapshots.account_key == account.key).group_by(snapshots.trading_date)
+    columns = (snapshots.observed_at, snapshots.trading_date, snapshots.equity_cents, snapshots.unpriced_positions)
+    daily = db.execute(select(*columns).where(snapshots.id.in_(daily_ids)).order_by(snapshots.observed_at)).all()
+    latest_day = daily[-1].trading_date if daily else None
+    intraday = db.execute(select(*columns).where(snapshots.account_key == account.key,
+        snapshots.trading_date == latest_day).order_by(snapshots.observed_at)).all() if daily else []
+    first = db.scalar(select(func.min(snapshots.observed_at)).where(snapshots.account_key == account.key))
+    baseline = account.policy["starting_cash_cents"]
+
+    def point(row):
+        return {"at": utc(row.observed_at).isoformat(), "date": row.trading_date.isoformat(),
+                "equity_cents": row.equity_cents, "unpriced_positions": row.unpriced_positions,
+                "return_percent": None if row.equity_cents is None else round((row.equity_cents-baseline)/baseline*100, 6)}
+
+    return {"baseline_cents": baseline, "started_at": utc(first).isoformat() if first else None,
+            "daily": [point(row) for row in daily], "intraday": [point(row) for row in intraday],
+            "basis": "Observed simulated liquidation equity after modeled costs; return since original funding. No backfill."}
+
+
+def account_catalog(db: Session) -> list[dict]:
+    accounts = [{"key": KEY, "label": "Tastytrade · corrected trial", "archived": False}]
+    accounts.extend({"key": key, "label": f"Legacy research · {key}", "archived": True}
+                    for key in db.scalars(select(ForwardPaperAccount.key).where(
+                        ForwardPaperAccount.key != KEY).order_by(ForwardPaperAccount.activated_at.desc())))
+    return accounts
+
+
+def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: datetime | None = None) -> dict:
     now = utc(now or datetime.now(timezone.utc))
-    account = db.get(ForwardPaperAccount, KEY)
+    catalog = account_catalog(db)
+    account = db.get(ForwardPaperAccount, account_key)
     if account is None:
-        return {"status": "NOT_STARTED", "paper_only": True}
+        if account_key != KEY:
+            raise ValueError("Unknown paper research account")
+        return {"status": "SCHEDULED" if now < TRIAL_START else "NOT_STARTED", "paper_only": True,
+                "account_key": KEY, "accounts": catalog, "scheduled_start": TRIAL_START.isoformat(),
+                "starting_cash_cents": cents(STARTING_CASH)}
+    archived = account_key != KEY
     # Never load every event's potentially large strategy/quote JSON for polling.
     event_totals = db.execute(select(ForwardPaperEvent.occurred_at, ForwardPaperEvent.settled_cents,
         ForwardPaperEvent.unsettled_cents, ForwardPaperEvent.realized_cents, ForwardPaperEvent.fee_cents)
-        .where(ForwardPaperEvent.account_key == KEY).order_by(ForwardPaperEvent.id)
+        .where(ForwardPaperEvent.account_key == account_key).order_by(ForwardPaperEvent.id)
         .execution_options(yield_per=500))
     active = list(db.scalars(select(ForwardPaperPosition).where(
-        ForwardPaperPosition.account_key == KEY,
+        ForwardPaperPosition.account_key == account_key,
         ForwardPaperPosition.status.in_(("PENDING_ENTRY", "OPEN", "UNPRICED", "UNSETTLED")))
         .order_by(ForwardPaperPosition.id)).all())
     settled = unsettled = pnl = fees = 0
@@ -337,38 +439,37 @@ def account_summary(db: Session, *, page: int = 1, now: datetime | None = None) 
         fees += event.fee_cents
         day = utc(event.occurred_at).astimezone(NY).date().isoformat()
         daily[day] = {"date": day, "cash_cents": settled+unsettled, "realized_cents": pnl}
-    close_fee = account.policy["closing_commission_cents"]+account.policy["fee_allowance_per_side_cents"]
-    unknown = unknown_debit = known_value = reserve = open_fees = 0
-    for position in active:
-        if position.status not in HELD:
-            continue
-        reserve += close_fee
-        open_fees += position.detail["entry_fee_cents"]
-        valuation = position.detail.get("valuation")
-        if (position.status == "OPEN" and valuation and market_session(now) == "regular"
-                and all(0 <= (now-datetime.fromisoformat(valuation[key])).total_seconds()
-                        <= account.policy["quote_age_seconds"] for key in ("bid_at", "ask_at"))):
-            known_value += max(0, cents(valuation["bid"]*100)-account.policy["slippage_premium_cents"]*100)-close_fee
-        else:
-            unknown += 1
-            unknown_debit += position.detail["entry_debit_cents"]
+    value = _valuation(active, account.policy, now, archived=archived)
     page_size = 20
     pages = max(1, math.ceil(count/page_size))
+    requested_page = page
     page = max(1, min(page, pages))
-    visible = db.scalars(select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == KEY)
+    visible = db.scalars(select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == account_key)
         .order_by(ForwardPaperEvent.id.desc()).offset((page-1)*page_size).limit(page_size)).all()
-    return {"status": "ACTIVE", "paper_only": True, "account_key": KEY,
+    trade_count = db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key == account_key)) or 0
+    trade_pages = max(1, math.ceil(trade_count/page_size))
+    trade_page = max(1, min(requested_page, trade_pages))
+    trades = db.scalars(select(ForwardPaperPosition).where(ForwardPaperPosition.account_key == account_key)
+        .order_by(ForwardPaperPosition.id.desc()).offset((trade_page-1)*page_size).limit(page_size)).all()
+    return {"status": "ARCHIVED" if archived else "ACTIVE", "paper_only": True, "account_key": account_key,
+        "accounts": catalog,
         "activated_at": utc(account.activated_at).isoformat(), "as_of": now.isoformat(), "policy": account.policy,
         "processed_at": utc(account.processed_at).isoformat(),
-        "processing_stale": market_session(now) == "regular" and (now-utc(account.processed_at)).total_seconds() > 180,
+        "processing_stale": not archived and market_session(now) == "regular" and (now-utc(account.processed_at)).total_seconds() > 180,
         "settled_cents": settled, "unsettled_cents": unsettled,
-        "available_cents": settled-reserve, "reserved_exit_fees_cents": reserve,
-        "realized_cents": pnl, "charged_fees_cents": fees, "open_entry_fees_cents": open_fees,
-        "known_liquidation_cents": known_value, "unpriced_positions": unknown,
-        "unpriced_debit_cents": unknown_debit,
-        "equity_cents": None if unknown else settled+unsettled+known_value,
+        "available_cents": settled-value["reserved_exit_fees_cents"],
+        "realized_cents": pnl, "charged_fees_cents": fees, **value,
+        "equity_cents": None if value["unpriced_positions"] else settled+unsettled+value["known_liquidation_cents"],
+        "equity_history": _equity_history(db, account),
         "daily": list(daily.values()),
         "positions": [{"id": p.id, "status": p.status, **p.detail} for p in active],
+        "trades": [{"id": p.id, "status": p.status, **p.detail,
+                    "estimated_net_proceeds_cents": _valuation([p], account.policy, now)["known_liquidation_cents"]
+                    if not archived and p.status == "OPEN" and not _valuation([p], account.policy, now)["unpriced_positions"] else None,
+                    "net_proceeds_cents": p.detail["sale_cents"]-p.detail.get("exit_fee_cents", 0)
+                    if "sale_cents" in p.detail else None} for p in trades],
+        "trade_pagination": {"page": trade_page, "pages": trade_pages, "total": trade_count},
         "events": [{"id": e.id, "kind": e.kind, "at": utc(e.occurred_at).isoformat(),
             "settled_cents": e.settled_cents, "unsettled_cents": e.unsettled_cents,
             "fee_cents": e.fee_cents, "realized_cents": e.realized_cents, "detail": e.detail} for e in visible],

@@ -1,4 +1,7 @@
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
 
 import httpx
 
@@ -119,7 +122,8 @@ def test_dxlink_snapshot_method_belongs_to_bounded_snapshot_client():
     assert not hasattr(DXLinkCandleStreamClient, "snapshot")
 
 
-def test_tastytrade_persistent_candle_stream_populates_quality_and_can_close():
+def test_tastytrade_persistent_candle_stream_populates_quality_and_can_close(monkeypatch):
+    monkeypatch.setattr("app.market_data.tastytrade._latest_market_date", lambda: date(2026, 9, 2))
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth/token":
             return httpx.Response(200, json={"access_token": "access", "expires_in": 900})
@@ -142,3 +146,51 @@ def test_tastytrade_persistent_candle_stream_populates_quality_and_can_close():
     assert quality["symbols_with_candles"] == 1
     market.close()
     assert market.data_quality_status()["connected"] is False
+
+
+@pytest.mark.parametrize("first,second", [(date(2026, 10, 13), date(2026, 10, 14)),
+                                         (date(2026, 10, 9), date(2026, 10, 12)),
+                                         (date(2026, 9, 4), date(2026, 9, 8))])
+def test_candle_rollover_clears_history_and_rejects_late_old_stream(monkeypatch, first, second):
+    day = [first]
+    streams = []
+
+    class Stream(FakeCandleStream):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.day = args[3].date()
+            streams.append(self)
+
+        def start(self):
+            self.started = True
+
+    def event(day, hour=9, minute=30, close=100):
+        at = datetime.combine(day, datetime.min.time(), ZoneInfo("America/New_York")).replace(hour=hour, minute=minute)
+        return {"eventSymbol": "SPY{=m}", "time": at.timestamp()*1000,
+                "open": close, "high": close+1, "low": close-1, "close": close, "volume": 100}
+
+    market = TastytradeMarketDataProvider("id", "secret", "refresh", "https://api.tastyworks.com", "test/1",
+                                         candle_stream_factory=Stream)
+    monkeypatch.setattr(market, "_quote_credentials", lambda: ("wss://quotes.example", "quote-token"))
+    monkeypatch.setattr("app.market_data.tastytrade._latest_market_date", lambda: day[0])
+    market.start()
+    streams[0].on_events([event(first)])
+    assert len(market.candles("SPY")) == 1
+    day[0] = second
+    market.start()
+    assert streams[0].stopped
+    assert not market._candle_cache
+    # Reject both prior dates from the new stream and callbacks from the old
+    # stream (even if that callback happens to contain a current-day event).
+    streams[0].on_events([event(second, close=999)])
+    streams[1].on_events([event(first), event(second-timedelta(days=1)), event(second, 8),
+                          event(second, 16), event(second, close=102)])
+    rows = market.candles("SPY")
+    assert len(rows) == 1 and rows[0].timestamp.date() == second and rows[0].close == 102
+    market.close()
+    streams[1].on_events([event(second, close=999)])
+    assert not market._candle_cache
+    market.start()  # A same-session restart has a new generation, too.
+    streams[1].on_events([event(second, close=999)])
+    streams[2].on_events([event(second, close=103)])
+    assert market.candles("SPY")[0].close == 103

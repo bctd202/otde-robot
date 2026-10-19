@@ -10,10 +10,11 @@ from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.contracts import annotate_chain
 from app.services.indicators import spread_pct, vwap
 from app.services.parlay import completed_candle_history_ready, session_candle_requirement
+from app.services.session_candles import session_candles, session_evidence
 
 NY = ZoneInfo("America/New_York")
 STRATEGY_MODE: Literal["STRUCTURED_INTRADAY"] = "STRUCTURED_INTRADAY"
-STRATEGY_VERSION = "structured-intraday-v1"
+STRATEGY_VERSION = "structured-intraday-v1-session-v2"
 Direction = Literal["call", "put"]
 
 
@@ -44,7 +45,7 @@ def _completed_bars(rows: list[CandleOut], minutes: int, completed_at: datetime)
 def evaluate_structured_setup(candles: list[CandleOut], underlying_price: float,
                               completed_at: datetime) -> StructuredEvaluation:
     """Deterministic slower intraday model: 1H bias, 15M sweep, 5M shift, controlled retest."""
-    rows = [row for row in candles if _utc(row.timestamp) <= _utc(completed_at)]
+    rows = session_candles(candles, completed_at)
     if len(rows) < 60:
         return StructuredEvaluation(None, "PASS", 0, 0, 0, 0, 0, 0, [],
                                     ["Waiting for one full hour of session context"])
@@ -187,7 +188,7 @@ def rank_structured_intraday(provider: Any, symbols: list[str], *,
             candles = provider.candles(symbol, "1m")
         except (AttributeError, KeyError, TypeError, ValueError):
             candles = []
-        candles = [candle for candle in candles if _utc(candle.timestamp) <= _utc(completed_at)]
+        candles = session_candles(candles, completed_at)
         required = session_candle_requirement(completed_at, 60)
         if not completed_candle_history_ready(candles, completed_at, required):
             reason = ("Candles unavailable" if len(candles) < required
@@ -203,6 +204,7 @@ def rank_structured_intraday(provider: Any, symbols: list[str], *,
             reasons=setup.reasons, rejection_reasons=setup.rejection_reasons,
             generated_at=quote.timestamp, data_freshness=f"{status.mode}_current",
             strategy_mode=STRATEGY_MODE, strategy_version=STRATEGY_VERSION,
+            input_evidence=session_evidence(candles, completed_at),
             timeframe_context="1H / 15M / 5M", target_dte="5–14 DTE")
         if setup.status in {"PASS", "WATCH"}:
             action = ("PASS — STRUCTURE NOT ALIGNED" if setup.status == "PASS" else

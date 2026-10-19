@@ -73,6 +73,7 @@ class SetupOut(BaseModel):
 
 class LotteryOut(BaseModel):
     symbol: str
+    input_evidence: dict = Field(default_factory=dict)
 
     option_symbol: str
     normalized_symbol: str | None = None
@@ -139,6 +140,7 @@ class DashboardOut(BaseModel):
 
 class ParlayCandidateOut(BaseModel):
     ranking_position: int = 0
+    input_evidence: dict = Field(default_factory=dict)
     symbol: str
     rank: str
     direction: Literal["call", "put", "none"] = "none"

@@ -11,7 +11,8 @@ from app.services.contracts import validate_contract, validate_exit_quote
 from app.services.parlay import rank_parlays
 from app.services.performance import track_candidates
 
-NOW = datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc)
+# The mock path ends at 10:05 ET; evaluate only after that candle completes.
+NOW = datetime(2026, 8, 4, 14, 6, tzinfo=timezone.utc)
 
 
 def contract(**changes):

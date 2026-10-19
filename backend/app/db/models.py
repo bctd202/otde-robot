@@ -205,6 +205,9 @@ class LotteryQuoteSnapshot(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     tracker_id: Mapped[str] = mapped_column(ForeignKey("lottery_trackers.id"), index=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    data_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     quote_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     bid_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -478,6 +481,39 @@ class AutomatedOptionObservation(Base):
     cohort: Mapped[str] = mapped_column(String(64))
 
 
+class LottoTrialAccount(Base):
+    __tablename__ = "lotto_trial_accounts"
+    key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    policy: Mapped[dict] = mapped_column(JSON)
+
+
+class LottoTrialPosition(Base):
+    __tablename__ = "lotto_trial_positions"
+    __table_args__ = (UniqueConstraint("account_key", "tracker_id", name="uq_lotto_trial_tracker"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("lotto_trial_accounts.key"), index=True)
+    tracker_id: Mapped[str] = mapped_column(ForeignKey("lottery_trackers.id"))
+    status: Mapped[str] = mapped_column(String(24))
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
+class LottoTrialEvent(Base):
+    __tablename__ = "lotto_trial_events"
+    __table_args__ = (UniqueConstraint("account_key", "event_key", name="uq_lotto_trial_event"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("lotto_trial_accounts.key"), index=True)
+    event_key: Mapped[str] = mapped_column(String(120))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    settled: Mapped[int] = mapped_column(Integer, default=0)
+    unsettled: Mapped[int] = mapped_column(Integer, default=0)
+    realized: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
 class ForwardPaperAccount(Base):
     __tablename__ = "forward_paper_accounts"
     key: Mapped[str] = mapped_column(String(48), primary_key=True)
@@ -513,6 +549,21 @@ class ForwardPaperEvent(Base):
     unsettled_cents: Mapped[int] = mapped_column(Integer)
     fee_cents: Mapped[int] = mapped_column(Integer)
     realized_cents: Mapped[int] = mapped_column(Integer)
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
+class ForwardPaperEquitySnapshot(Base):
+    """Append-only observed valuations, separate from immutable cash events."""
+    __tablename__ = "forward_paper_equity_snapshots"
+    __table_args__ = (UniqueConstraint("account_key", "observed_at", name="uq_forward_equity_observation"),
+                     Index("ix_forward_equity_account_day", "account_key", "trading_date", "id"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("forward_paper_accounts.key"))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    trading_date: Mapped[date] = mapped_column(Date)
+    cash_cents: Mapped[int] = mapped_column(Integer)
+    equity_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unpriced_positions: Mapped[int] = mapped_column(Integer)
     detail: Mapped[dict] = mapped_column(JSON)
 
 

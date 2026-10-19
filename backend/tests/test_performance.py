@@ -126,6 +126,7 @@ def test_research_breakdowns_compare_cohorts_and_option_evidence_without_mutatio
     spy = row(signal_id="spy", ticker="SPY")
     spy.exit_reason = "TARGET"; spy.exit_at = spy.triggered_at + timedelta(minutes=5)
     spy.exit_price = 102; spy.result_r = 2; spy.duration_minutes = 5
+    spy.strategy_snapshot = {"input_evidence": {"input_version": "current-session-v2"}}
     tsla = row(signal_id="tsla", ticker="TSLA")
     tsla.exit_reason = "STOP"; tsla.exit_at = tsla.triggered_at + timedelta(minutes=4)
     tsla.exit_price = 99; tsla.result_r = -1; tsla.duration_minutes = 4
@@ -141,6 +142,10 @@ def test_research_breakdowns_compare_cohorts_and_option_evidence_without_mutatio
         {"label": "TSLA", "closed_with_quote": 1, "wins": 0, "losses": 1, "pnl_dollars": -40.0},
     ]
     assert breakdown["historical_records_changed"] is False
+    assert breakdown["input_cohorts"] == [
+        {"label": "Session-isolated inputs", "selected_plays": 1, "resolved_plays": 1, "total_r": 2},
+        {"label": "Legacy inputs · not revalidated", "selected_plays": 1, "resolved_plays": 1, "total_r": -1},
+    ]
     assert (spy.result_r, tsla.result_r) == (2, -1)
 
 

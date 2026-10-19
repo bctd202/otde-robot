@@ -1,5 +1,9 @@
 # Forward simulated cash account (v1)
 
+> Historical v1 specification. The October 19 corrected trial supersedes v1 as
+> the active account. V1 remains read-only with its original balances, policy,
+> and unresolved positions. See [trial isolation and archive procedure](CORRECTED_TRIAL.md).
+
 This is a constrained **simulation**, not brokerage paper fills or live trading.
 Quoted prices do not guarantee execution. No order endpoint is called.
 

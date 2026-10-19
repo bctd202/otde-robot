@@ -1,7 +1,9 @@
 import {useEffect,useState} from 'react';
 import {getForwardPaperAccount} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
-import type {ForwardAccount} from '../types';
+import type {ForwardAccount,PaperAccountChoice} from '../types';
+import {AccountEquityChart} from './AccountEquityChart';
+import {TradeResultCards} from './TradeResultCards';
 
 const money=(cents:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100);
 const human=(text:string)=>text.replaceAll('_',' ').toLowerCase();
@@ -23,27 +25,42 @@ function MoneyChart({daily,field,title}:{daily:ForwardAccount['daily'];field:'ca
 export function ForwardPaperAccount(){
   const [data,setData]=useState<ForwardAccount|null>(null);
   const [page,setPage]=useState(1);
+  const [pane,setPane]=useState<'ACCOUNT'|'TRADES'|'DETAILS'>('ACCOUNT');
+  const [accountKey,setAccountKey]=useState<string>();
+  const [accounts,setAccounts]=useState<PaperAccountChoice[]>([]);
   const [status,setStatus]=useState('Loading the forward account…');
   const [error,setError]=useState('');
   useEffect(()=>{
     let active=true;
-    const load=()=>getForwardPaperAccount(page).then(result=>{
+    const load=()=>getForwardPaperAccount(page,accountKey).then(result=>{
       if(!active)return;
-      if(result.status==='NOT_STARTED'){setData(null);setStatus('Not started. The scanner will create a new account; historical plays will not be imported.');setError('');return}
-      if(result.status!=='ACTIVE'||!Array.isArray(result.events)||!result.policy)throw new Error('Invalid account response');
+      setAccounts(result.accounts??[]);
+      if(result.status==='SCHEDULED'||result.status==='NOT_STARTED'){
+        setData(null);setStatus(result.status==='SCHEDULED'
+          ? `Scheduled for ${formatEasternDateTime(result.scheduled_start!)}. A separate ${money(result.starting_cash_cents!)} paper trial will start when the scanner next processes the account on or after that time. No old trades or positions will be imported.`
+          : 'Not started. Waiting for the scanner to initialize the corrected trial. Historical plays will not be imported.');setError('');return;
+      }
+      if((result.status!=='ACTIVE'&&result.status!=='ARCHIVED')||!Array.isArray(result.events)||!result.policy)throw new Error('Invalid account response');
       setData(result);setError('');
     }).catch(()=>{if(active)setError('Account update unavailable. Any figures below are the last saved response, not a live balance.')});
     void load();const timer=window.setInterval(()=>{void load()},30000);
     return()=>{active=false;window.clearInterval(timer)};
-  },[page]);
+  },[page,accountKey]);
   return <section className="forward-account graph-panel" aria-label="Forward simulated cash account">
     <header><div><span>FORWARD CASH ACCOUNT · SIMULATED, NOT BROKER FILLS</span><h3>What could this account actually keep?</h3></div><strong>{data?`${money(data.policy.starting_cash_cents)} starting cash`:'New account'}</strong></header>
     <p>Both automated engines share this account. Lotto and manual trades stay separate. History filters and replay sliders below do not change it.</p>
+    {accounts.length>0&&<label className="account-trial-selector">Paper trial <select value={accountKey??accounts[0].key} onChange={event=>{setAccountKey(event.target.value);setPage(1);setData(null);setError('');setStatus('Loading selected account…')}}>{accounts.map(account=><option key={account.key} value={account.key}>{account.label}</option>)}</select></label>}
     {error&&<p role="alert" className="execution-warning">{error}</p>}
     {!data&&!error&&<p>{status}</p>}
     {data&&<>
+      <nav className="workspace-tabs" aria-label="Cash account sections">{(['ACCOUNT','TRADES','DETAILS'] as const).map(value=><button key={value} aria-current={pane===value?'page':undefined} onClick={()=>{setPane(value);setPage(1)}}>{value==='ACCOUNT'?'Balance':value==='TRADES'?'Trades':'Account details'}</button>)}</nav>
+      {data.status==='ARCHIVED'?<p className="execution-warning">Legacy research — read-only. These balances and position states are preserved, not settled or forgiven. Held exposure remains unknown; no new entries, exits or settlements are processed here. It is not included in the corrected trial.</p>:<p>Corrected Tastytrade trial — its own starting capital, saved rules and results. Restarting does not reset it. Legacy research is kept separate.</p>}
       <p className="forward-account-dates">Started {formatEasternDateTime(data.activated_at)} · Account last processed {formatEasternDateTime(data.processed_at)} · Snapshot {formatEasternDateTime(data.as_of)}</p>
       {data.processing_stale&&<p role="alert" className="execution-warning">Account processing is behind during market hours. Check scanner health; these figures do not confirm that new entries or exits are being tracked.</p>}
+      {pane==='ACCOUNT'&&<AccountEquityChart key={data.account_key} account={data}/>}
+      {pane!=='DETAILS'&&data.unpriced_positions>0&&<p className="execution-warning">Account result is incomplete: {data.unpriced_positions} held position(s) have unknown value—not zero. Open Account details for the preserved exposure.</p>}
+      {pane==='TRADES'&&<><TradeResultCards trades={data.trades??[]}/><nav className="forward-pagination" aria-label="Paper trade pages"><button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>Previous trades</button><span>Page {data.trade_pagination?.page??1} of {data.trade_pagination?.pages??1}</span><button disabled={page>=(data.trade_pagination?.pages??1)} onClick={()=>setPage(value=>value+1)}>Next trades</button></nav></>}
+      {pane==='DETAILS'&&<>
       <div className="performance-metrics headline-metrics">
         {[
           ['Net realized P/L',money(data.realized_cents)],
@@ -66,6 +83,7 @@ export function ForwardPaperAccount(){
       <h4>Money ledger · every debit, sale, settlement and skip</h4>
       <div className="forward-ledger-scroll"><table><thead><tr><th>Time (ET)</th><th>Event</th><th>Settled cash Δ</th><th>Unsettled Δ</th><th>Evidence</th></tr></thead><tbody>{data.events.map(e=><tr key={e.id}><td>{formatEasternDateTime(e.at)}</td><td>{human(e.kind)}</td><td>{money(e.settled_cents)}</td><td>{money(e.unsettled_cents)}</td><td><details><summary>{e.detail.ticker??'Account'} · {e.detail.reason??'View saved evidence'}</summary><pre>{JSON.stringify(e.detail,null,2)}</pre></details></td></tr>)}</tbody></table></div>
       <div className="forward-pagination"><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Previous cash events</button><span>Page {data.pagination.page} of {data.pagination.pages} · {data.pagination.total} events</span><button disabled={page>=data.pagination.pages} onClick={()=>setPage(p=>p+1)}>Next cash events</button></div>
+      </>}
     </>}
   </section>;
 }

@@ -4,7 +4,8 @@ async function request<T>(path:string):Promise<T> { const response=await fetch(`
 async function send<T>(path:string,body:unknown):Promise<T> { const response=await fetch(`${API}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!response.ok){const detail=await response.json().catch(()=>({detail:`request returned ${response.status}`})) as {detail?:string};throw new Error(detail.detail??`request returned ${response.status}`)}return response.json() as Promise<T> }
 async function remove<T>(path:string):Promise<T> { const response=await fetch(`${API}${path}`,{method:'DELETE'});if(!response.ok)throw new Error(`${path} returned ${response.status}`);return response.json() as Promise<T> }
 export const getDashboard=()=>request<Dashboard>('/dashboard');
-export const getForwardPaperAccount=(page=1)=>request<import('../types').ForwardAccount|{status:'NOT_STARTED';paper_only:true}>(`/forward-paper-account?page=${page}`);
+export const getForwardPaperAccount=(page=1,accountKey?:string)=>request<import('../types').ForwardAccount|import('../types').PendingPaperAccount>(`/forward-paper-account?page=${page}${accountKey?`&account_key=${encodeURIComponent(accountKey)}`:''}`);
+export const getLottoPaperTrial=(page=1,accountKey?:string)=>request<import('../types').LottoTrialResponse>(`/lotto-paper-trials?page=${page}${accountKey?`&account_key=${encodeURIComponent(accountKey)}`:''}`);
 export const getJournal=()=>request<JournalSignal[]>('/journal');
 export const getAnalytics=()=>request<Analytics>('/analytics');
 export const getParlays=()=>request<ParlayResponse>('/parlays');

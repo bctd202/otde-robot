@@ -2,7 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.main import SCANNER_JOB_ID, MarketHoursTrigger, add_scanner_job
+from app.main import SCANNER_JOB_ID, CLOSE_JOB_ID, MarketHoursTrigger, add_scanner_job, add_close_job
 
 NY = ZoneInfo("America/New_York")
 
@@ -61,3 +61,16 @@ def test_scanner_job_prevents_overlap_and_coalesces_missed_runs():
     assert job.max_instances == 1
     assert job.coalesce is True
     assert job.misfire_grace_time == 30
+
+
+def test_close_job_has_an_independent_slot_and_respects_early_close_and_holidays():
+    scheduler = BackgroundScheduler(timezone=NY)
+    scan = add_scanner_job(scheduler, lambda: None)
+    close = add_close_job(scheduler, lambda: None)
+    assert close.id == CLOSE_JOB_ID and close.id != scan.id
+    assert close.max_instances == 1 and close.coalesce and close.misfire_grace_time == 3600
+    early = close.trigger.get_next_fire_time(None, datetime(2026, 11, 27, 12, 59, tzinfo=NY))
+    assert early == datetime(2026, 11, 27, 13, 0, 15, tzinfo=NY)
+    monday = close.trigger.get_next_fire_time(early, early)
+    assert monday == datetime(2026, 11, 30, 16, 0, 15, tzinfo=NY)
+    assert close.trigger.get_next_fire_time(None, datetime(2026, 9, 7, 12, tzinfo=NY)) == datetime(2026, 9, 8, 16, 0, 15, tzinfo=NY)

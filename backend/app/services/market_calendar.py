@@ -74,3 +74,14 @@ def next_scanner_run(now: datetime, second: int = 5) -> datetime:
                 return candidate
         next_open = next_market_open(candidate)
         candidate = next_open.replace(second=scan_second)
+
+
+def next_session_housekeeping(now: datetime) -> datetime:
+    """Independent close job; no provider polling overnight or on closed days."""
+    local = now.astimezone(NY)
+    day = local.date()
+    while True:
+        due = datetime.combine(day, market_close(day), NY) + timedelta(seconds=15)
+        if is_market_day(day) and due > local:
+            return due
+        day += timedelta(days=1)

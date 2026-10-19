@@ -13,7 +13,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
-from app.services.market_calendar import is_market_day
+from app.services.market_calendar import is_market_day, market_close
 
 NY = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
@@ -271,6 +271,8 @@ class TastytradeMarketDataProvider:
         self._candle_cache: dict[tuple[str, str], list[CandleOut]] = {}
         self._candle_cached_at = datetime.min.replace(tzinfo=timezone.utc)
         self._candle_condition = Condition(RLock())
+        self._candle_stream_lock = RLock()
+        self._candle_generation = 0
         self._candle_stream: DXLinkCandleStreamClient | None = None
         self._candle_stream_day: date | None = None
         self._candle_warmup_attempted = False
@@ -380,9 +382,12 @@ class TastytradeMarketDataProvider:
         return self.streamer_factory(url, token,
                                      get_settings().tastytrade_stream_timeout_seconds)
 
-    def _accept_candle_events(self, events: list[dict[str, Any]]) -> None:
+    def _accept_candle_events(self, events: list[dict[str, Any]], *, generation: int | None = None) -> None:
         changed = False
         with self._candle_condition:
+            day = self._candle_stream_day
+            if day is None or (generation is not None and generation != self._candle_generation):
+                return
             for event in events:
                 try:
                     event_symbol = str(event["eventSymbol"])
@@ -390,7 +395,7 @@ class TastytradeMarketDataProvider:
                     stamp = _stamp(event.get("time")).astimezone(NY)
                     # Strategies are regular-session models. Extended-hours bars must not
                     # silently change their indicators or expected candle counts.
-                    if not time(9, 30) <= stamp.time() < time(16, 0):
+                    if stamp.date() != day or not time(9, 30) <= stamp.time() < market_close(day):
                         continue
                     row = CandleOut(symbol=symbol, timeframe="1m", timestamp=stamp,
                         open=float(event["open"]), high=float(event["high"]),
@@ -412,17 +417,36 @@ class TastytradeMarketDataProvider:
         self._ensure_candle_stream()
 
     def close(self) -> None:
-        stream = self._candle_stream
-        if stream is not None:
-            stream.stop()
-        self._candle_stream = None
+        with self._candle_stream_lock:
+            with self._candle_condition:
+                self._candle_generation += 1
+                stream = self._candle_stream
+                self._candle_stream = None
+                self._candle_stream_day = None
+                self._candle_cache.clear()
+            if stream is not None:
+                stream.stop()
 
     def _ensure_candle_stream(self) -> None:
+        with self._candle_stream_lock:
+            self._rotate_candle_stream()
+
+    def _rotate_candle_stream(self) -> None:
         trading_day = _latest_market_date()
         current = self._candle_stream
         if current is not None and self._candle_stream_day == trading_day:
             current.start()
             return
+        # Invalidate callbacks before stopping the old thread. Do not hold the
+        # condition while joining: its callback may be waiting for that lock.
+        with self._candle_condition:
+            self._candle_generation += 1
+            generation = self._candle_generation
+            self._candle_stream = None
+            self._candle_stream_day = trading_day
+            self._candle_cache.clear()
+            self._candle_cached_at = datetime.min.replace(tzinfo=timezone.utc)
+            self._candle_warmup_attempted = False
         if current is not None:
             current.stop()
         credentials = self._quote_credentials()
@@ -432,7 +456,8 @@ class TastytradeMarketDataProvider:
         start = datetime.combine(trading_day, time(9, 30), NY)
         stream = self.candle_stream_factory(
             url, token, get_settings().parlay_symbol_list, start,
-            self._accept_candle_events, get_settings().tastytrade_stream_timeout_seconds,
+            lambda events: self._accept_candle_events(events, generation=generation),
+            get_settings().tastytrade_stream_timeout_seconds,
         )
         self._candle_stream = stream
         self._candle_stream_day = trading_day

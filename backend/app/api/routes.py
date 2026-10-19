@@ -32,7 +32,8 @@ from app.services.paper_positions import (create_position, market_mark,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
 from app.services.option_research import option_path_research
-from app.services.forward_account import account_summary
+from app.services.forward_account import KEY as FORWARD_ACCOUNT_KEY, account_summary
+from app.services.lotto_trials import lotto_trial_summary
 from app.services.performance import (analytics_exclusion_reason, automated_origin,
                                       deduplicate_positions,
                                       execution_cost_analysis, link_paper_position,
@@ -48,8 +49,11 @@ router = APIRouter()
 
 
 @router.get("/forward-paper-account")
-def forward_paper_account(page: int = 1, db: Session = Depends(get_db)):
-    return account_summary(db, page=page)
+def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY, db: Session = Depends(get_db)):
+    try:
+        return account_summary(db, page=page, account_key=account_key)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 def _trading_date() -> date:
     from zoneinfo import ZoneInfo
@@ -256,16 +260,17 @@ def signal_alerts(after_id: int = 0, limit: int = 50, db: Session = Depends(get_
 @router.get("/lottery-trackers", response_model=LotteryTrackerListOut)
 def lottery_trackers(trading_date: date | None = None, limit: int = 50,
                      db: Session = Depends(get_db)):
-    selected_date = trading_date or db.scalar(select(func.max(LotteryTracker.trading_date))) or _trading_date()
+    selected_date = trading_date or db.scalar(select(func.max(LotteryTracker.trading_date)).where(LotteryTracker.right == "call")) or _trading_date()
     bounded_limit = max(1, min(limit, 200))
     rows = list(db.scalars(select(LotteryTracker).where(
         LotteryTracker.trading_date == selected_date,
+        LotteryTracker.right == "call",
     ).order_by(LotteryTracker.first_seen_at.desc())).all())
     serialized = [serialize_tracker(row, tracker_points(db, row.id)) for row in rows]
-    all_rows = list(db.scalars(select(LotteryTracker).order_by(
+    all_rows = list(db.scalars(select(LotteryTracker).where(LotteryTracker.right == "call").order_by(
         LotteryTracker.first_seen_at, LotteryTracker.option_symbol)).all())
     all_serialized = [serialize_tracker(row, tracker_points(db, row.id)) for row in all_rows]
-    available_dates = list(db.scalars(select(LotteryTracker.trading_date).distinct()
+    available_dates = list(db.scalars(select(LotteryTracker.trading_date).where(LotteryTracker.right == "call").distinct()
                                       .order_by(LotteryTracker.trading_date.desc())).all())
     return LotteryTrackerListOut(
         trading_date=selected_date,
@@ -277,6 +282,14 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
                   for row in serialized[:bounded_limit]],
         cash_tracker=LotteryCashTrackerOut.model_validate(lottery_cash_tracker(all_serialized)),
     )
+
+
+@router.get("/lotto-paper-trials")
+def lotto_paper_trials(account_key: str | None = None, page: int = 1, db: Session = Depends(get_db)):
+    try:
+        return lotto_trial_summary(db, account_key, page)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/lottery-trackers/{tracker_id}", response_model=LotteryTrackerDetailOut)
