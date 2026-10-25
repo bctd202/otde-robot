@@ -177,9 +177,14 @@ export interface MoneyTrade {
   tracker_id?:string;[key:string]:unknown;
 }
 
+export interface LottoTrialChoice {key:string;label:string;scope:'combined'|'directional'}
+export interface LottoDirectionResult {
+  right:'call'|'put';entered:number;closed:number;open:number;unpriced:number;pending:number;skipped:number;realized_cents:number;
+}
 export interface LottoTrialActive extends Pick<ForwardAccount,'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'> {
-  status:'ACTIVE';accounts:{key:string;label:string}[];policy:{starting_cash_cents:number;[key:string]:unknown};
+  status:'ACTIVE';accounts:LottoTrialChoice[];policy:{starting_cash_cents:number;[key:string]:unknown};
   settled_cents:number;unsettled_cents:number;realized_cents:number;unpriced_positions:number;
+  direction_breakdown:LottoDirectionResult[];
   trades:MoneyTrade[];pagination:{page:number;pages:number;total:number};
 }
-export type LottoTrialResponse=LottoTrialActive|{status:'SCHEDULED'|'NOT_STARTED';accounts:{key:string;label:string}[];scheduled_start:string};
+export type LottoTrialResponse=LottoTrialActive|{status:'SCHEDULED'|'NOT_STARTED';account_key:string;accounts:LottoTrialChoice[];scheduled_start:string};
