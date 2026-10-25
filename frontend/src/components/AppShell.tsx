@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import type {ReactNode} from 'react';
 import type {ParlayResponse} from '../types';
 import {formatEasternDateTime} from '../lib/dates';
+import {CollectionChecks} from './EvidenceChecks';
 
 export const appPages=['parlay','lottery','performance','backtest-lab'] as const;
 export type AppPage=typeof appPages[number];
@@ -45,6 +46,7 @@ export function AppShell({activePage,onNavigate,data,stale,refreshing,onRefresh,
           <span>{market}{health?.operator_hold?' · Scanner held':''}</span>
           <span className={!online||stale?'connection-warning':'connection-state'} role="status">{connection}</span>
           <small className="last-scan">Last completed scan: {lastScan?formatEasternDateTime(lastScan):'Not yet verified'}</small>
+          <CollectionChecks evidence={health?.collection_evidence}/>
         </div>
         <button className="app-refresh" disabled={refreshing} onClick={onRefresh} aria-label="Refresh workspace" title="Refresh saved server data">↻<span>{refreshing?'Checking':'Refresh'}</span></button>
       </header>

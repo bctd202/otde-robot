@@ -169,6 +169,10 @@ def test_startup_reconciliation_repairs_stale_scanning_state(monkeypatch):
         assert runtime.last_error is None
         assert runtime.next_evaluation_at is not None
     assert housekeeping == [NOW + timedelta(hours=8)]
+    # SQLite strips offsets: persist UTC, not 09:30 Eastern labeled as UTC.
+    with Session(engine) as db:
+        runtime = db.get(ScannerRuntime, signal_engine.ENGINE_KEY)
+        assert runtime.next_evaluation_at == datetime(2026, 8, 6, 13, 30)
 
 
 def test_background_scanner_operator_hold_blocks_regular_session_provider_work(monkeypatch):

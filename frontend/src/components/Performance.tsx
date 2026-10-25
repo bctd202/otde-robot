@@ -3,6 +3,7 @@ import {getPerformance} from '../api/client';
 import {formatEasternDateTime} from '../lib/dates';
 import {OneMinuteRules,OptionResearchLab} from './OptionResearchLab';
 import {ForwardPaperAccount} from './ForwardPaperAccount';
+import {ShadowEvidenceChecks} from './EvidenceChecks';
 import type {ExecutionCostAnalysis,OptionShadowBreakdown,PaperMoneyPortfolio,PerformanceDailyPoint,PerformanceResponse,PerformanceSignal,ResearchCohort} from '../types';
 
 type OutcomeUnit='R'|'DIRECTIONAL'|'RAW';
@@ -284,6 +285,7 @@ export function Performance(){
       {data.option_path_research&&<OptionResearchLab data={data.option_path_research}/>}</>}
       {pane==='EXECUTION'&&<>
       <p className="performance-method">Option quote coverage: {data.option_shadow_metrics.closed_with_quote} priced exits / {data.metrics.total_triggered_signals} selected plays ({data.option_shadow_metrics.selected_quote_coverage_percent??'—'}%). The tracked-entry coverage below excludes plays without an entry mark. R drawdown is calculated in entry-time order, not as a cash-account drawdown.</p>
+      <ShadowEvidenceChecks audit={data.option_shadow_metrics.evidence_audit}/>
       <section className="option-shadow"><header><div><span>REAL OPTION EVIDENCE · FORWARD ONLY</span><h3>Automated ask-to-bid shadow</h3></div><strong>{data.option_shadow_metrics.quote_coverage_percent}% of tracked exits quoted</strong></header><div className="shadow-layout"><OptionEquityChart points={data.chart_data.daily}/><div className="shadow-stats"><div><span>Tracked</span><strong>{data.option_shadow_metrics.tracked_positions}</strong></div><div><span>Closed with quote</span><strong>{data.option_shadow_metrics.closed_with_quote}</strong></div><div><span>Quote gaps</span><strong>{data.option_shadow_metrics.quote_gaps}</strong></div><div><span>Shadow P/L</span><strong>{dollars.format(data.option_shadow_metrics.cumulative_pnl_dollars)}</strong></div><p>Entry is the verified ask. Exit is the first verified bid after the underlying exit. This never mixes into underlying-R headlines.</p></div></div><div className="shadow-breakdown-grid"><ShadowBreakdownGraph title="P/L by ticker" rows={data.research_breakdowns.option_shadow_by_ticker}/><ShadowBreakdownGraph title="P/L by underlying exit" rows={data.research_breakdowns.option_shadow_by_exit_reason}/></div></section>
       <PaperMoneyPanel data={data} loading={loading} onStartingCashChange={setPaperStartingCash}/>
       </>}

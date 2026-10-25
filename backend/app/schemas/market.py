@@ -204,6 +204,7 @@ class ScannerHealth(BaseModel):
     market_session: str = "unknown"
     next_market_open_at: datetime | None = None
     schedule_mode: str = "REGULAR_MARKET_HOURS"
+    collection_evidence: dict = Field(default_factory=dict)
 
     @field_validator("heartbeat_at", "last_scan_started_at", "last_completed_scan_at",
                      "last_successful_completion_at", "evaluation_candle_at", "next_evaluation_at",

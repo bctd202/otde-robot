@@ -436,7 +436,8 @@ def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
         if session != "regular":
             expire_stale_lifecycles(db, started_at)
             runtime.status = "held_by_operator" if runtime.operator_hold else "idle_market_closed"
-            runtime.next_evaluation_at = None if runtime.operator_hold else next_market_open(started_at)
+            runtime.next_evaluation_at = (None if runtime.operator_hold else
+                                          next_market_open(started_at).astimezone(timezone.utc))
         elif runtime.operator_hold:
             runtime.status = "held_by_operator"
             runtime.next_evaluation_at = None
