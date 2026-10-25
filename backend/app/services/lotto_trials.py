@@ -1,4 +1,4 @@
-"""Prospective, paired-entry lotto experiments. No orders or historical replay."""
+"""Prospective lotto accounts, with preserved directional comparisons. No orders."""
 from datetime import datetime, timedelta, timezone
 import math
 
@@ -12,9 +12,12 @@ from app.services.option_research import utc
 
 RULES = ("fixed5", "trail40")
 HELD = ("OPEN", "UNPRICED")
+SHARED_TRIAL_START = datetime(2026, 10, 26, 13, 30, tzinfo=timezone.utc)
 
 
 def key_for(right: str, rule: str) -> str:
+    if right == "both":
+        return f"lotto-v2-20261026-both-{rule}"
     return f"lotto-v1-20261019-{right}-{rule}"
 
 
@@ -35,7 +38,10 @@ def ensure_lotto_trials(db: Session, now: datetime) -> None:
     now = utc(now)
     if now < TRIAL_START:
         return
-    for right in ("call", "put"):
+    for right in ("call", "put", "both"):
+        start = SHARED_TRIAL_START if right == "both" else TRIAL_START
+        if now < start:
+            continue
         for rule in RULES:
             key = key_for(right, rule)
             if db.get(LottoTrialAccount, key) is not None:
@@ -46,8 +52,11 @@ def ensure_lotto_trials(db: Session, now: datetime) -> None:
                 "quote_age_seconds": 60, "entry_deadline_seconds": 120, "exit_deadline_seconds": 180,
                 "target_multiple": 5, "trail_activation_multiple": 2, "trail_fraction": .40,
                 "provider": "tastytrade", "input_version": "current-session-v2",
-                "selection": "Paired entries; score descending, spread ascending, symbol ascending; one ticker/day",
-                "scheduled_start": TRIAL_START.isoformat(), "live_orders": False}
+                "selection": ("Shared CALL/PUT cash; independent exit-rule account; "
+                              "discovery time, score descending, spread ascending, symbol ascending; one ticker/day"
+                              if right == "both" else
+                              "Paired entries; score descending, spread ascending, symbol ascending; one ticker/day"),
+                "scheduled_start": start.isoformat(), "live_orders": False}
             db.add(LottoTrialAccount(key=key, activated_at=now, processed_at=now, revision=0, policy=policy))
             db.flush()
             event(db, key, "FUNDING", "funding", now, settled=50000, detail={"policy": policy})
@@ -157,8 +166,10 @@ def _paired_entries(db, accounts, positions, now):
                     event(db, account.key, "SKIP", f"skip:{pos.id}", now, detail={"position_id": pos.id, **pos.detail})
         return
     seen = {pos.tracker_id for pos in positions[first.key]}
+    rights = ("call", "put") if p["right"] == "both" else (p["right"],)
+    shared = p["right"] == "both"
     trackers = db.scalars(select(LotteryTracker).where(LotteryTracker.trading_date == day,
-        LotteryTracker.right == p["right"], LotteryTracker.first_seen_at >= first.activated_at,
+        LotteryTracker.right.in_(rights), LotteryTracker.first_seen_at >= first.activated_at,
         LotteryTracker.first_seen_at <= now).order_by(LotteryTracker.first_seen_at,
         LotteryTracker.setup_score.desc(), LotteryTracker.option_symbol)).all()
     # Deterministic ordering within each scan wave, independent of later peaks.
@@ -172,7 +183,7 @@ def _paired_entries(db, accounts, positions, now):
         if (tracker.provider != "tastytrade" or tracker.data_mode != "live" or not tracker.actionable
                 or tracker.expiration != day
                 or evidence.get("input_version") != p["input_version"]
-                or evidence.get("lottery_version") != f"lotto-{p['right']}-session-v2"
+                or evidence.get("lottery_version") != f"lotto-{tracker.right}-session-v2"
                 or evidence.get("session_date") != day.isoformat()):
             reason = "Not corrected-session live Tastytrade evidence"
         elif (now-utc(tracker.first_seen_at)).total_seconds() > p["entry_deadline_seconds"]:
@@ -180,7 +191,8 @@ def _paired_entries(db, accounts, positions, now):
         elif now >= close-timedelta(minutes=15):
             reason = "No new entries in final 15 minutes"
         elif any(pos.status in (*HELD, "PENDING_ENTRY") for rows in positions.values() for pos in rows):
-            reason = "Paired comparison already holds an idea in this direction"
+            reason = ("Shared account already holds a CALL or PUT idea" if shared else
+                      "Paired comparison already holds an idea in this direction")
         elif any(pos.detail.get("symbol") == tracker.symbol and pos.detail.get("date") == day.isoformat()
                  and pos.status != "SKIPPED" for pos in positions[first.key]):
             reason = "One selected contract per ticker/day"
@@ -220,9 +232,9 @@ def _paired_entries(db, accounts, positions, now):
                         for row in positions[account.key] if row.detail.get("entry_debit_cents") is not None
                         and row.detail["date"] == day.isoformat())
                     if balance(db, account.key)[0] < debit+p["exit_fee_cents"]:
-                        reason = "Paired account lacks settled cash"
+                        reason = "Shared account lacks settled cash" if shared else "Paired account lacks settled cash"
                     if spent+debit+p["exit_fee_cents"] > p["daily_debit_cap_cents"]:
-                        reason = "Paired $100 daily all-in cap"
+                        reason = "Shared CALL/PUT $100 daily all-in cap" if shared else "Paired $100 daily all-in cap"
         for account, row in zip(accounts, paired):
             detail = dict(row.detail)
             if reason:
@@ -266,10 +278,14 @@ def equity(db, account, positions, now):
 def advance_lotto_trials(db: Session, *, now: datetime | None = None) -> None:
     now = utc(now or datetime.now(timezone.utc))
     ensure_lotto_trials(db, now)
-    for right in ("call", "put"):
-        loaded = [db.get(LottoTrialAccount, key_for(right, rule)) for rule in RULES]
+    # Preserve the original paired directional comparisons. The two new shared
+    # accounts run independently: a slow exit must not reserve the other's slot.
+    groups = [[key_for(right, rule) for rule in RULES] for right in ("call", "put")]
+    groups += [[key_for("both", rule)] for rule in RULES]
+    for keys in groups:
+        loaded = [db.get(LottoTrialAccount, key) for key in keys]
         accounts = [account for account in loaded if account is not None]
-        if len(accounts) != len(RULES):
+        if len(accounts) != len(keys):
             continue
         for account in accounts:
             db.execute(update(LottoTrialAccount).where(LottoTrialAccount.key == account.key).values(
@@ -293,15 +309,19 @@ def advance_lotto_trials(db: Session, *, now: datetime | None = None) -> None:
 
 def lotto_trial_summary(db: Session, key: str | None = None, page: int = 1, *, now: datetime | None = None) -> dict:
     now = utc(now or datetime.now(timezone.utc))
-    keys = [key_for(right, rule) for right in ("call", "put") for rule in RULES]
+    keys = [key_for(right, rule) for right in ("both", "call", "put") for rule in RULES]
     if key is not None and key not in keys:
         raise ValueError("Unknown lotto paper trial")
-    catalogue = [{"key": k, "label": f"{right.upper()} · {'5× trigger' if rule == 'fixed5' else '40% trail after 2×'}"}
-                 for right in ("call", "put") for rule in RULES for k in [key_for(right, rule)]]
-    account = db.get(LottoTrialAccount, key or keys[0])
+    catalogue = [{"key": k,
+                  "label": f"{'Calls + puts' if right == 'both' else right.upper()} · {'5× trigger' if rule == 'fixed5' else '40% trail after 2×'}",
+                  "scope": "combined" if right == "both" else "directional"}
+                 for right in ("both", "call", "put") for rule in RULES for k in [key_for(right, rule)]]
+    selected_key = key or keys[0]
+    start = SHARED_TRIAL_START if selected_key in keys[:2] else TRIAL_START
+    account = db.get(LottoTrialAccount, selected_key)
     if account is None:
-        return {"status": "SCHEDULED" if now < TRIAL_START else "NOT_STARTED", "paper_only": True,
-                "accounts": catalogue, "scheduled_start": TRIAL_START.isoformat()}
+        return {"status": "SCHEDULED" if now < start else "NOT_STARTED", "paper_only": True,
+                "account_key": selected_key, "accounts": catalogue, "scheduled_start": start.isoformat()}
     positions = list(db.scalars(select(LottoTrialPosition).where(LottoTrialPosition.account_key == account.key)
                                 .order_by(LottoTrialPosition.id.desc())))
     pages = max(1, math.ceil(len(positions)/12))
@@ -321,9 +341,26 @@ def lotto_trial_summary(db: Session, key: str | None = None, page: int = 1, *, n
     return {"status": "ACTIVE", "paper_only": True, "accounts": catalogue, "account_key": account.key,
         "activated_at": utc(account.activated_at).isoformat(), "processed_at": utc(account.processed_at).isoformat(),
         "as_of": now.isoformat(), "policy": account.policy, **equity(db, account, positions, now),
+        "direction_breakdown": direction_breakdown(positions),
         "equity_history": {"baseline_cents": 50000, "started_at": utc(account.activated_at).isoformat(),
             "daily": [point(m) for m in daily], "intraday": [point(m) for m in intraday], "basis": "Forward paper liquidation estimate after costs"},
         "trades": [{"id": p.id, "tracker_id": p.tracker_id, "status": p.status, **p.detail,
                     "estimated_net_proceeds_cents": liquidation_value(p, account.policy, now)}
                    for p in positions[(page-1)*12:page*12]],
         "pagination": {"page": page, "pages": pages, "total": len(positions)}}
+
+
+def direction_breakdown(positions) -> list[dict]:
+    """Full-account realized outcomes, not allocated balances or summed returns."""
+    result = []
+    for right in ("call", "put"):
+        rows = [p for p in positions if p.detail.get("right") == right]
+        closed = [p for p in rows if p.status in ("CLOSED", "UNSETTLED")]
+        result.append({"right": right,
+            "entered": sum(p.detail.get("entry_debit_cents") is not None for p in rows),
+            "closed": len(closed), "open": sum(p.status == "OPEN" for p in rows),
+            "unpriced": sum(p.status == "UNPRICED" for p in rows),
+            "pending": sum(p.status == "PENDING_ENTRY" for p in rows),
+            "skipped": sum(p.status == "SKIPPED" for p in rows),
+            "realized_cents": sum(p.detail["net_pnl_cents"] for p in closed)})
+    return result

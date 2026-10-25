@@ -31,9 +31,16 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4 5; do
+            # Both sources publish the official images. Alternate registries so
+            # a single mirror's anonymous quota does not block every retry.
+            if (( attempt % 2 == 1 )); then
+              image_registry=docker.io/library
+            else
+              image_registry=public.ecr.aws/docker/library
+            fi
             if docker build \
-              --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:22-alpine \
-              --build-arg PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.12-slim \
+              --build-arg NODE_IMAGE="$image_registry/node:22-alpine" \
+              --build-arg PYTHON_IMAGE="$image_registry/python:3.12-slim" \
               -t otde-ci .; then
               exit 0
             fi

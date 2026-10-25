@@ -67,7 +67,7 @@ def entered(db, right='call'):
 
 def test_scheduled_read_is_read_only_and_funding_idempotent(db):
     assert lotto_trial_summary(db, now=TRIAL_START-timedelta(seconds=1))['status'] == 'SCHEDULED'
-    assert lotto_trial_summary(db, now=NOW)['status'] == 'NOT_STARTED'
+    assert lotto_trial_summary(db, key_for('call', 'fixed5'), now=NOW)['status'] == 'NOT_STARTED'
     assert db.scalar(select(func.count()).select_from(LottoTrialAccount)) == 0
     ensure_lotto_trials(db, TRIAL_START)
     advance_lotto_trials(db, now=TRIAL_START)
@@ -103,7 +103,7 @@ def test_pair_uses_later_quote_costs_one_idea_and_persists_restart(db):
     db.expire_all()
     advance_lotto_trials(db, now=NOW+timedelta(minutes=1))
     assert db.scalar(select(func.count()).select_from(LottoTrialEvent)) == count
-    assert lotto_trial_summary(db, now=NOW+timedelta(minutes=1))['equity_cents'] == 49400
+    assert lotto_trial_summary(db, key_for('call', 'fixed5'), now=NOW+timedelta(minutes=1))['equity_cents'] == 49400
 
 
 @pytest.mark.parametrize('changes',[
@@ -146,7 +146,7 @@ def test_fixed_target_is_decision_then_later_bid_not_perfect_fill_and_settles(db
     assert p.detail['net_proceeds_cents'] == 7850
     assert p.detail['net_pnl_cents'] == 5600
     assert balance(db, key_for('call','fixed5')) == (47700,7900,5600)
-    assert lotto_trial_summary(db, now=NOW+timedelta(minutes=3))['equity_cents'] == 55600
+    assert lotto_trial_summary(db, key_for('call', 'fixed5'), now=NOW+timedelta(minutes=3))['equity_cents'] == 55600
     due = datetime.fromisoformat(p.detail['settles_at'])
     advance_lotto_trials(db, now=due)
     assert balance(db, key_for('call','fixed5')) == (55600,0,5600)
@@ -171,7 +171,7 @@ def test_trail_waits_for_2x_then_40_percent_drop_then_later_quote(db):
 
 def test_unknown_stale_and_end_of_day_do_not_invent_zero_or_free_capital(db):
     entered(db)
-    summary = lotto_trial_summary(db, now=NOW+timedelta(minutes=3))
+    summary = lotto_trial_summary(db, key_for('call', 'fixed5'), now=NOW+timedelta(minutes=3))
     assert summary['equity_cents'] is None and summary['unpriced_positions'] == 1
     advance_lotto_trials(db, now=NOW.replace(hour=19,minute=55))
     assert position(db).detail['exit_reason'] == 'SESSION_END'
@@ -182,7 +182,7 @@ def test_unknown_stale_and_end_of_day_do_not_invent_zero_or_free_capital(db):
     tracker(db, 'QQQ', now=next_day)
     advance_lotto_trials(db, now=next_day)
     assert position(db, tracker_id='QQQcall').status == 'SKIPPED'
-    assert lotto_trial_summary(db, now=next_day)['equity_cents'] is None
+    assert lotto_trial_summary(db, key_for('call', 'fixed5'), now=next_day)['equity_cents'] is None
 
 
 def test_path_evidence_counts_distinct_quotes_not_repeats_or_missing_minutes(db):
@@ -241,7 +241,7 @@ def test_verified_zero_bid_is_not_confused_with_missing_quote(db):
     assert position(db).status == 'UNSETTLED'
     assert position(db).detail['sale_cents'] == 0
     assert position(db).detail['net_pnl_cents'] == -2300
-    assert lotto_trial_summary(db,now=NOW+timedelta(minutes=3))['equity_cents'] == 47700
+    assert lotto_trial_summary(db,key_for('call','fixed5'),now=NOW+timedelta(minutes=3))['equity_cents'] == 47700
 
 
 def test_early_close_entry_and_exit_windows_follow_exchange_calendar(db):
@@ -278,8 +278,8 @@ def test_summary_pagination_and_marks_are_read_only_and_use_eastern_date(db):
     # 01:00 UTC is still the prior exchange date; do not create a second daily bucket.
     advance_lotto_trials(db,now=NOW.replace(hour=1)+timedelta(days=1))
     before = db.scalar(select(func.count()).select_from(LottoTrialEvent))
-    first = lotto_trial_summary(db,page=1,now=NOW)
-    second = lotto_trial_summary(db,page=2,now=NOW)
+    first = lotto_trial_summary(db,key_for('call','fixed5'),page=1,now=NOW)
+    second = lotto_trial_summary(db,key_for('call','fixed5'),page=2,now=NOW)
     assert len(first['trades']) == 12 and len(second['trades']) == 2
     assert first['pagination']['total'] == 14
     assert len(first['equity_history']['daily']) == 1
