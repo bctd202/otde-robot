@@ -6,7 +6,7 @@ import { DirectionBadge } from './DirectionBadge';
 
 const money=(number:number|null|undefined)=>number==null?'—':`$${number.toFixed(2)}`;
 
-export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean}) {
+export function ParlayTicket({candidate,onPaperEnter,entering=false,onInspect,selected=false}:{candidate:ParlayCandidate;onPaperEnter?:(candidate:ParlayCandidate)=>void;entering?:boolean;onInspect?:()=>void;selected?:boolean}) {
   const [now,setNow]=useState(()=>Date.now());
   useEffect(()=>{const timer=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(timer)},[]);
   const contract=candidate.contract;
@@ -66,5 +66,6 @@ export function ParlayTicket({candidate,onPaperEnter,entering=false}:{candidate:
       {candidate.rejection_reasons.length>0&&<ul className="rejection-list">{candidate.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}
     </details>
     {candidate.signal_status==='BUY'&&verifiedActionable&&onPaperEnter&&<button type="button" className="paper-enter" disabled={entering} onClick={()=>onPaperEnter(candidate)}>{entering?'Recording…':'Paper Enter'}</button>}
+    {onInspect&&<button type="button" className="inspect-play" aria-expanded={selected} onClick={onInspect}>View {candidate.symbol} play →</button>}
   </article>;
 }

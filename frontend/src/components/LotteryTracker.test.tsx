@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 
 import type { LotteryTrackerDetail, LotteryTrackerList, LotteryTrackerSummary } from '../types';
@@ -52,6 +52,27 @@ test('shows a clear empty state when no lottery play was tracked',async()=>{
   fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
   expect(await screen.findByText('No lottery contracts logged for this session')).toBeInTheDocument();
   expect(screen.getByText(/Choose another saved date above/i)).toBeInTheDocument();
+});
+
+test('late quote paths cannot replace a newer selection or reopen a closed inspector',async()=>{
+  let finishFirst!:(value:Response)=>void;
+  const second={...tracker,id:'tracker-2',symbol:'QQQ',option_symbol:'QQQ test'};
+  vi.spyOn(globalThis,'fetch').mockImplementation(async input=>{
+    const url=String(input);
+    if(url.includes('/lottery-trackers?'))return new Response(JSON.stringify({...list,trackers:[tracker,second]}));
+    if(url.endsWith('/tracker-1'))return new Promise<Response>(resolve=>{finishFirst=resolve});
+    return new Response(JSON.stringify({...detail,tracker:second}));
+  });
+  render(<LotteryLab/>);fireEvent.click(screen.getByRole('button',{name:'Observation archive'}));
+  fireEvent.click(await screen.findByText(/related strike\(s\), one market idea/));
+  fireEvent.click(screen.getAllByRole('button',{name:'View quote path'})[0]);
+  expect(screen.getByText('Loading quote path…')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'View quote path'}));
+  await screen.findByLabelText('QQQ call 102 sellable option value by scan');
+  await act(async()=>finishFirst(new Response(JSON.stringify(detail))));
+  expect(screen.queryByLabelText('SPY call 102 sellable option value by scan')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:/Back to plays/}));
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
 });
 
 test('separates exact-target cost sensitivity from gross lotto bankroll curves',async()=>{

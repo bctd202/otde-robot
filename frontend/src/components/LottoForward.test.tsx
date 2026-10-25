@@ -17,11 +17,12 @@ test('defaults to shared fixed5 and scheduled accounts cannot look funded',async
   const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(async()=>new Response(JSON.stringify(scheduled)));
   render(<LottoForward onInspect={()=>{}}/>);
   await screen.findByText(/Scheduled ·/);
-  expect(screen.getByRole('combobox',{name:'Lotto experiment'})).toHaveValue('both-fixed5');
-  expect(screen.getAllByRole('option')).toHaveLength(6);
-  expect(screen.getByRole('group',{name:'Shared calls + puts · $500 each'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:/^5× Exit/})).toHaveAttribute('aria-pressed','true');
+  expect(screen.getAllByRole('option')).toHaveLength(5);
+  expect(screen.getByRole('group',{name:'Shared calls and puts exit rule'})).toBeInTheDocument();
   expect(screen.queryByRole('region',{name:'Account value and percentage return'})).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole('combobox',{name:'Lotto experiment'}),{target:{value:'put-fixed5'}});
+  fireEvent.click(screen.getByText('Original directional comparisons'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Original experiment'}),{target:{value:'put-fixed5'}});
   await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=put-fixed5'));
   expect(screen.getByText(/Never add these balances together/)).toBeInTheDocument();
 });
@@ -39,12 +40,13 @@ test('switches exit rules and original comparisons without combining balances',a
   fireEvent.click(screen.getByRole('button',{name:'Trades'}));
   fireEvent.click(screen.getByRole('button',{name:'Next trades'}));
   await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=2'));
-  fireEvent.change(screen.getByRole('combobox',{name:'Lotto experiment'}),{target:{value:'both-trail40'}});
+  fireEvent.click(screen.getByRole('button',{name:/^Trail after 2×/}));
   await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=both-trail40'));
-  await screen.findByRole('combobox',{name:'Lotto experiment'});
-  fireEvent.change(screen.getByRole('combobox',{name:'Lotto experiment'}),{target:{value:'put-fixed5'}});
+  await screen.findByRole('button',{name:/^Trail after 2×/});
+  fireEvent.click(screen.getByText('Original directional comparisons'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Original experiment'}),{target:{value:'put-fixed5'}});
   await screen.findByText(/Original directional comparison—not a shared/);
-  expect(screen.getByRole('combobox',{name:'Lotto experiment'})).toHaveValue('put-fixed5');
+  expect(screen.getByRole('combobox',{name:'Original experiment'})).toHaveValue('put-fixed5');
 });
 
 test('forward account defaults to balance, paginates trades and opens evidence',async()=>{

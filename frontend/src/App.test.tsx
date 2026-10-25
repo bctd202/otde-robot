@@ -3,7 +3,7 @@ import {afterEach,expect,test,vi} from 'vitest';
 import {App,PARLAY_REFRESH_INTERVAL_MS,stabilizeCandidateOrder} from './main';
 import type {LotteryTrackerList,PaperMoneyTracker,ParlayCandidate,ParlayResponse,PerformanceMetrics,PerformanceResponse} from './types';
 
-afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/')});
+afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();window.history.replaceState(null,'','/')});
 
 const providerStatus={provider:'tradier',mode:'live',status:'healthy',delay_seconds:0,latest_timestamp:'2026-09-11T14:00:00-04:00',message:'Live Tradier market data; paper research only.'};
 const board:ParlayResponse={provider_status:providerStatus,universe:['SPY'],scanner_health:{candidate_count:0,unavailable_candidate_count:0,provider_status:'healthy',engine_status:'running'},paper_only:true,candidates:[]};
@@ -34,13 +34,13 @@ test('renders the focused board and visual history without legacy dashboard call
   const requests=mockApplication();
   render(<App/>);
   await waitFor(()=>expect(screen.getByText('NO QUALIFIED PARLAYS RIGHT NOW')).toBeInTheDocument());
-  expect(screen.getByRole('link',{name:'Lottery Plays'})).toBeInTheDocument();
+  expect(screen.getByRole('link',{name:'Lotto Lab'})).toBeInTheDocument();
   expect(screen.queryByRole('heading',{name:'Lottery Plays'})).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('link',{name:'Lottery Plays'}));
+  fireEvent.click(screen.getByRole('link',{name:'Lotto Lab'}));
   expect(screen.getByRole('heading',{name:'Lottery Plays'})).toBeInTheDocument();
-  expect(screen.getByRole('link',{name:'Lottery Plays'})).toHaveAttribute('aria-current','page');
+  expect(screen.getByRole('link',{name:'Lotto Lab'})).toHaveAttribute('aria-current','page');
   expect(screen.queryByText('NO QUALIFIED PARLAYS RIGHT NOW')).not.toBeVisible();
-  fireEvent.click(screen.getByRole('link',{name:'Play History'}));
+  fireEvent.click(screen.getByRole('link',{name:'History'}));
   expect(screen.getByRole('heading',{name:'Play History & Performance'})).toBeInTheDocument();
   expect(screen.getByText(/Most lottery contracts are expected to expire worthless/)).not.toBeVisible();
   expect(screen.queryByText('Market Context')).not.toBeInTheDocument();
@@ -51,6 +51,7 @@ test('renders the focused board and visual history without legacy dashboard call
 });
 
 test('opens a saved page link directly and responds to browser navigation',async()=>{
+  localStorage.setItem('parlay-ui-page','performance');
   window.history.replaceState(null,'','/#lottery');
   mockApplication();
   render(<App/>);
@@ -59,6 +60,28 @@ test('opens a saved page link directly and responds to browser navigation',async
   window.history.replaceState(null,'','/#performance');
   fireEvent(window,new Event('hashchange'));
   expect(screen.getByRole('heading',{name:'Play History & Performance'})).toBeInTheDocument();
+});
+
+test('remembers the workspace without storing balances, and skip link does not navigate',async()=>{
+  localStorage.setItem('parlay-ui-page','lottery');mockApplication();render(<App/>);
+  expect(await screen.findByRole('heading',{name:'Lottery Plays'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('link',{name:'History'}));
+  expect(localStorage.getItem('parlay-ui-page')).toBe('performance');
+  fireEvent.click(screen.getByRole('link',{name:'Skip to workspace'}));
+  expect(screen.getByRole('main')).toHaveFocus();
+  expect(screen.getByRole('link',{name:'History'})).toHaveAttribute('aria-current','page');
+});
+
+test('workspace status distinguishes feed mode, connection and unverified scan time',async()=>{
+  mockApplication();render(<App/>);await screen.findByText('Server connected');
+  expect(screen.getByLabelText('Workspace status')).toHaveTextContent('tradier · live feed');
+  expect(screen.getByLabelText('Workspace status')).toHaveTextContent('Last completed scan: Not yet verified');
+  vi.spyOn(navigator,'onLine','get').mockReturnValue(false);fireEvent(window,new Event('offline'));
+  expect(screen.getByText('Offline · last saved data')).toBeInTheDocument();
+  vi.mocked(fetch).mockRejectedValue(new Error('unavailable'));
+  vi.spyOn(navigator,'onLine','get').mockReturnValue(true);fireEvent(window,new Event('online'));
+  fireEvent.click(screen.getByRole('button',{name:'Refresh workspace'}));
+  await screen.findByText('Server unavailable · last saved data');
 });
 
 test('polls the server-owned Parlay cache every 15 seconds',()=>{
