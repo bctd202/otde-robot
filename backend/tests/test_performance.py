@@ -15,6 +15,7 @@ from app.services.performance import (analytics_exclusion_reason, deduplicate_po
                                       performance_chart_data, research_breakdowns, track_candidates,
                                       update_outcome)
 from app.api.routes import _ledger, performance
+from app.services.shadow_audit import shadow_evidence_audit
 
 def row(direction="CALL", signal_id="x", ticker="SPY"):
     now=datetime(2026,8,3,14,30,tzinfo=timezone.utc)
@@ -403,6 +404,32 @@ def add_shadow_pair(db: Session, trade: SignalPerformance, *, entry_ask: float,
         quote_timestamp=trade.exit_at, bid_timestamp=trade.exit_at,
         ask_timestamp=trade.exit_at, selected_price=exit_bid, price_basis="BID",
         quote_lag_seconds=0, created_at=trade.exit_at))
+
+
+def test_shadow_audit_flags_without_excluding_or_changing_results():
+    local = database()
+    with local() as db:
+        winner, loser = row(signal_id="win"), row(signal_id="loss", ticker="QQQ")
+        loser.trading_date += timedelta(days=1)
+        add_shadow_pair(db, winner, entry_ask=1, exit_bid=6, offset_minutes=0)
+        add_shadow_pair(db, loser, entry_ask=1, exit_bid=.5, offset_minutes=0)
+        db.flush()
+        exit_mark = db.scalar(select(AutomatedOptionMark).where(
+            AutomatedOptionMark.signal_id == "win", AutomatedOptionMark.mark_type == "EXIT"))
+        exit_mark.quote_timestamp += timedelta(seconds=120)
+        exit_mark.quote_lag_seconds = 120
+        db.flush()
+        before = (winner.result_r, loser.result_r, exit_mark.quote_timestamp)
+        summary, shadows = option_shadow_results(db, [winner, loser])
+        audit = shadow_evidence_audit(db, [winner, loser], shadows)
+        assert summary["cumulative_pnl_dollars"] == 450
+        assert audit["best_day_pnl_dollars"] == 500
+        assert audit["without_best_day_pnl_dollars"] == -50
+        assert audit["flagged_trades"] == 1
+        assert len(audit["flagged_examples"][0]["flags"]) == 3
+        assert before == (winner.result_r, loser.result_r, exit_mark.quote_timestamp)
+        assert not db.dirty
+        assert shadow_evidence_audit(db, [], {})["best_entry_day"] is None
 
 
 def test_paper_money_tracker_replays_cash_and_keeps_core_separate():

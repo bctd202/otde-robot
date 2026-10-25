@@ -32,6 +32,8 @@ from app.services.paper_positions import (create_position, market_mark,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
 from app.services.option_research import option_path_research
+from app.services.evidence_health import collection_evidence
+from app.services.shadow_audit import shadow_evidence_audit
 from app.services.forward_account import KEY as FORWARD_ACCOUNT_KEY, account_summary
 from app.services.lotto_trials import lotto_trial_summary
 from app.services.performance import (analytics_exclusion_reason, automated_origin,
@@ -207,6 +209,7 @@ def parlays(db: Session = Depends(get_db)):
             operator_hold=runtime.operator_hold if runtime else False,
             control_updated_at=runtime.control_updated_at if runtime else None,
             market_session=session,
+            collection_evidence=collection_evidence(db, now, runtime),
             next_market_open_at=next_market_open(now) if session != "regular" else None,
         ),
     )
@@ -233,7 +236,7 @@ def scanner_control(payload: ScannerControlRequest, db: Session = Depends(get_db
         message = "Scanner enabled. The next scheduled market-minute scan will run automatically."
     else:
         runtime.status = "idle_market_closed"
-        runtime.next_evaluation_at = next_market_open(now)
+        runtime.next_evaluation_at = next_market_open(now).astimezone(timezone.utc)
         message = "Scanner enabled and waiting for the next regular market session."
     db.commit()
     db.refresh(runtime)
@@ -383,6 +386,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
         select(ParlayPaperPosition).where(ParlayPaperPosition.id.in_(paper_ids))).all()}
         if paper_ids else {})
     option_shadow_metrics, option_shadows = option_shadow_results(db, rows)
+    option_shadow_metrics["evidence_audit"] = shadow_evidence_audit(db, rows, option_shadows)
     selected_view = view.upper()
     if selected_view not in {"ALL", "OPEN", "COMPLETED", "EXCLUDED"}:
         raise HTTPException(status_code=422, detail="View must be ALL, OPEN, COMPLETED, or EXCLUDED")

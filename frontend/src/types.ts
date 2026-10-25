@@ -94,12 +94,27 @@ export interface AutomatedOptionShadow {
   fees_modeled:false;additional_slippage_modeled:false;paper_only:true;
 }
 export interface AutomatedOptionShadowMetrics {
+  evidence_audit?:ShadowEvidenceAudit;
   selected_positions?:number;selected_quote_coverage_percent?:number;
   tracked_positions:number;closed_with_quote:number;quote_gaps:number;active_positions:number;exit_pending:number;
   untracked_selected_positions:number;quote_coverage_percent:number;wins:number;losses:number;cumulative_pnl_dollars:number;
   average_pnl_dollars:number;average_return_percent:number;entry_basis:string;exit_basis:string;forward_only:true;
   headline_metrics:false;fees_modeled:false;additional_slippage_modeled:false;paper_only:true;
 }
+export interface ShadowEvidenceAudit {
+  quoted_trades:number;flagged_trades:number;best_entry_day:string|null;best_day_pnl_dollars:number|null;
+  without_best_day_pnl_dollars:number|null;basis:string;historical_records_changed:false;
+  daily:{date:string;pnl_dollars:number}[];
+  flagged_examples:{signal_id:string;ticker:string;date:string;pnl_dollars:number;flags:string[];
+    entry_quote_at:string|null;entry_observed_at:string;exit_quote_at:string|null;exit_observed_at:string;
+    quote_lag_seconds:number|null}[];
+}
+export interface CollectionEvidence {
+  status:'CURRENT'|'STALE'|'CLOSED'|'HELD'|'WARMING_UP';has_coverage_gaps:boolean;basis:string;
+  sessions:{date:string;expected_minutes:number;observed_minutes:number;missing_minutes:number;
+    coverage_percent:number|null;complete_session:boolean}[];
+}
+export interface ScannerHealth {collection_evidence?:CollectionEvidence}
 export interface ExecutionScenarioMetrics {pnl_dollars:number;average_pnl_dollars:number;wins:number;losses:number;breakeven:number}
 export interface ExecutionCostBreakdown {label:string;closed_with_quote:number;observed_pnl_dollars:number;net_pnl_dollars:number;stress_pnl_dollars:number}
 export interface ExecutionCostAnalysis {
