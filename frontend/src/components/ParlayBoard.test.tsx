@@ -23,6 +23,17 @@ test('loading skeleton preserves board layout',()=>{render(<ParlaySkeleton/>);ex
 
 test('Paper Enter appears on BUY only and invokes entry handler',()=>{const enter=vi.fn();render(<ParlayBoard data={data} updated={new Date()} refreshing={false} stale={false} onRetry={vi.fn()} onPaperEnter={enter}/>);fireEvent.click(screen.getByRole('button',{name:'Paper Enter'}));expect(enter).toHaveBeenCalledWith(expect.objectContaining({symbol:'SPY',signal_status:'BUY'}));expect(screen.getAllByRole('button',{name:'Paper Enter'})).toHaveLength(1)});
 
+test('inspector follows refreshed decisions and cannot retain a removed BUY action',()=>{
+  const props={data,updated:new Date(),refreshing:false,stale:false,onRetry:vi.fn(),onPaperEnter:vi.fn()};
+  const {rerender}=render(<ParlayBoard {...props}/>);
+  fireEvent.click(screen.getByRole('button',{name:'View SPY play →'}));
+  expect(within(screen.getByRole('complementary')).getByRole('button',{name:'Paper Enter'})).toBeInTheDocument();
+  const changed={...data,candidates:data.candidates.map(row=>row.symbol==='SPY'?{...row,signal_status:'PASS' as const,actionable:false}:row)};
+  rerender(<ParlayBoard {...props} data={changed}/>);
+  expect(within(screen.getByRole('complementary')).queryByRole('button',{name:'Paper Enter'})).not.toBeInTheDocument();
+  rerender(<ParlayBoard {...props} active={false}/>);expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+});
+
 test('an expired BUY is removed from Ready to Trade even when the cached card still says BUY',()=>{const expired={...candidate('SPY',0),lifecycle_status:'BUY',valid_until:'2020-01-01T00:00:00Z',validity_reason:'Awaiting next completed candle'} as ParlayCandidate;render(<ParlayBoard data={{...data,candidates:[expired]}} updated={new Date()} refreshing={false} stale={false} onRetry={vi.fn()} onPaperEnter={vi.fn()}/>);expect(screen.getByRole('region',{name:'Ready to Trade'})).not.toHaveTextContent('SPY');expect(screen.queryByRole('button',{name:'Paper Enter'})).not.toBeInTheDocument();fireEvent.click(screen.getByText('Expired, missed, pass, and unavailable setups'));expect(screen.getByText(/Awaiting next completed candle/)).toBeInTheDocument()});
 
 

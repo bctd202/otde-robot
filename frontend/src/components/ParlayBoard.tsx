@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { SplitWorkspace } from './SplitWorkspace';
 import type { PaperPosition, ParlayCandidate, ParlayResponse, StrategyView } from '../types';
 import { parseApiTimestamp } from '../lib/dates';
 import { isVerifiedLiveContract } from '../lib/contracts';
@@ -17,8 +18,11 @@ interface ParlayBoardProps { data:ParlayResponse;selectedStrategy?:StrategyView;
 const lifecycleIsCurrent=(item:ParlayCandidate)=>item.lifecycle_status==null||(['BUY','WATCH'].includes(item.lifecycle_status)&&item.lifecycle_status===item.signal_status&&(parseApiTimestamp(item.valid_until)?.getTime()??0)>Date.now());
 const isVerifiedActionable=(item:ParlayCandidate)=>item.signal_status==='BUY'&&lifecycleIsCurrent(item)&&item.actionable===true&&isVerifiedLiveContract(item.contract);
 
-export function ParlayBoard({data,selectedStrategy='ALL',updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol,scannerControlBusy=false,scannerFeedback='',onScannerControl}:ParlayBoardProps) {
+export function ParlayBoard({data,selectedStrategy='ALL',updated,refreshing,stale,onRetry,positions=[],positionsStale=false,onPaperEnter,onPaperExit,enteringSymbol,scannerControlBusy=false,scannerFeedback='',onScannerControl,active=true}:ParlayBoardProps & {active?:boolean}) {
+  const [selectedKey,setSelectedKey]=useState<string|null>(null);
   const visible=useMemo(()=>data.candidates.filter(item=>selectedStrategy==='ALL'||item.strategy_mode===selectedStrategy),[data.candidates,selectedStrategy]);
+  const selected=visible.find(item=>`${item.strategy_mode}:${item.symbol}`===selectedKey);
+  const inspect=(item:ParlayCandidate)=>setSelectedKey(`${item.strategy_mode}:${item.symbol}`);
   const groups=useMemo(()=>({
     ready:visible.filter(isVerifiedActionable),
     waiting:visible.filter(item=>item.signal_status==='WATCH'&&lifecycleIsCurrent(item)).sort((a,b)=>a.ranking_position-b.ranking_position),
@@ -35,12 +39,14 @@ export function ParlayBoard({data,selectedStrategy='ALL',updated,refreshing,stal
     </section>
     {stale&&<StaleDataWarning updated={updated} onRetry={onRetry}/>}
 
-    <section className="decision-section ready-section" aria-labelledby="ready-title"><div className="decision-section-heading"><div><p className="eyebrow">Act now</p><h2 id="ready-title">Ready to Trade</h2></div><span>{groups.ready.length} BUY NOW</span></div>{groups.ready.length===0?<div className="empty-state"><strong>NO QUALIFIED PARLAYS RIGHT NOW</strong><span>Continue scanning. Do not force a trade.</span></div>:<div className="decision-grid">{groups.ready.map(item=><ParlayTicket key={`${item.strategy_mode}:${item.symbol}`} candidate={item} onPaperEnter={onPaperEnter} entering={enteringSymbol===`${item.strategy_mode}:${item.symbol}`}/>)}</div>}</section>
+    <SplitWorkspace title={selected?`${selected.symbol} play details`:'Play details'} onClose={()=>setSelectedKey(null)} detail={active&&selected?<ParlayTicket candidate={selected} onPaperEnter={isVerifiedActionable(selected)?onPaperEnter:undefined} entering={enteringSymbol===selectedKey}/>:null}>
+    <section className="decision-section ready-section" aria-labelledby="ready-title"><div className="decision-section-heading"><div><p className="eyebrow">Act now</p><h2 id="ready-title">Ready to Trade</h2></div><span>{groups.ready.length} BUY NOW</span></div>{groups.ready.length===0?<div className="empty-state"><strong>NO QUALIFIED PARLAYS RIGHT NOW</strong><span>Continue scanning. Do not force a trade.</span></div>:<div className="decision-grid">{groups.ready.map(item=><ParlayTicket key={`${item.strategy_mode}:${item.symbol}`} candidate={item} onInspect={()=>inspect(item)} selected={selected===item} onPaperEnter={onPaperEnter} entering={enteringSymbol===`${item.strategy_mode}:${item.symbol}`}/>)}</div>}</section>
 
-    <section className="decision-section waiting-section" aria-labelledby="waiting-title"><div className="decision-section-heading"><div><p className="eyebrow">Approaching a trigger</p><h2 id="waiting-title">Waiting Room</h2></div><span>{groups.waiting.length} WAIT</span></div><p className="section-note">Ordered by each strategy&apos;s readiness rank.</p>{groups.waiting.length===0?<p className="section-empty">No setups are waiting for a trigger.</p>:<div className="decision-grid">{groups.waiting.map(item=><ParlayTicket key={`${item.strategy_mode}:${item.symbol}`} candidate={item}/>)}</div>}</section>
+    <section className="decision-section waiting-section" aria-labelledby="waiting-title"><div className="decision-section-heading"><div><p className="eyebrow">Approaching a trigger</p><h2 id="waiting-title">Waiting Room</h2></div><span>{groups.waiting.length} WAIT</span></div><p className="section-note">Ordered by each strategy&apos;s readiness rank.</p>{groups.waiting.length===0?<p className="section-empty">No setups are waiting for a trigger.</p>:<div className="decision-grid">{groups.waiting.map(item=><ParlayTicket key={`${item.strategy_mode}:${item.symbol}`} candidate={item} onInspect={()=>inspect(item)} selected={selected===item}/>)}</div>}</section>
 
     <details className="no-trade-section"><summary><span><b>No Trade</b><small>Expired, missed, pass, and unavailable setups</small></span><strong>{groups.noTrade.length}</strong></summary><div className="no-trade-list">{groups.noTrade.map(item=><details key={`${item.strategy_mode}:${item.symbol}`} className="no-trade-row"><summary><b>#{item.ranking_position} {item.symbol}</b><SignalBadge status={item.signal_status}/><span>{item.strategy_mode==='STRUCTURED_INTRADAY'?'STRUCTURED':'1-MIN'}</span><span>{item.direction==='none'?'No contract':item.direction.toUpperCase()}</span></summary><div><p>{item.primary_action}</p><p><b>Strategy:</b> {item.strategy_mode==='STRUCTURED_INTRADAY'?'Structured Intraday':'1-Min / 0DTE'} · {item.strategy_version}</p>{item.validity_reason&&<p><b>Lifecycle:</b> {item.lifecycle_status} — {item.validity_reason}</p>}{item.unavailable_reason&&<p>{item.unavailable_reason}</p>}<p><b>Score:</b> {item.score.toFixed(1)} · {item.score_label}</p><p><b>Data freshness:</b> {item.data_freshness.replaceAll('_',' ')}</p>{item.underlying_trigger!==null&&<p><b>Underlying trigger:</b> {item.underlying_trigger.toFixed(2)}</p>}{item.underlying_invalidation!==null&&<p><b>Underlying invalidation:</b> {item.underlying_invalidation.toFixed(2)}</p>}{item.first_underlying_target!==null&&<p><b>Underlying target:</b> {item.first_underlying_target.toFixed(2)}</p>}{item.contract_verification_reason&&<p><b>Contract:</b> No verified contract available — {item.contract_verification_reason}</p>}{item.rejection_reasons.length>0&&<ul>{item.rejection_reasons.map(reason=><li key={reason}>{reason}</li>)}</ul>}</div></details>)}</div></details>
 
     <PaperPositions positions={positions} stale={positionsStale} onExit={position=>onPaperExit?.(position)}/>
+    </SplitWorkspace>
   </section>;
 }

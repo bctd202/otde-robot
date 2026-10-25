@@ -1,30 +1,34 @@
 import {useEffect,useState} from 'react';
 import {getLottoPaperTrial} from '../api/client';
-import type {LottoTrialResponse} from '../types';
+import type {LottoTrialResponse,LottoTrialChoice} from '../types';
 import {formatEasternDateTime} from '../lib/dates';
 import {AccountEquityChart} from './AccountEquityChart';
 import {TradeResultCards} from './TradeResultCards';
 
 export function LottoForward({onInspect}:{onInspect:(id:string)=>void}){
   const [data,setData]=useState<LottoTrialResponse|null>(null);
+  const [choices,setChoices]=useState<LottoTrialChoice[]>([]);
   const [key,setKey]=useState<string>();
   const [page,setPage]=useState(1);
   const [error,setError]=useState('');
   const [pane,setPane]=useState<'BALANCE'|'TRADES'>('BALANCE');
   useEffect(()=>{
     let active=true;
-    const load=()=>getLottoPaperTrial(page,key).then(result=>{if(!Array.isArray(result.accounts)||!result.accounts.length||!result.accounts.every(a=>a.key&&a.label&&['combined','directional'].includes(a.scope)))throw new Error('Invalid account response');if(active){setData(result);setError('')}})
-      .catch(()=>{if(active)setError('Lotto account unavailable. Any displayed figures are the last response, not a live balance.')});
+    let request=0;
+    const load=()=>{const serial=++request;return getLottoPaperTrial(page,key).then(result=>{if(!Array.isArray(result.accounts)||!result.accounts.length||!result.accounts.every(a=>a.key&&a.label&&['combined','directional'].includes(a.scope)))throw new Error('Invalid account response');if(active&&serial===request){setData(result);setChoices(result.accounts);setError('')}})
+      .catch(()=>{if(active&&serial===request)setError('Lotto account unavailable. Any displayed figures are the last response, not a live balance.')})};
     void load();const timer=window.setInterval(()=>void load(),30000);
     return()=>{active=false;window.clearInterval(timer)};
   },[key,page]);
+  const choose=(value:string)=>{setKey(value);setPage(1);setData(null);setError('')};
+  const selectedKey=key??data?.account_key;
   return <section className="forward-account graph-panel" aria-label="Forward lotto paper accounts">
     <h3>What did the lotto rules actually keep?</h3><p>Two exit-rule experiments: 5× trigger versus a 40% trail after 2×. Each starts with $500 shared by calls and puts. Never add these balances together. No brokerage orders.</p>
-    <p>Each shared account has one open idea across calls and puts, one contract per ticker/day, and a combined $100 daily all-in cap. The two exit rules run independently, so later entries can differ. Model: $1.50 opening costs, $0.50 closing costs, plus 1¢ premium slippage each side.</p>
-    {data&&<label className="account-trial-selector">Lotto experiment <select value={key??data.account_key} onChange={e=>{setKey(e.target.value);setPage(1);setData(null);setError('')}}>
-      <optgroup label="Shared calls + puts · $500 each">{data.accounts.filter(a=>a.scope==='combined').map(a=><option key={a.key} value={a.key}>{a.label}</option>)}</optgroup>
-      <optgroup label="Original directional comparisons · $500 each">{data.accounts.filter(a=>a.scope==='directional').map(a=><option key={a.key} value={a.key}>{a.label}</option>)}</optgroup>
-    </select></label>}
+    <details className="shared-account-rules"><summary>Shared account limits &amp; modeled costs</summary><p>Each shared account has one open idea across calls and puts, one contract per ticker/day, and a combined $100 daily all-in cap. The two exit rules run independently, so later entries can differ. Model: $1.50 opening costs, $0.50 closing costs, plus 1¢ premium slippage each side.</p></details>
+    {choices.length>0&&<><div className="exit-rule-switch" role="group" aria-label="Shared calls and puts exit rule">{choices.filter(a=>a.scope==='combined').map(a=><button key={a.key} type="button" aria-pressed={selectedKey===a.key} onClick={()=>choose(a.key)}><strong>{a.key.includes('fixed5')?'5× Exit':'Trail after 2×'}</strong><span>{a.key.includes('fixed5')?'Request an exit at 5×':'40% trail once doubled'} · Calls + puts</span></button>)}</div>
+    <details className="original-experiments"><summary>Original directional comparisons</summary><p>Separate research accounts; not part of the shared balance.</p><label className="account-trial-selector">Original experiment <select value={choices.some(a=>a.scope==='directional'&&a.key===selectedKey)?selectedKey:''} onChange={e=>choose(e.target.value)}>
+      <option value="" disabled>Choose an original account</option>{choices.filter(a=>a.scope==='directional').map(a=><option key={a.key} value={a.key}>{a.label}</option>)}
+    </select></label></details></>}
     {data&&data.accounts.find(a=>a.key===data.account_key)?.scope==='directional'&&<p className="execution-warning">Original directional comparison—not a shared calls + puts account. Its two exit variants still use paired entries and separate balances. Original rules and results are preserved.</p>}
     {error&&<p role="alert">{error}</p>}{!data&&!error&&<p>Loading saved lotto account…</p>}
     {data&&data.status!=='ACTIVE'&&<p>{data.status==='SCHEDULED'?'Scheduled':'Waiting for scanner initialization'} · {formatEasternDateTime(data.scheduled_start)}. No old trades are imported.</p>}

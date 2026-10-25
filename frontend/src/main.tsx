@@ -10,15 +10,17 @@ import { StrategyControls } from './components/StrategyControls';
 import { LotteryLab } from './components/LotteryTracker';
 import type { DailyWatchResponse, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert, StrategyMode, StrategyView } from './types';
 import { parseApiTimestamp } from './lib/dates';
+import {AppShell,appPages} from './components/AppShell';
+import type {AppPage} from './components/AppShell';
+import {readPreference,savePreference} from './lib/preferences';
 import './style.css';
 import './visual-history.css';
+import './app-shell.css';
 
 export const PARLAY_REFRESH_INTERVAL_MS = 15_000;
 
 const statusOrder:Record<ParlayCandidate['signal_status'],number>={BUY:0,WATCH:1,MISSED:2,PASS:3,UNAVAILABLE:4};
-type AppPage='parlay'|'lottery'|'performance'|'backtest-lab';
-const appPages:AppPage[]=['parlay','lottery','performance','backtest-lab'];
-function pageFromHash():AppPage {const hash=window.location.hash.slice(1);return appPages.includes(hash as AppPage)?hash as AppPage:'parlay'}
+function pageFromHash():AppPage {const hash=window.location.hash.slice(1);const saved=readPreference('page');return appPages.includes(hash as AppPage)?hash as AppPage:!hash&&appPages.includes(saved as AppPage)?saved as AppPage:'parlay'}
 
 export function stabilizeCandidateOrder(next:ParlayResponse,previous:ParlayResponse|null):ParlayResponse {
   if(!previous)return next;
@@ -34,6 +36,7 @@ export function stabilizeCandidateOrder(next:ParlayResponse,previous:ParlayRespo
 
 export function App() {
   const [activePage,setActivePage]=useState<AppPage>(pageFromHash);
+  const navigate=(page:AppPage)=>{if(window.location.hash!==`#${page}`)window.history.pushState(null,'',`#${page}`);setActivePage(page);savePreference('page',page)};
   const [parlays,setParlays]=useState<ParlayResponse|null>(null);
   const [dailyWatch,setDailyWatch]=useState<DailyWatchResponse|null>(null);
   const [dailyWatchBusy,setDailyWatchBusy]=useState(false);
@@ -76,20 +79,18 @@ export function App() {
   const addWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await addDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} added for today.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to add ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const removeWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await removeDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} removed.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to remove ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const controlScanner=useCallback(async(action:'HOLD'|'RESUME')=>{if(action==='HOLD'&&!window.confirm('Hold automated scans? The dashboard and saved research will remain available.'))return;setScannerControlBusy(true);setScannerFeedback('');try{const result=await setScannerControl(action);setScannerFeedback(result.message);await refreshParlays()}catch(reason){setScannerFeedback(reason instanceof Error?reason.message:'Unable to update scanner control')}finally{setScannerControlBusy(false)}},[refreshParlays]);
-  return <main>
-    <nav className="top-navigation" aria-label="Primary"><a href="#parlay" aria-current={activePage==='parlay'?'page':undefined} onClick={()=>setActivePage('parlay')}>Trade Board</a><a href="#lottery" aria-current={activePage==='lottery'?'page':undefined} onClick={()=>setActivePage('lottery')}>Lottery Plays</a><a href="#performance" aria-current={activePage==='performance'?'page':undefined} onClick={()=>setActivePage('performance')}>Play History</a><a href="#backtest-lab" aria-current={activePage==='backtest-lab'?'page':undefined} onClick={()=>setActivePage('backtest-lab')}>Backtests</a></nav>
-    <div hidden={activePage!=='parlay'}>
+  return <AppShell activePage={activePage} onNavigate={navigate} data={parlays} stale={parlayStale} refreshing={parlayRefreshing} onRefresh={()=>void refreshParlays()}>
+    <div className="app-page" hidden={activePage!=='parlay'}>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
     <StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>
     <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
     <SignalAlerts alerts={signalAlerts}/>
-    {parlays?<ParlayBoard data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
+    {parlays?<ParlayBoard active={activePage==='parlay'} data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
     </div>
-    <div hidden={activePage!=='lottery'}><LotteryLab/></div>
-    <div hidden={activePage!=='performance'}><Performance/></div>
-    <div hidden={activePage!=='backtest-lab'}><BacktestLab/></div>
-    <footer>Parlay paper-only research · No brokerage adapter or order-routing path exists.</footer>
-  </main>;
+    <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>
+    <div className="app-page" hidden={activePage!=='performance'}><Performance/></div>
+    <div className="app-page" hidden={activePage!=='backtest-lab'}><BacktestLab/></div>
+  </AppShell>;
 }
 
 const root=document.getElementById('root');
