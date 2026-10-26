@@ -288,9 +288,9 @@ def lottery_trackers(trading_date: date | None = None, limit: int = 50,
 
 
 @router.get("/lotto-paper-trials")
-def lotto_paper_trials(account_key: str | None = None, page: int = 1, db: Session = Depends(get_db)):
+def lotto_paper_trials(account_key: str | None = None, page: int = 1, view: str = "ALL", db: Session = Depends(get_db)):
     try:
-        return lotto_trial_summary(db, account_key, page)
+        return lotto_trial_summary(db, account_key, page, view=view)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
