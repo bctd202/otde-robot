@@ -21,9 +21,9 @@ test('defaults to shared fixed5 and scheduled accounts cannot look funded',async
   expect(screen.getAllByRole('option')).toHaveLength(5);
   expect(screen.getByRole('group',{name:'Shared calls and puts exit rule'})).toBeInTheDocument();
   expect(screen.queryByRole('region',{name:'Account value and percentage return'})).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText('Original directional comparisons'));
-  fireEvent.change(screen.getByRole('combobox',{name:'Original experiment'}),{target:{value:'put-fixed5'}});
-  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=put-fixed5'));
+  fireEvent.click(screen.getByText('Other experiment versions'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Experiment version'}),{target:{value:'put-fixed5'}});
+  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=put-fixed5&view=ENTERED'));
   expect(screen.getByText(/Never add these balances together/)).toBeInTheDocument();
 });
 
@@ -39,14 +39,14 @@ test('switches exit rules and original comparisons without combining balances',a
   expect(screen.getByText(/2 entered · 1 closed · 0 open · 1 unknown/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Trades'}));
   fireEvent.click(screen.getByRole('button',{name:'Next trades'}));
-  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=2'));
+  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=2&view=ENTERED'));
   fireEvent.click(screen.getByRole('button',{name:/^Trail after 2×/}));
-  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=both-trail40'));
+  await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&account_key=both-trail40&view=ENTERED'));
   await screen.findByRole('button',{name:/^Trail after 2×/});
-  fireEvent.click(screen.getByText('Original directional comparisons'));
-  fireEvent.change(screen.getByRole('combobox',{name:'Original experiment'}),{target:{value:'put-fixed5'}});
+  fireEvent.click(screen.getByText('Other experiment versions'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Experiment version'}),{target:{value:'put-fixed5'}});
   await screen.findByText(/Original directional comparison—not a shared/);
-  expect(screen.getByRole('combobox',{name:'Original experiment'})).toHaveValue('put-fixed5');
+  expect(screen.getByRole('combobox',{name:'Experiment version'})).toHaveValue('put-fixed5');
 });
 
 test('forward account defaults to balance, paginates trades and opens evidence',async()=>{
@@ -62,7 +62,7 @@ test('forward account defaults to balance, paginates trades and opens evidence',
   expect(inspect).toHaveBeenCalledWith('tracker1');
   fireEvent.click(screen.getByRole('button',{name:'Next trades'}));
   await screen.findByText('Page 2 of 2');
-  expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=2');
+  expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=2&view=ENTERED');
 });
 
 test('quote gaps remain visible and invalid responses show unavailable',async()=>{
@@ -75,4 +75,37 @@ test('quote gaps remain visible and invalid responses show unavailable',async()=
   render(<LottoForward onInspect={()=>{}}/>);
   await screen.findByRole('alert');
   expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+});
+
+test('new contract ceiling is separate from daily spending and legacy accounts remain accessible',async()=>{
+  const nextAccounts=[...accounts.map(a=>({...a,generation:a.scope==='combined'?'single':'directional'})),
+    ...['fixed5','trail40'].map(rule=>({key:`multi-${rule}`,label:`Multi ${rule}`,scope:'combined',generation:'multi'}))];
+  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({...active,accounts:nextAccounts,account_key:'multi-fixed5'})));
+  render(<LottoForward onInspect={()=>{}}/>);
+  await screen.findByRole('region',{name:'Calls versus puts breakdown'});
+  expect(screen.getByText(/Maximum \$100 premium per standard contract/)).toHaveTextContent('No daily spending cap');
+  expect(screen.getAllByText(/5 slots/)).toHaveLength(2);
+  fireEvent.click(screen.getByText('Other experiment versions'));
+  expect(screen.getAllByRole('option')).toHaveLength(7);
+});
+
+test('trade filters request separate server pages and do not label skips as losses',async()=>{
+  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(async input=>new Response(JSON.stringify({...active,
+    trades:String(input).includes('view=SKIPPED')?[]:active.trades,pagination:{page:1,pages:1,total:0}})));
+  render(<LottoForward onInspect={()=>{}}/>);
+  await screen.findByRole('region',{name:'Calls versus puts breakdown'});
+  fireEvent.click(screen.getByRole('button',{name:'Trades'}));
+  expect(screen.getByRole('button',{name:'Entered trades'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(screen.getByRole('button',{name:'Skipped opportunities'}));
+  await screen.findByText('No skipped opportunities in this account.');
+  expect(fetch).toHaveBeenCalledWith('/api/lotto-paper-trials?page=1&view=SKIPPED');
+  expect(screen.queryByText('gain $30.00 · +150.0%')).not.toBeInTheDocument();
+});
+
+test('planned multi-position accounts cannot appear active or funded',async()=>{
+  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({...scheduled,
+    status:'NOT_STARTED',scheduled_start:null,activation_required:true})));
+  render(<LottoForward onInspect={()=>{}}/>);
+  await screen.findByText(/Not activated — requires explicit approval/);
+  expect(screen.queryByRole('region',{name:'Account value and percentage return'})).not.toBeInTheDocument();
 });

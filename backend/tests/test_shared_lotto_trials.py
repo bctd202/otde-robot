@@ -45,7 +45,7 @@ def test_new_default_is_scheduled_read_only_then_once_funded_without_history(db)
     response = lotto_trial_summary(db, now=before)
     assert response['status'] == 'SCHEDULED'
     assert response['account_key'] == key_for('both', 'fixed5')
-    assert [a['scope'] for a in response['accounts']] == ['combined']*2+['directional']*4
+    assert [a['scope'] for a in response['accounts']] == ['combined']*2+['directional']*4+['combined']*2
     assert db.scalar(select(func.count()).select_from(LottoTrialAccount)) == 4
     # Late deployment starts at the real activation time, not Monday's open.
     ensure_lotto_trials(db, NOW)

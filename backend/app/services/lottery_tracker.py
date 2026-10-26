@@ -60,14 +60,16 @@ def _market_inputs(provider, symbols: list[str], trading_day: date, observed_at:
 
 
 def _discover(symbols: list[str], quotes: dict[str, Quote], candles: dict[str, list],
-              chains: dict[str, list[OptionContractOut]], provider_status, *, right="call") -> list[LotteryOut]:
+              chains: dict[str, list[OptionContractOut]], provider_status, *, right="call",
+              contract_cap_cents: int | None = None) -> list[LotteryOut]:
     candidates: list[LotteryOut] = []
     for symbol in symbols:
         quote = quotes.get(symbol)
         rows = candles.get(symbol, [])
         if quote is None or len(rows) < 12:
             continue
-        candidates.extend(lottery_candidates(symbol, rows, quote, chains.get(symbol, []), provider_status, right=right))
+        candidates.extend(lottery_candidates(symbol, rows, quote, chains.get(symbol, []), provider_status,
+                                             right=right, contract_cap_cents=contract_cap_cents))
     return sorted(candidates, key=lambda item: item.setup_score, reverse=True)[:3]
 
 
@@ -163,13 +165,14 @@ def track_lottery_scan(db: Session, provider, symbols: list[str], evaluation_at:
     quotes, candles, chains = _market_inputs(
         provider, all_symbols, trading_day, observed_at, evaluation_at,
     )
-    candidates = _discover(requested_symbols, quotes, candles, chains, provider.status())
+    from app.services.lotto_trials import TRIAL_START, multi_trials_active
+    cap = 10000 if multi_trials_active(db, now or datetime.now(timezone.utc)) else None
+    candidates = _discover(requested_symbols, quotes, candles, chains, provider.status(), contract_cap_cents=cap)
     # Separately tagged bearish experiment; no extra feed calls or CALL changes.
-    from app.services.lotto_trials import TRIAL_START
     status = provider.status()
     if (observed_at >= TRIAL_START and status.provider == "tastytrade"
             and status.mode == "live" and status.status == "healthy"):
-        candidates += _discover(requested_symbols, quotes, candles, chains, status, right="put")
+        candidates += _discover(requested_symbols, quotes, candles, chains, status, right="put", contract_cap_cents=cap)
     candidate_by_contract = {item.option_symbol.strip().upper(): item for item in candidates}
 
     trackers_by_contract = {
