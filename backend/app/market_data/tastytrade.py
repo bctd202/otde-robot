@@ -109,6 +109,10 @@ class DXLinkSnapshotClient:
         from websockets.sync.client import connect
         requested = {key: self.EVENT_FIELDS[key] for key in event_types}
         output: list[dict[str, Any]] = []
+        # Only point-in-time metrics may finish early. Candle history can arrive
+        # in several packets and must retain the full bounded collection window.
+        expected = {(row['type'], row['symbol']) for row in subscriptions}
+        seen: set[tuple[str, str]] = set()
         deadline = datetime.now(timezone.utc) + timedelta(seconds=self.timeout)
         with connect(self.url, open_timeout=self.timeout, close_timeout=1) as ws:
             ws.send(json.dumps({"type": "SETUP", "channel": 0, "version": "0.1-DXF-JS/0.3.0",
@@ -137,7 +141,11 @@ class DXLinkSnapshotClient:
                     ws.send(json.dumps({"type": "FEED_SUBSCRIPTION", "channel": 3,
                                         "reset": True, "add": subscriptions}))
                 elif kind == "FEED_DATA":
-                    output.extend(self._events(message.get("data"), requested))
+                    events = list(self._events(message.get("data"), requested))
+                    output.extend(events)
+                    seen.update((str(row.get('eventType')), str(row.get('eventSymbol'))) for row in events)
+                    if event_types <= {'Greeks', 'Summary'} and expected and expected <= seen:
+                        break
             return output
 
 
@@ -633,12 +641,16 @@ class TastytradeMarketDataProvider:
         if not instruments:
             return []
         quote_rows: dict[str, dict[str, Any]] = {}
+        receipts: dict[str, datetime] = {}
         for offset in range(0, len(instruments), 100):
             batch = instruments[offset:offset+100]
             symbols = [str(row.get("symbol", "")) for row in batch if row.get("symbol")]
             payload = self._request("GET", "/market-data/by-type", params={"equity-option": ",".join(symbols)})
+            received_at = datetime.now(timezone.utc)
             for row in _items(payload):
-                quote_rows[_occ_compact(str(row.get("symbol", "")))] = row
+                key = _occ_compact(str(row.get("symbol", "")))
+                quote_rows[key] = row
+                receipts[key] = received_at
         metrics = self._option_metrics(instruments)
         result = []
         for row in instruments:
@@ -646,7 +658,18 @@ class TastytradeMarketDataProvider:
             quote = quote_rows.get(_occ_compact(raw_symbol))
             if not quote:
                 continue
-            stamp = _stamp(quote.get("updated-at") or quote.get("updatedAt")).astimezone(NY)
+            raw_stamp = quote.get("updated-at") or quote.get("updatedAt")
+            # A local receipt is not an exchange timestamp. Never manufacture a
+            # fresh bid/ask timestamp when the upstream timestamp is absent/bad.
+            try:
+                stamp = (_stamp(raw_stamp) if isinstance(raw_stamp, (int, float))
+                         and not isinstance(raw_stamp, bool) else
+                         datetime.fromisoformat(str(raw_stamp).replace('Z', '+00:00')))
+                if stamp.tzinfo is None:
+                    continue
+                stamp = stamp.astimezone(NY)
+            except (ValueError, TypeError, OverflowError, OSError):
+                continue
             metric = metrics.get(str(row.get("streamer-symbol", "")), {})
             try:
                 result.append(OptionContractOut(symbol=symbol.upper(), option_symbol=_occ_compact(raw_symbol),
@@ -657,7 +680,8 @@ class TastytradeMarketDataProvider:
                     volume=int(_number(quote.get("volume"))), open_interest=int(_number(metric.get("openInterest"))),
                     iv=metric.get("volatility"), delta=metric.get("delta"), gamma=metric.get("gamma"),
                     theta=metric.get("theta"), vega=metric.get("vega"), timestamp=stamp,
-                    bid_timestamp=stamp, ask_timestamp=stamp, provider="tastytrade", data_mode="live"))
+                    bid_timestamp=stamp, ask_timestamp=stamp, provider="tastytrade", data_mode="live",
+                    received_at=receipts[_occ_compact(raw_symbol)], receipt_basis="REST_RESPONSE_RECEIVED_V1"))
                 self._latest = max(self._latest, stamp)
             except (KeyError, TypeError, ValueError):
                 continue

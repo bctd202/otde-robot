@@ -110,6 +110,8 @@ export interface ShadowEvidenceAudit {
     quote_lag_seconds:number|null}[];
 }
 export interface CollectionEvidence {
+  scan_timing?:{measured_scans:number;window_scans:number;over_minute_scans:number;p95_seconds:number|null;
+    latest_at:string|null;latest_phases_ms:Record<string,number>;basis:string};
   status:'CURRENT'|'STALE'|'CLOSED'|'HELD'|'WARMING_UP';has_coverage_gaps:boolean;basis:string;
   sessions:{date:string;expected_minutes:number;observed_minutes:number;missing_minutes:number;
     coverage_percent:number|null;complete_session:boolean}[];

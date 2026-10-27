@@ -19,6 +19,26 @@ def test_missing_weekday_sessions_stay_visible_over_weekend():
     assert result["has_coverage_gaps"]
     assert [day["date"] for day in result["sessions"]] == [f"2026-10-{d}" for d in range(23, 18, -1)]
     assert all(day["expected_minutes"] == 390 for day in result["sessions"])
+    assert result['scan_timing']['measured_scans']==0
+    assert result['scan_timing']['p95_seconds'] is None
+
+
+def test_timing_summary_is_bounded_and_does_not_invent_old_durations():
+    engine=create_engine('sqlite://'); Base.metadata.create_all(engine)
+    now=datetime(2026,10,26,14,tzinfo=NY)
+    with Session(engine) as db:
+        for index in range(125):
+            at=now-timedelta(minutes=125-index)
+            payload={'scan_timing_v1':{'total_ms':70000,'phases_ms':{'lotto':50000}}} if index%2 else {}
+            db.add(SignalScan(trading_date=now.date(),scanned_at=at,evaluation_candle_at=at-timedelta(minutes=1),
+                              provider_status=payload,universe=[],candidates=[]))
+        db.flush()
+        result=collection_evidence(db,now,None)['scan_timing']
+        assert result['window_scans']==120
+        assert result['measured_scans']==60
+        assert result['over_minute_scans']==60
+        assert result['p95_seconds']==70
+        assert result['latest_phases_ms']=={'lotto':50000}
 
 
 def test_unique_minutes_partial_session_and_stale_runtime():

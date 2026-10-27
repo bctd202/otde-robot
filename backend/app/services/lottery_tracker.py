@@ -120,6 +120,9 @@ def _record_point(db: Session, tracker: LotteryTracker, contract: OptionContract
     db.add(LotteryQuoteSnapshot(
         tracker_id=tracker.id, observed_at=observed_at,
         received_at=now, provider=contract.provider, data_mode=contract.data_mode,
+        receipt_evidence={"version": "quote-receipt-v1", "processed_at": now.isoformat(),
+            "received_at": _utc(contract.received_at).isoformat() if contract.received_at else None,
+            "basis": contract.receipt_basis or "UNKNOWN"},
         quote_timestamp=_utc(contract.timestamp),
         bid_timestamp=_utc(contract.bid_timestamp) if contract.bid_timestamp else None,
         ask_timestamp=_utc(contract.ask_timestamp) if contract.ask_timestamp else None,

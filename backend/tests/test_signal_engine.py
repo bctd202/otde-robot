@@ -93,6 +93,10 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
         assert first is not None and second is not None and first.id == second.id
         assert calls == 1
         assert signal_engine.cached_candidates(second)[0].symbol == "SPY"
+        timing=first.provider_status['scan_timing_v1']
+        assert timing['total_ms'] >= 0
+        assert set(timing['phases_ms']) == {'one_minute','structured','lifecycle_and_shadow',
+            'lotto','forward_account_and_observations','alerts'}
 
 
 def test_latest_scan_query_fetches_only_one_ledger_row():

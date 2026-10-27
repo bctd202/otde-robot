@@ -22,7 +22,24 @@ def alembic(db: Path, *args: str) -> str:
 def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0016_lotto_trials" in alembic(db, "current")
+    assert "0017_quote_receipt" in alembic(db, "current")
+
+
+def test_receipt_migration_does_not_invent_historical_receipts(tmp_path):
+    db = tmp_path / 'before-receipts.db'
+    alembic(db, 'upgrade', '0016_lotto_trials')
+    with sqlite3.connect(db) as conn:
+        # Bootstrap uses current metadata; emulate the deployed 0016 columns.
+        conn.execute('ALTER TABLE lottery_quote_snapshots DROP COLUMN receipt_evidence')
+        conn.execute('''INSERT INTO lottery_quote_snapshots
+            (tracker_id,observed_at,quote_timestamp,bid,ask,midpoint,last,spread_percent,volume,open_interest,is_qualified,received_at)
+            VALUES ('old','2026-10-26','2026-10-26',.18,.20,.19,.19,10,1500,2000,1,'2026-10-26')''')
+        original=conn.execute('SELECT * FROM lottery_quote_snapshots').fetchall()
+    alembic(db, 'upgrade', 'head')
+    with sqlite3.connect(db) as conn:
+        upgraded=conn.execute('SELECT * FROM lottery_quote_snapshots').fetchall()
+        assert [row[:-1] for row in upgraded]==original
+        assert upgraded[0][-1] is None
 
 
 def test_equity_migration_preserves_existing_account_and_cash_events(tmp_path):

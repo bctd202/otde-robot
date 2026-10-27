@@ -115,7 +115,20 @@ def fresh_point(db, tracker_id, now, *, after=None):
         LotteryQuoteSnapshot.id.desc()).limit(1))
     if point is None or point.provider != "tastytrade" or point.data_mode != "live":
         return None
-    stamps = (point.bid_timestamp, point.ask_timestamp, point.received_at)
+    stamps = [point.bid_timestamp, point.ask_timestamp, point.received_at]
+    # Legacy rows retain their existing semantics. New evidence separates
+    # response arrival from collector processing; a cache hit cannot refresh it.
+    if point.receipt_evidence is not None:
+        receipt = point.receipt_evidence
+        if receipt.get('basis') != 'REST_RESPONSE_RECEIVED_V1' or not receipt.get('received_at'):
+            return None
+        try:
+            actual_received = datetime.fromisoformat(receipt['received_at'])
+        except (ValueError, TypeError):
+            return None
+        if actual_received.tzinfo is None:
+            return None
+        stamps.append(actual_received)
     if any(stamp is None or not 0 <= (now-utc(stamp)).total_seconds() <= 60 for stamp in stamps):
         return None
     if after is not None and any(utc(stamp) < after for stamp in stamps):
@@ -126,9 +139,13 @@ def fresh_point(db, tracker_id, now, *, after=None):
 
 
 def quote_evidence(point):
+    receipt = point.receipt_evidence or {}
     return {"snapshot_id": point.id, "bid": point.bid, "ask": point.ask,
             "bid_at": utc(point.bid_timestamp).isoformat(), "ask_at": utc(point.ask_timestamp).isoformat(),
-            "received_at": utc(point.received_at).isoformat(), "provider": point.provider,
+            "received_at": receipt.get('received_at') if receipt else utc(point.received_at).isoformat(),
+            "processed_at": utc(point.received_at).isoformat(),
+            "receipt_basis": receipt.get('basis', 'LEGACY_PROCESSING_TIME'), "provider": point.provider,
+            "receipt_evidence": point.receipt_evidence,
             "size_available": False}
 
 

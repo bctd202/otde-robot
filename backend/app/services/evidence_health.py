@@ -1,5 +1,6 @@
 """Read-only collection diagnostics. Never change selection or ledger records."""
 from datetime import date, datetime, timedelta, timezone
+import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,6 +41,22 @@ def collection_evidence(db: Session, now: datetime, runtime: ScannerRuntime | No
                          "coverage_percent": round(100*len(minutes)/expected, 1) if expected else None,
                          "complete_session": now >= close})
     age = None
+    # Read only the latest bounded window, not every saved candidate payload.
+    recent = db.execute(select(SignalScan.scanned_at, SignalScan.provider_status).where(
+        SignalScan.scanned_at >= start, SignalScan.scanned_at <= now)
+        .order_by(SignalScan.scanned_at.desc()).limit(120)).all()
+    measured = [(at, payload['scan_timing_v1']) for at, payload in recent
+                if isinstance(payload, dict) and isinstance(payload.get('scan_timing_v1'), dict)
+                and isinstance(payload['scan_timing_v1'].get('total_ms'), (int, float))
+                and math.isfinite(payload['scan_timing_v1']['total_ms'])
+                and payload['scan_timing_v1']['total_ms'] >= 0]
+    durations = sorted(timing['total_ms']/1000 for _, timing in measured)
+    timing_summary = {'measured_scans': len(durations), 'window_scans': len(recent),
+        'over_minute_scans': sum(duration >= 60 for duration in durations),
+        'p95_seconds': round(durations[math.ceil(.95*len(durations))-1], 2) if durations else None,
+        'latest_at': utc(measured[0][0]).isoformat() if measured else None,
+        'latest_phases_ms': measured[0][1].get('phases_ms', {}) if measured else {},
+        'basis': 'Last 120 saved scans within five sessions. New instrumentation only; no historical timing inferred. Work time excludes the final database commit. A run over 60 seconds can overlap the next scheduled scan; it is not proof of the cause of every gap.'}
     if runtime and runtime.last_evaluation_candle_at:
         age = round((now-utc(runtime.last_evaluation_candle_at)).total_seconds())
     if runtime and runtime.operator_hold:
@@ -51,6 +68,7 @@ def collection_evidence(db: Session, now: datetime, runtime: ScannerRuntime | No
     else:
         status = "CURRENT" if age is not None and 0 <= age <= 180 else "STALE"
     return {"status": status, "evaluation_age_seconds": age, "sessions": sessions,
+            "scan_timing": timing_summary,
             "has_coverage_gaps": any(row["missing_minutes"] > 0 for row in sessions),
             "basis": "Unique saved regular-session evaluation minutes; not proof of valid quotes or every ticker's candles.",
             "historical_records_changed": False}

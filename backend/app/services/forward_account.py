@@ -104,6 +104,10 @@ def _quote(provider, mark: AutomatedOptionMark, now: datetime, earliest: datetim
     except (KeyError, ValueError, RuntimeError):
         return None
     for quote in chain:
+        if quote.provider == 'tastytrade':
+            if (quote.receipt_basis != 'REST_RESPONSE_RECEIVED_V1' or quote.received_at is None
+                    or not max(earliest, now-timedelta(seconds=policy['quote_age_seconds'])) <= utc(quote.received_at) <= now):
+                continue
         decision = validate_exit_quote(quote, mark.ticker, mark.normalized_option_symbol,
             max(earliest, now-timedelta(seconds=policy["quote_age_seconds"])), policy["quote_age_seconds"])
         if (decision.actionable and quote.provider == policy["required_provider"]
@@ -118,6 +122,8 @@ def _quote(provider, mark: AutomatedOptionMark, now: datetime, earliest: datetim
 
 def _evidence(quote, now: datetime) -> dict:
     return {"observed_at": now.isoformat(), "bid": quote.bid, "ask": quote.ask,
+        "received_at": utc(quote.received_at).isoformat() if quote.received_at else None,
+        "receipt_basis": quote.receipt_basis or 'UNKNOWN',
         "bid_at": utc(quote.bid_timestamp).isoformat(), "ask_at": utc(quote.ask_timestamp).isoformat(),
         "provider": quote.provider, "data_mode": quote.data_mode, "option_symbol": quote.option_symbol}
 
