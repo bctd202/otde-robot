@@ -206,6 +206,7 @@ class LotteryQuoteSnapshot(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tracker_id: Mapped[str] = mapped_column(ForeignKey("lottery_trackers.id"), index=True)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    receipt_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     data_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

@@ -15,6 +15,14 @@ export function CollectionChecks({evidence}:{evidence?:CollectionEvidence}){
       {evidence.sessions.map(day=><div className="coverage-day" key={day.date}><span>{day.date}{!day.complete_session?' · so far':''}</span>
         <meter min="0" max={Math.max(1,day.expected_minutes)} value={day.observed_minutes} aria-label={`${day.date} saved evaluation minutes`}/>
         <span>{day.observed_minutes}/{day.expected_minutes} minutes · {day.coverage_percent??'—'}%</span></div>)}
+      {evidence.scan_timing&&<details><summary>Scan speed &amp; bottlenecks</summary>
+        {evidence.scan_timing.measured_scans?<>
+          <p>{evidence.scan_timing.measured_scans} measured scans · 95% finished within {evidence.scan_timing.p95_seconds}s · {evidence.scan_timing.over_minute_scans} took at least a minute.</p>
+          <p>Latest measured run: {formatEasternDateTime(evidence.scan_timing.latest_at)}</p>
+          <ul>{Object.entries(evidence.scan_timing.latest_phases_ms).map(([phase,ms])=><li key={phase}>{phase.replaceAll('_',' ')}: {(ms/1000).toFixed(1)}s</li>)}</ul>
+        </>:<p>No measured scans yet. Timing starts with the new collector; historical gaps remain visible.</p>}
+        <p>{evidence.scan_timing.basis}</p>
+      </details>}
     </div>
   </details>;
 }

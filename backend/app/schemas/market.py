@@ -50,6 +50,8 @@ class OptionContractOut(BaseModel):
     verification_reason: str = "Contract has not been independently verified"
     actionable: bool = False
     normalized_symbol: str | None = None
+    received_at: datetime | None = None
+    receipt_basis: str | None = None
 
 class SetupOut(BaseModel):
     symbol: str

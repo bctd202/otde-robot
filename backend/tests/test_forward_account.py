@@ -23,7 +23,8 @@ def trial_fixture_clock(monkeypatch):
 class Quotes:
     def __init__(self, stamp, *, bid=.40, ask=.45, mode="live", **changes):
         self.mode = mode
-        self.quote = shadow_contract(stamp=stamp, bid=bid, ask=ask).model_copy(update={"provider": "tastytrade", **changes})
+        self.quote = shadow_contract(stamp=stamp, bid=bid, ask=ask).model_copy(update={"provider": "tastytrade",
+            "received_at":stamp, "receipt_basis":"REST_RESPONSE_RECEIVED_V1", **changes})
 
     def status(self):
         return SimpleNamespace(status="healthy", mode=self.mode)
@@ -61,6 +62,27 @@ def opened(db):
     advance_account(db, Quotes(START+timedelta(seconds=2)), now=START+timedelta(seconds=2))
     db.commit()
     return trade
+
+
+@pytest.mark.parametrize('changes',[
+    {'receipt_basis':None,'received_at':None},
+    {'receipt_basis':'UNKNOWN'}, {'received_at':None},
+    {'received_at':START-timedelta(seconds=65)},
+    {'received_at':START}, {'received_at':START+timedelta(minutes=1)},
+])
+def test_forward_entries_require_actual_fresh_post_decision_receipt(changes):
+    local=database()
+    with local() as db:
+        ensure_account(db,START-timedelta(seconds=1))
+        candidate(db)
+        advance_account(db,Quotes(START),now=START)
+        later=START+timedelta(seconds=2)
+        advance_account(db,Quotes(later,**changes),now=later)
+        position=db.scalar(select(ForwardPaperPosition))
+        assert position.status=='PENDING_ENTRY'
+        advance_account(db,Quotes(later+timedelta(seconds=1)),now=later+timedelta(seconds=1))
+        assert position.status=='OPEN'
+        assert position.detail['entry_quote']['receipt_basis']=='REST_RESPONSE_RECEIVED_V1'
 
 
 def test_read_does_not_activate_and_restart_does_not_import_history_or_reset_policy(monkeypatch):

@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 from threading import Lock
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, cast
@@ -245,32 +246,49 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
     runtime.heartbeat_at = now
     runtime.last_error = None
     db.commit()
+    started = perf_counter()
+    phase_started = started
+    timings: dict[str, float] = {}
+
+    def finish_phase(name: str) -> None:
+        nonlocal phase_started
+        finished = perf_counter()
+        timings[name] = round((finished-phase_started)*1000, 2)
+        phase_started = finished
+
     try:
         one_minute = rank_parlays(provider, universe, completed_at=evaluation_at)
+        finish_phase('one_minute')
         structured = rank_structured_intraday(provider, universe, completed_at=evaluation_at)
+        finish_phase('structured')
         candidates = one_minute + structured
         apply_lifecycle(db, candidates, evaluation_at)
         track_candidates(db, candidates, provider)
+        finish_phase('lifecycle_and_shadow')
         track_lottery_scan(db, provider, get_settings().symbol_list, evaluation_at)
         advance_lotto_trials(db)
+        finish_phase('lotto')
         record_option_observations(db, provider)
         refresh_account_quotes(db, provider)
         advance_account(db, provider)
+        finish_phase('forward_account_and_observations')
         _position_alerts(db, provider)
         _performance_alerts(db)
+        finish_phase('alerts')
         if hasattr(provider, "budget_status"):
             budget = provider.budget_status()
             remaining = budget.get("remaining")
             if remaining is not None and remaining <= 20:
                 minute = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
                 _alert(db, lifecycle=None, symbol="SYSTEM", event_type="API_BUDGET_LOW",
-                       message=f"Tradier request capacity is low: {remaining} safe requests remain",
+                       message=f"Provider request capacity is low: {remaining} safe requests remain",
                        payload=budget, dedupe_key=f"api-budget:{minute}")
         final_status = provider.status()
         completed = datetime.now(timezone.utc)
         scan = SignalScan(trading_date=(evaluation_at + timedelta(minutes=1)).astimezone(NY).date(),
             scanned_at=completed, evaluation_candle_at=evaluation_at,
-            provider_status=final_status.model_dump(mode="json"), universe=universe,
+            provider_status={**final_status.model_dump(mode="json"), "scan_timing_v1": {
+                "total_ms": round((perf_counter()-started)*1000, 2), "phases_ms": timings}}, universe=universe,
             candidates=[candidate.model_dump(mode="json") for candidate in candidates])
         db.add(scan)
         runtime.status = "healthy" if final_status.status == "healthy" else "degraded"

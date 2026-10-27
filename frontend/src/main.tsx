@@ -7,6 +7,7 @@ import { BacktestLab } from './components/BacktestLab';
 import { DailyWatch } from './components/DailyWatch';
 import { SignalAlerts } from './components/SignalAlerts';
 import { StrategyControls } from './components/StrategyControls';
+import { BoardTools } from './components/BoardTools';
 import { LotteryLab } from './components/LotteryTracker';
 import type { DailyWatchResponse, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert, StrategyMode, StrategyView } from './types';
 import { parseApiTimestamp } from './lib/dates';
@@ -82,9 +83,11 @@ export function App() {
   return <AppShell activePage={activePage} onNavigate={navigate} data={parlays} stale={parlayStale} refreshing={parlayRefreshing} onRefresh={()=>void refreshParlays()}>
     <div className="app-page" hidden={activePage!=='parlay'}>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
-    <StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>
-    <DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>
-    <SignalAlerts alerts={signalAlerts}/>
+    <BoardTools viewLabel={strategyView==='ALL'?'All plays':strategyView==='ONE_MIN_0DTE'?'1-Min / 0DTE':'Structured Intraday'}
+      watchLabel={dailyWatch?`${dailyWatch.slots_used}/${dailyWatch.slot_limit} slots used`:'Loading watch list'} alertCount={signalAlerts.length}
+      selector={<StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>}
+      watch={<DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>}
+      alerts={<SignalAlerts alerts={signalAlerts}/>}/>
     {parlays?<ParlayBoard active={activePage==='parlay'} data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
     </div>
     <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>
