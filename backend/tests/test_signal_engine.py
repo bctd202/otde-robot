@@ -96,7 +96,7 @@ def test_scan_runs_once_per_completed_candle_and_uses_cached_snapshot(monkeypatc
         timing=first.provider_status['scan_timing_v1']
         assert timing['total_ms'] >= 0
         assert set(timing['phases_ms']) == {'one_minute','structured','lifecycle_and_shadow',
-            'lotto','forward_account_and_observations','alerts'}
+            'lotto','forward_account_and_observations','alerts','expanded_paper_account'}
 
 
 def test_latest_scan_query_fetches_only_one_ledger_row():

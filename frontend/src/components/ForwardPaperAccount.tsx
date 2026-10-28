@@ -4,6 +4,7 @@ import {formatEasternDateTime} from '../lib/dates';
 import type {ForwardAccount,PaperAccountChoice} from '../types';
 import {AccountEquityChart} from './AccountEquityChart';
 import {TradeResultCards} from './TradeResultCards';
+import {AccountCapacity} from './AccountCapacity';
 
 const money=(cents:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100);
 const human=(text:string)=>text.replaceAll('_',' ').toLowerCase();
@@ -26,7 +27,7 @@ export function ForwardPaperAccount(){
   const [data,setData]=useState<ForwardAccount|null>(null);
   const [page,setPage]=useState(1);
   const [pane,setPane]=useState<'ACCOUNT'|'TRADES'|'DETAILS'>('ACCOUNT');
-  const [accountKey,setAccountKey]=useState<string>();
+  const [accountKey,setAccountKey]=useState<string|undefined>(()=>new URLSearchParams(window.location.search).get('paper_account')??undefined);
   const [accounts,setAccounts]=useState<PaperAccountChoice[]>([]);
   const [status,setStatus]=useState('Loading the forward account…');
   const [error,setError]=useState('');
@@ -38,7 +39,7 @@ export function ForwardPaperAccount(){
       if(result.status==='SCHEDULED'||result.status==='NOT_STARTED'){
         setData(null);setStatus(result.status==='SCHEDULED'
           ? `Scheduled for ${formatEasternDateTime(result.scheduled_start!)}. A separate ${money(result.starting_cash_cents!)} paper trial will start when the scanner next processes the account on or after that time. No old trades or positions will be imported.`
-          : 'Not started. Waiting for the scanner to initialize the corrected trial. Historical plays will not be imported.');setError('');return;
+          : result.activation_required?'Not started. The ten-position account is prepared but requires explicit after-hours activation. No funding or historical trades have been imported. Select the existing trial to inspect its preserved balance.':'Not started. Waiting for the scanner to initialize the corrected trial. Historical plays will not be imported.');setError('');return;
       }
       if((result.status!=='ACTIVE'&&result.status!=='ARCHIVED')||!Array.isArray(result.events)||!result.policy)throw new Error('Invalid account response');
       setData(result);setError('');
@@ -54,9 +55,10 @@ export function ForwardPaperAccount(){
     {!data&&!error&&<p>{status}</p>}
     {data&&<>
       <nav className="workspace-tabs" aria-label="Cash account sections">{(['ACCOUNT','TRADES','DETAILS'] as const).map(value=><button key={value} aria-current={pane===value?'page':undefined} onClick={()=>{setPane(value);setPage(1)}}>{value==='ACCOUNT'?'Balance':value==='TRADES'?'Trades':'Account details'}</button>)}</nav>
-      {data.status==='ARCHIVED'?<p className="execution-warning">Legacy research — read-only. These balances and position states are preserved, not settled or forgiven. Held exposure remains unknown; no new entries, exits or settlements are processed here. It is not included in the corrected trial.</p>:<p>Corrected Tastytrade trial — its own starting capital, saved rules and results. Restarting does not reset it. Legacy research is kept separate.</p>}
+      {data.status==='ARCHIVED'?<p className="execution-warning">Legacy research — read-only. These balances and position states are preserved, not settled or forgiven. Held exposure remains unknown; no new entries, exits or settlements are processed here. It is not included in the corrected trial.</p>:<p>{data.policy.label??'Corrected Tastytrade trial'} — its own starting capital, saved rules and results. Restarting does not reset it. Other accounts remain separate; do not add their balances or overlapping trades together.</p>}
       <p className="forward-account-dates">Started {formatEasternDateTime(data.activated_at)} · Account last processed {formatEasternDateTime(data.processed_at)} · Snapshot {formatEasternDateTime(data.as_of)}</p>
       {data.processing_stale&&<p role="alert" className="execution-warning">Account processing is behind during market hours. Check scanner health; these figures do not confirm that new entries or exits are being tracked.</p>}
+      <AccountCapacity account={data}/>
       {pane==='ACCOUNT'&&<AccountEquityChart key={data.account_key} account={data}/>}
       {pane!=='DETAILS'&&data.unpriced_positions>0&&<p className="execution-warning">Account result is incomplete: {data.unpriced_positions} held position(s) have unknown value—not zero. Open Account details for the preserved exposure.</p>}
       {pane==='TRADES'&&<><TradeResultCards trades={data.trades??[]}/><nav className="forward-pagination" aria-label="Paper trade pages"><button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>Previous trades</button><span>Page {data.trade_pagination?.page??1} of {data.trade_pagination?.pages??1}</span><button disabled={page>=(data.trade_pagination?.pages??1)} onClick={()=>setPage(value=>value+1)}>Next trades</button></nav></>}

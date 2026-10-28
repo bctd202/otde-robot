@@ -26,6 +26,7 @@ from app.services.forward_account import advance_account, ensure_account, refres
 from app.services.lotto_trials import ensure_lotto_trials, advance_lotto_trials
 from app.services.structured_intraday import rank_structured_intraday
 from app.services import retest_trials
+from app.services import expanded_account
 
 logger = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -292,6 +293,15 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
                     retest_trials.event(db, f"collection-error:{evaluation_at.isoformat()}",
                         datetime.now(timezone.utc), "COLLECTION_ERROR", detail={"error_type":type(exc).__name__})
             finish_phase('retest_research')
+        # The expanded paper account consumes only leftover request capacity,
+        # after both the baseline and frozen retest study have been serviced.
+        try:
+            expanded_account.refresh_account_quotes(db, provider)
+            with db.begin_nested():
+                expanded_account.advance_account(db, provider)
+        except Exception:
+            logger.exception("Expanded paper account failed; baseline and retest retained")
+        finish_phase('expanded_paper_account')
         if hasattr(provider, "budget_status"):
             budget = provider.budget_status()
             remaining = budget.get("remaining")
@@ -462,6 +472,11 @@ def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
     with SessionLocal() as db:
         advance_account(db, now=started_at)
         advance_lotto_trials(db, now=started_at)
+        try:
+            with db.begin_nested():
+                expanded_account.advance_account(db, now=started_at)
+        except Exception:
+            logger.exception("Expanded paper housekeeping failed; baseline recovery retained")
         if retest_trials.active(db):
             try:
                 with db.begin_nested():

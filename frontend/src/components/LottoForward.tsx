@@ -8,7 +8,7 @@ import {TradeResultCards} from './TradeResultCards';
 export function LottoForward({onInspect}:{onInspect:(id:string)=>void}){
   const [data,setData]=useState<LottoTrialResponse|null>(null);
   const [choices,setChoices]=useState<LottoTrialChoice[]>([]);
-  const [key,setKey]=useState<string>();
+  const [key,setKey]=useState<string|undefined>(()=>new URLSearchParams(window.location.search).get('lotto_account')??undefined);
   const [page,setPage]=useState(1);
   const [error,setError]=useState('');
   const [pane,setPane]=useState<'BALANCE'|'TRADES'>('BALANCE');
