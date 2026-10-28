@@ -1,8 +1,8 @@
-"""Inert entry-timing research component; NOT an account or a production scanner.
+"""Pure entry-timing research component; account wiring lives in retest_trials.
 
 No imports from scanner/account writers, database access, provider requests, clock reads,
 activation, fills, or order execution. ENTRY_ELIGIBLE is evidence for a future account
-adapter, not a booked trade. See docs/RETEST_RESEARCH_PREPARATION.md for integration gates.
+adapter, not a booked trade. No activation or account mutation happens in this module.
 """
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -235,6 +235,10 @@ def advance(setup: FrozenSetup, state: TimingState, *, now: datetime,
             if extension > 1.35:
                 return _cancel(state, now, "EXTENSION_EXCEEDED", extension=extension)
             problem = _quote_problem(setup, quote, now, now-timedelta(seconds=60))
+            state = _event(state, now, "RETEST_VERIFICATION", verification=problem,
+                input_complete=problem not in ("QUOTE_UNAVAILABLE", "QUOTE_NOT_FRESH_OR_LATER",
+                    "CONTRACT_CHANGED", "PROVENANCE_FAILED", "INVALID_PRICE"),
+                quote=json.loads(quote.model_dump_json()) if quote else None)
             if problem:
                 return _cancel(state, now, "RETEST_VERIFICATION_FAILED", verification=problem)
             if not capacity_available:

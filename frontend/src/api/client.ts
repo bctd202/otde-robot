@@ -27,4 +27,5 @@ export const getPerformance=(strategyMode:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY'='
   return request<import('../types').PerformanceResponse>(`/performance?${params.toString()}`);
 };
 export const getBacktests=()=>request<import('../types').BacktestRun[]>('/backtests');
+export const getRetestResearch=(page=1,view:'accounts'|'opportunities'='accounts')=>request<import('../components/RetestResearch').RetestResponse>(`/retest-research?page=${page}&view=${view}`);
 export const startBacktest=(start:string,end:string,tickers:string[])=>send<import('../types').BacktestRun>('/backtests',{start,end,tickers});

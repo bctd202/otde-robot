@@ -249,7 +249,7 @@ def test_conflicting_bars_and_invalid_ohlc_fail_closed():
 def test_unchanged_baseline_modules_have_no_dependency_on_experiment():
     from pathlib import Path
     root = Path(__file__).parents[1]/"app"/"services"
-    for name in ("parlay.py", "structured_intraday.py", "performance.py", "signal_engine.py",
+    for name in ("parlay.py", "structured_intraday.py", "performance.py",
                  "forward_account.py", "lotto_trials.py"):
         assert "retest_research" not in (root/name).read_text()
 

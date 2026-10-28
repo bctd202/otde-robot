@@ -7,6 +7,7 @@ import { BacktestLab } from './components/BacktestLab';
 import { DailyWatch } from './components/DailyWatch';
 import { SignalAlerts } from './components/SignalAlerts';
 import { StrategyControls } from './components/StrategyControls';
+import {RetestResearch} from './components/RetestResearch';
 import { BoardTools } from './components/BoardTools';
 import { LotteryLab } from './components/LotteryTracker';
 import type { DailyWatchResponse, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert, StrategyMode, StrategyView } from './types';
@@ -92,7 +93,7 @@ export function App() {
     </div>
     <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>
     <div className="app-page" hidden={activePage!=='performance'}><Performance/></div>
-    <div className="app-page" hidden={activePage!=='backtest-lab'}><BacktestLab/></div>
+    <div className="app-page" hidden={activePage!=='backtest-lab'}><RetestResearch active={activePage==='backtest-lab'}/><BacktestLab/></div>
   </AppShell>;
 }
 

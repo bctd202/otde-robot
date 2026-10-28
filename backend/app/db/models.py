@@ -568,6 +568,75 @@ class ForwardPaperEquitySnapshot(Base):
     detail: Mapped[dict] = mapped_column(JSON)
 
 
+class RetestRun(Base):
+    __tablename__ = "retest_runs"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    policy: Mapped[dict] = mapped_column(JSON)
+
+
+class RetestAccount(Base):
+    __tablename__ = "retest_accounts"
+    key: Mapped[str] = mapped_column(String(96), primary_key=True)
+    run_key: Mapped[str] = mapped_column(ForeignKey("retest_runs.key"), index=True)
+    arm: Mapped[str] = mapped_column(String(16))
+    scenario: Mapped[str] = mapped_column(String(16))
+    __table_args__ = (UniqueConstraint("run_key", "arm", "scenario", name="uq_retest_account"),)
+
+
+class RetestOpportunity(Base):
+    __tablename__ = "retest_opportunities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(ForeignKey("retest_runs.key"), index=True)
+    trading_date: Mapped[date] = mapped_column(Date)
+    ticker: Mapped[str] = mapped_column(String(16))
+    mode: Mapped[str] = mapped_column(String(32))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    selected: Mapped[bool] = mapped_column(Boolean)
+    frozen: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (UniqueConstraint("run_key", "trading_date", "ticker", "mode", name="uq_retest_opportunity"),)
+
+
+class RetestPosition(Base):
+    __tablename__ = "retest_positions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("retest_opportunities.id"), index=True)
+    account_key: Mapped[str | None] = mapped_column(ForeignKey("retest_accounts.key"), nullable=True, index=True)
+    arm: Mapped[str] = mapped_column(String(16))
+    scenario: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    detail: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (UniqueConstraint("opportunity_id", "arm", "scenario", name="uq_retest_position"),)
+
+
+class RetestEvent(Base):
+    __tablename__ = "retest_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(ForeignKey("retest_runs.key"), index=True)
+    event_key: Mapped[str] = mapped_column(String(160))
+    account_key: Mapped[str | None] = mapped_column(ForeignKey("retest_accounts.key"), nullable=True, index=True)
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("retest_positions.id"), nullable=True, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    settled: Mapped[int] = mapped_column(Integer, default=0)
+    unsettled: Mapped[int] = mapped_column(Integer, default=0)
+    realized: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (UniqueConstraint("run_key", "event_key", name="uq_retest_event"),)
+
+
+class RetestObservation(Base):
+    __tablename__ = "retest_observations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(ForeignKey("retest_runs.key"), index=True)
+    evaluation_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    detail: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (UniqueConstraint("run_key", "evaluation_at", name="uq_retest_observation"),)
+
+
 class TradeOutcome(Base):
     __tablename__ = "trade_outcomes"
     id: Mapped[int] = mapped_column(primary_key=True)

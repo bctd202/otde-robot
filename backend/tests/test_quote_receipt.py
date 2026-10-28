@@ -104,6 +104,18 @@ def test_numeric_upstream_timestamp_remains_supported(monkeypatch):
     assert chain[0].timestamp==NOW
 
 
+def test_optional_research_enforces_hard_reserve_without_changing_baseline_budget(monkeypatch):
+    market=make_market(monkeypatch,NOW.isoformat())
+    limit=market.budget_status()['safety_limit']
+    before=market._error
+    with market.research_request_reserve(20):
+        for _ in range(limit-20):assert market._budget_available()
+        assert not market._budget_available()
+        assert market._error==before
+    assert market.budget_status()['remaining']==20
+    assert market._budget_available()  # Baseline context can still use its reserve.
+
+
 @pytest.mark.parametrize('mode',['complete','partial','candles'])
 def test_snapshot_only_finishes_early_when_all_metric_pairs_arrived(monkeypatch,mode):
     fields=DXLinkSnapshotClient.EVENT_FIELDS

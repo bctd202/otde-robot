@@ -50,6 +50,15 @@ from app.services.signal_engine import (ENGINE_KEY, cached_candidates,
 router = APIRouter()
 
 
+@router.get("/retest-research")
+def retest_research(page: int = 1, view: str = "accounts", db: Session = Depends(get_db)):
+    from app.services.retest_report import summary
+    try:
+        return summary(db, page=page, view=view)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @router.get("/forward-paper-account")
 def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY, db: Session = Depends(get_db)):
     try:

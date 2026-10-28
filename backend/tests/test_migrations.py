@@ -22,7 +22,20 @@ def alembic(db: Path, *args: str) -> str:
 def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0017_quote_receipt" in alembic(db, "current")
+    assert "0018_retest_research" in alembic(db, "current")
+
+
+def test_retest_tables_are_empty_and_old_ledger_preserved(tmp_path):
+    db = tmp_path / 'before-retest.db'
+    alembic(db, 'upgrade', '0017_quote_receipt')
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO forward_paper_accounts VALUES ('preserved', '2026-10-27', '2026-10-27', 10, 0, '{}')")
+        original=conn.execute('SELECT * FROM forward_paper_accounts').fetchall()
+    alembic(db, 'upgrade', 'head')
+    with sqlite3.connect(db) as conn:
+        assert conn.execute('SELECT * FROM forward_paper_accounts').fetchall()==original
+        for table in ('retest_runs','retest_accounts','retest_opportunities','retest_positions','retest_events','retest_observations'):
+            assert conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0]==0
 
 
 def test_receipt_migration_does_not_invent_historical_receipts(tmp_path):

@@ -1,4 +1,9 @@
-# Breakout/retest research preparation — not deployment-ready
+# Breakout/retest initial preparation record — superseded
+
+**Historical preparation notes below.** The account wiring was subsequently
+approved and implemented locally. See [the current frozen protocol, validation
+and rollout plan](RETEST_TRIALS.md). No production deployment or activation has
+occurred. Statements below about unimplemented wiring describe the earlier commit.
 
 Prepared October 27, 2026 against `c8ec116`, matching the read-only inspected
 Parlay-Mac checkout. Its tracked working tree was clean; operator overrides,

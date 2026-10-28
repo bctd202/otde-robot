@@ -96,6 +96,12 @@ class CachedMarketDataProvider:
         minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(timeframe)
         return aggregate_candles(rows, minutes) if minutes else []
 
+    def cached_candles(self, symbol: str) -> list[CandleOut]:
+        """Research inspection only: no provider call or cache refresh."""
+        with self._lock:
+            entry = self._candles.get(symbol.upper())
+            return list(entry.value) if entry is not None and self._fresh(entry, get_settings().market_candle_cache_seconds) else []
+
     def historical_candles(self, symbol: str, timeframe: str, start, end):
         return self.provider.historical_candles(symbol, timeframe, start, end)
 
@@ -148,6 +154,11 @@ class CachedMarketDataProvider:
         return {"safety_limit": None, "used_last_minute": None, "remaining": None,
                 "provider_allowed": None, "provider_used": None, "provider_available": None,
                 "resets_at": None, "paused": False}
+
+    def research_request_reserve(self, reserve: int):
+        if not hasattr(self.provider, "research_request_reserve"):
+            raise ValueError("Provider cannot enforce optional research request reserve")
+        return self.provider.research_request_reserve(reserve)
 
     def data_quality_status(self) -> dict[str, Any]:
         if hasattr(self.provider, "data_quality_status"):

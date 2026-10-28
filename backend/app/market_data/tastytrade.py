@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 import json
 import logging
@@ -17,6 +19,7 @@ from app.services.market_calendar import is_market_day, market_close
 
 NY = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
+_RESEARCH_RESERVE: ContextVar[int] = ContextVar('tastytrade_research_reserve', default=0)
 
 
 def _items(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -295,11 +298,22 @@ class TastytradeMarketDataProvider:
             return "TASTYTRADE_USER_AGENT must use product/version format."
         return None
 
+    @contextmanager
+    def research_request_reserve(self, reserve: int):
+        """Context-local hard request floor for optional research, not baseline work."""
+        token = _RESEARCH_RESERVE.set(max(0, reserve))
+        try:
+            yield
+        finally:
+            _RESEARCH_RESERVE.reset(token)
+
     def _budget_available(self) -> bool:
         now = datetime.now(timezone.utc)
         while self._request_times and now - self._request_times[0] >= timedelta(minutes=1):
             self._request_times.popleft()
         limit = max(1, get_settings().tastytrade_request_budget_per_minute)
+        if _RESEARCH_RESERVE.get() and len(self._request_times) >= max(0, limit-_RESEARCH_RESERVE.get()):
+            return False  # Optional work stops; do not label the baseline feed failed.
         if len(self._request_times) >= limit:
             self._error = f"Tastytrade request safety budget reached ({limit}/minute)."
             return False
