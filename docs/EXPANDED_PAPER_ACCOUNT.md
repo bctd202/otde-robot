@@ -69,3 +69,9 @@ performed as part of implementation. Existing tables suffice; no schema change.
 Dashboard: History → Paper trial. Research → Uncapped opportunities exposes the
 independent breakout/retest observations. The ten-position account becomes the
 default forward-account API view; preserved accounts remain selectable.
+
+Trade Board → Paper accounts provides direct links to the new and original main
+accounts, both multi-position lotto exits, and all four frozen comparison arms.
+Each link selects its exact account and opens the existing balance/graph view.
+The directory shows policy starting amounts, never invented live balances or
+combined returns. Older archive versions remain in each area's account selector.

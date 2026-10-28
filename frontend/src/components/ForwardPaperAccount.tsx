@@ -27,7 +27,7 @@ export function ForwardPaperAccount(){
   const [data,setData]=useState<ForwardAccount|null>(null);
   const [page,setPage]=useState(1);
   const [pane,setPane]=useState<'ACCOUNT'|'TRADES'|'DETAILS'>('ACCOUNT');
-  const [accountKey,setAccountKey]=useState<string>();
+  const [accountKey,setAccountKey]=useState<string|undefined>(()=>new URLSearchParams(window.location.search).get('paper_account')??undefined);
   const [accounts,setAccounts]=useState<PaperAccountChoice[]>([]);
   const [status,setStatus]=useState('Loading the forward account…');
   const [error,setError]=useState('');

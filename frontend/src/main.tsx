@@ -9,6 +9,7 @@ import { SignalAlerts } from './components/SignalAlerts';
 import { StrategyControls } from './components/StrategyControls';
 import {RetestResearch} from './components/RetestResearch';
 import { BoardTools } from './components/BoardTools';
+import {AccountDirectory} from './components/AccountDirectory';
 import { LotteryLab } from './components/LotteryTracker';
 import type { DailyWatchResponse, PaperPosition, ParlayCandidate, ParlayResponse, SignalAlert, StrategyMode, StrategyView } from './types';
 import { parseApiTimestamp } from './lib/dates';
@@ -89,6 +90,7 @@ export function App() {
       selector={<StrategyControls view={strategyView} onViewChange={setStrategyView} alerts={strategyAlerts} onAlertChange={changeStrategyAlert}/>}
       watch={<DailyWatch data={dailyWatch} busy={dailyWatchBusy} message={dailyWatchMessage} onAdd={symbol=>void addWatch(symbol)} onRemove={symbol=>void removeWatch(symbol)}/>}
       alerts={<SignalAlerts alerts={signalAlerts}/>}/>
+    <AccountDirectory/>
     {parlays?<ParlayBoard active={activePage==='parlay'} data={parlays} selectedStrategy={strategyView} updated={lastParlayUpdate} refreshing={parlayRefreshing} stale={parlayStale} onRetry={()=>void refreshParlays()} positions={positions} positionsStale={positionsStale} onPaperEnter={candidate=>void enterPaper(candidate)} onPaperExit={position=>void exitPaper(position)} enteringSymbol={enteringSymbol} scannerControlBusy={scannerControlBusy} scannerFeedback={scannerFeedback} onScannerControl={action=>void controlScanner(action)}/>:<ParlaySkeleton/>}
     </div>
     <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>

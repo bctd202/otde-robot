@@ -35,7 +35,7 @@ function Equity({points}:{points:NonNullable<RetestResponse['accounts']>[number]
 export function RetestResearch({active}:{active:boolean}){
   const [data,setData]=useState<RetestResponse|null>(null),[error,setError]=useState('');
   const [page,setPage]=useState(1),[view,setView]=useState<'accounts'|'opportunities'>('accounts');
-  const [selected,setSelected]=useState(''),[refresh,setRefresh]=useState(0);
+  const [selected,setSelected]=useState(()=>new URLSearchParams(window.location.search).get('research_account')??''),[refresh,setRefresh]=useState(0);
   useEffect(()=>{if(!active)return;let cancelled=false;setError('');setData(null);
     void getRetestResearch(page,view).then(value=>{if(!cancelled)setData(value)}).catch(reason=>{
       if(!cancelled)setError(reason instanceof Error?reason.message:'Research report unavailable')});

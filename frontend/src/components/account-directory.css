@@ -1,0 +1,6 @@
+.account-directory{margin:1rem 0;padding:1rem;border:1px solid #39536a;border-radius:1rem;background:#0b1523;color:#e4eff7;overflow-wrap:anywhere}
+.account-directory summary{cursor:pointer;font-weight:700;min-height:44px;line-height:1.7}.account-directory summary span{display:inline-block;margin-left:1rem;color:#60ead4;font-weight:400}
+.account-directory p{color:#b5c5d3;line-height:1.6}.account-directory h3{color:#e4eff7;font-size:1rem;margin:1rem 0 .5rem}
+.account-directory-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:.65rem}
+.account-directory a{display:grid;gap:.45rem;padding:1rem;border:1px solid #39536a;border-radius:.75rem;background:#122338;color:#e4eff7;text-decoration:none}
+.account-directory a small{color:#b5c5d3}.account-directory a span{color:#60ead4;font-size:.85rem}.account-directory a:hover,.account-directory a:focus-visible{outline:2px solid #60ead4;outline-offset:2px}
