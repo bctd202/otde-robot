@@ -25,6 +25,7 @@ from app.services.option_research import record_option_observations
 from app.services.forward_account import advance_account, ensure_account, refresh_account_quotes
 from app.services.lotto_trials import ensure_lotto_trials, advance_lotto_trials
 from app.services.structured_intraday import rank_structured_intraday
+from app.services import retest_trials
 
 logger = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -257,7 +258,10 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         phase_started = finished
 
     try:
-        one_minute = rank_parlays(provider, universe, completed_at=evaluation_at)
+        research_capture: dict | None = {} if retest_trials.active(db) else None
+        one_minute = (rank_parlays(provider, universe, completed_at=evaluation_at)
+                      if research_capture is None else
+                      rank_parlays(provider, universe, completed_at=evaluation_at, research_capture=research_capture))
         finish_phase('one_minute')
         structured = rank_structured_intraday(provider, universe, completed_at=evaluation_at)
         finish_phase('structured')
@@ -275,6 +279,19 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         _position_alerts(db, provider)
         _performance_alerts(db)
         finish_phase('alerts')
+        if research_capture is not None:
+            # Optional research must not roll back successful baseline scanning.
+            try:
+                retest_trials.refresh_quotes(db, provider, now=datetime.now(timezone.utc))
+                with db.begin_nested():
+                    retest_trials.process(db, provider, candidates=candidates, evaluation_at=evaluation_at,
+                                          capture=research_capture)
+            except Exception as exc:
+                logger.exception("Isolated retest research failed; baseline scan retained")
+                with db.begin_nested():
+                    retest_trials.event(db, f"collection-error:{evaluation_at.isoformat()}",
+                        datetime.now(timezone.utc), "COLLECTION_ERROR", detail={"error_type":type(exc).__name__})
+            finish_phase('retest_research')
         if hasattr(provider, "budget_status"):
             budget = provider.budget_status()
             remaining = budget.get("remaining")
@@ -445,6 +462,13 @@ def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
     with SessionLocal() as db:
         advance_account(db, now=started_at)
         advance_lotto_trials(db, now=started_at)
+        if retest_trials.active(db):
+            try:
+                with db.begin_nested():
+                    retest_trials.process(db, now=started_at,
+                        evaluation_at=latest_completed_candle_at(started_at) if market_session(started_at) != "regular" else None)
+            except Exception:
+                logger.exception("Isolated retest housekeeping failed; baseline recovery retained")
         runtime = _runtime(db)
         session = market_session(started_at)
         runtime.heartbeat_at = started_at

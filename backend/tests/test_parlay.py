@@ -56,6 +56,15 @@ def test_default_mock_board_has_complete_deterministic_variety():
         assert all(contract.volume and contract.open_interest for contract in chain)
 
 
+def test_research_capture_does_not_change_ranking_or_candidate_outputs():
+    capture={}
+    symbols=get_settings().parlay_symbol_list
+    before=rank_parlays(mock_provider(),symbols)
+    after=rank_parlays(mock_provider(),symbols,research_capture=capture)
+    assert [c.model_dump() for c in before]==[c.model_dump() for c in after]
+    assert capture and all('bars' in item for item in capture.values())
+
+
 def test_plans_score_labels_actions_and_sorting():
     results = board()
     order = {"BUY": 0, "WATCH": 1, "MISSED": 2, "PASS": 3, "UNAVAILABLE": 4}

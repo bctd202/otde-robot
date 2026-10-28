@@ -140,7 +140,8 @@ def session_candle_requirement(completed_at: datetime, maximum: int) -> int:
     return min(maximum, max(1, elapsed))
 
 
-def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | None = None) -> list[ParlayCandidateOut]:
+def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | None = None,
+                 research_capture: dict | None = None) -> list[ParlayCandidateOut]:
     """Build complete, deterministic paper-research plans without predicting outcomes."""
     provider_status = provider.status()
     output: list[ParlayCandidateOut] = []
@@ -173,12 +174,17 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
         boundary = completed_at or latest_completed_candle_at(quote.timestamp)
         candles = session_candles(candles, boundary)
         input_evidence[symbol] = session_evidence(candles, boundary)
+        if research_capture is not None:
+            research_capture[symbol] = {"bars": [c.model_dump(mode="json") for c in candles],
+                                        "input_evidence": input_evidence[symbol]}
         if not completed_candle_history_ready(candles, completed_at, 8):
             reason = ("Candles unavailable" if len(candles) < 8
                       else "Latest completed candle unavailable")
             output.append(_unavailable(symbol, reason, quote.timestamp))
             continue
         setup = evaluate_underlying_setup(candles, quote.price)
+        if research_capture is not None and setup.direction is not None:
+            research_capture[symbol]["planning_risk"] = max(abs(setup.trigger-setup.stop), quote.price*.002)
         direction, checks, reasons = setup.direction, setup.checks, setup.reasons
         trigger, invalidation, confirmed = setup.trigger, setup.stop, setup.confirmed
         if direction is None:
