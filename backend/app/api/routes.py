@@ -34,7 +34,7 @@ from app.services.backtest import run_backtest
 from app.services.option_research import option_path_research
 from app.services.evidence_health import collection_evidence
 from app.services.shadow_audit import shadow_evidence_audit
-from app.services.forward_account import KEY as FORWARD_ACCOUNT_KEY, account_summary
+from app.services.expanded_account import KEY as FORWARD_ACCOUNT_KEY, account_summary
 from app.services.lotto_trials import lotto_trial_summary
 from app.services.performance import (analytics_exclusion_reason, automated_origin,
                                       deduplicate_positions,

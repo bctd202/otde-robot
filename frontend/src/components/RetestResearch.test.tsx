@@ -44,3 +44,13 @@ test('fetch failure is explicit, never a zero return',async()=>{
   expect(await screen.findByRole('alert')).toHaveTextContent('Unavailable');
   expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
 });
+
+test('prominent uncapped research action uses existing read-only records without changing accounts',async()=>{
+  vi.mocked(getRetestResearch).mockResolvedValue(fixture);
+  render(<RetestResearch active/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Explore uncapped records'}));
+  await waitFor(()=>expect(getRetestResearch).toHaveBeenLastCalledWith(1,'opportunities'));
+  expect(await screen.findByText('Opportunity observations · both arms')).toBeVisible();
+  expect(screen.getByText(/24 saved decision rows, not a count of unique trades/)).toBeVisible();
+  expect(screen.getByText(/first-opportunity selection, quote deadlines and verification still apply/)).toBeVisible();
+});

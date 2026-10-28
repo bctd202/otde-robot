@@ -170,10 +170,11 @@ export interface PaperAccountChoice {key:string;label:string;archived:boolean}
 export interface PendingPaperAccount {
   status:'NOT_STARTED'|'SCHEDULED';paper_only:true;account_key?:string;accounts?:PaperAccountChoice[];
   scheduled_start?:string;starting_cash_cents?:number;
+  activation_required?:boolean;
 }
 export interface ForwardAccount {
   status:'ACTIVE'|'ARCHIVED';paper_only:true;account_key:string;accounts?:PaperAccountChoice[];activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
-  policy:{starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
+  policy:{label?:string;starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
   settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;
   realized_cents:number;charged_fees_cents:number;open_entry_fees_cents:number;
   known_liquidation_cents:number;unpriced_positions:number;unpriced_debit_cents:number;equity_cents:number|null;

@@ -49,6 +49,11 @@ export function RetestResearch({active}:{active:boolean}){
     {data&&<><p><strong>{data.status==='NOT_ACTIVATED'?'Not activated':data.status==='COLLECTING'?'Collecting — no conclusion yet':'Collection window ended'}</strong></p>
       <p>{data.note}</p>
       {data.status!=='NOT_ACTIVATED'&&<>
+        <aside className="retest-recording-note"><h3>Research records are separate from account slots</h3>
+          <p>The opportunity view ignores cash/slot limits and keeps both immediate-entry and retest observations, including skips and cancellations. It does not turn every alert into a fill: first-opportunity selection, quote deadlines and verification still apply.</p>
+          <p>The funded comparison keeps its original limits. The separate ten-position account does not change this study or the lotto accounts.</p>
+          <button type="button" onClick={()=>{setView('opportunities');setPage(1)}}>Explore uncapped records</button>
+        </aside>
         <div className="retest-metrics"><p>First one-minute opportunities <b>{data.baseline_opportunities}</b></p>
           <p>Required input coverage <b>{percent(data.input_coverage)}</b></p>
           <p>Evaluation <b>{data.verdict?.replaceAll('_',' ')}</b></p></div>
@@ -65,6 +70,8 @@ export function RetestResearch({active}:{active:boolean}){
         <div className="filter-tabs"><button type="button" aria-pressed={view==='accounts'} onClick={()=>{setView('accounts');setPage(1)}}>Account decisions</button>
           <button type="button" aria-pressed={view==='opportunities'} onClick={()=>{setView('opportunities');setPage(1)}}>Uncapped opportunities</button></div>
         {view==='opportunities'&&<p>These observations ignore cash/slot limits. They are not a funded portfolio or a return you could necessarily capture.</p>}
+        <h3>{view==='opportunities'?'Opportunity observations · both arms':'Account decisions · all four comparison accounts'}</h3>
+        <p>{data.pagination?.total??0} saved decision rows, not a count of unique trades or confirmed fills. The account selector above controls the chart only.</p>
         <div className="retest-trades">{data.positions?.map(p=><article key={p.id}><strong>{p.ticker} · {p.arm} · {p.scenario}</strong>
           <span>{p.status.replaceAll('_',' ')}</span><p>{p.detail.reason?.replaceAll('_',' ')}</p>
           {p.detail.opportunity_outcome&&<p>Underlying path: {p.detail.opportunity_outcome.reason.replaceAll('_',' ')}. Not an option return.</p>}

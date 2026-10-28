@@ -3,6 +3,7 @@ import {afterEach,expect,test,vi} from 'vitest';
 import {ForwardPaperAccount} from './ForwardPaperAccount';
 import {AccountEquityChart} from './AccountEquityChart';
 import {equitySegments} from '../lib/accountEquity';
+import {AccountCapacity} from './AccountCapacity';
 import type {ForwardAccount} from '../types';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks()});
@@ -155,4 +156,35 @@ test('intraday quote-collection gaps break the line even if both endpoints are p
   expect(equitySegments([equityPoints[0],later],true)).toHaveLength(2);
   expect(equitySegments(equityPoints,true)).toHaveLength(2);
   expect(equitySegments([{...equityPoints[0],equity_cents:0,return_percent:-100}],true)).toHaveLength(1);
+});
+
+test('full account explicitly explains unresolved slots and links to uncapped research',()=>{
+  render(<AccountCapacity account={account({positions:[1,2,3].map(id=>({id,status:'UNPRICED',option_symbol:`TEST${id}`}))})}/>);
+  expect(screen.getByText(/New entries blocked: account full · 3\/3 occupied/)).toBeVisible();
+  expect(screen.getByText('0 open · 3 unresolved exits · 0 slots free.')).toBeVisible();
+  expect(screen.getByRole('link',{name:'Open Research'})).toHaveAttribute('href','#backtest-lab');
+  expect(screen.getByText(/cannot release them or calculate their profit/)).toBeVisible();
+});
+
+test('ten-slot display counts held exposure only, not pending entries or unsettled proceeds',()=>{
+  const a=account();
+  render(<AccountCapacity account={account({policy:{...a.policy,max_positions:10},unpriced_positions:2,
+    positions:['OPEN','OPEN','PENDING_ENTRY','UNSETTLED'].map((status,id)=>({id,status,option_symbol:`TEST${id}`}))})}/>);
+  expect(screen.getByText('2 open · 0 unresolved exits · 8 slots free.')).toBeVisible();
+  expect(screen.queryByText(/New entries blocked/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Free slots alone do not guarantee a fill/)).toBeVisible();
+});
+
+test('archived account never suggests free slots allow new fills',()=>{
+  render(<AccountCapacity account={account({status:'ARCHIVED'})}/>);
+  expect(screen.getByText(/Archived account capacity/)).toBeVisible();
+  expect(screen.getByText(/This preserved account accepts no new entries/)).toBeVisible();
+});
+
+test('new ten-position account requires explicit activation and never shows pretend funding',async()=>{
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>({status:'NOT_STARTED',paper_only:true,
+    activation_required:true,starting_cash_cents:200000})} as Response);
+  render(<ForwardPaperAccount/>);
+  expect(await screen.findByText(/requires explicit after-hours activation/)).toBeVisible();
+  expect(screen.queryByText('$2,000.00 starting cash')).not.toBeInTheDocument();
 });
