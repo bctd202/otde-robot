@@ -1,4 +1,4 @@
-import {cleanup,render,screen} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,expect,test,vi} from 'vitest';
 import {AccountDirectory} from './AccountDirectory';
 import {ForwardPaperAccount} from './ForwardPaperAccount';
@@ -17,10 +17,40 @@ test('directory links all eight accounts without inventing balances or making re
   expect(newAccount.searchParams.get('paper_account')).toBe('tasty-capacity-ten-v1');
   expect(newAccount.searchParams.get('v')).toBe('release');
   expect(newAccount.hash).toBe('#performance');
-  const lotto=new URL(links[3].getAttribute('href')!,'http://localhost');
+  const lotto=new URL(screen.getByRole('link',{name:/Lotto · trail after 2×/,hidden:true}).getAttribute('href')!,'http://localhost');
   expect(lotto.searchParams.has('paper_account')).toBe(false);
   expect(lotto.searchParams.get('lotto_account')).toBe('lotto-v3-contract100-multi5-trail40');
   expect(lotto.hash).toBe('#lottery');
+});
+
+test('main is immediately visible; experiments and history are collapsed without disabling accounts',()=>{
+  render(<AccountDirectory/>);
+  expect(screen.getByRole('link',{name:/Main · ten positions/})).toBeVisible();
+  const experiments=screen.getByText('Experiments').closest('details')!;
+  const history=screen.getByText('History').closest('details')!;
+  expect(experiments).not.toHaveAttribute('open');
+  expect(history).not.toHaveAttribute('open');
+  const lotto=screen.getByRole('link',{name:/Lotto · 5× exit/,hidden:true});
+  const original=screen.getByRole('link',{name:/Original · three positions/,hidden:true});
+  expect(lotto).not.toBeVisible();expect(original).not.toBeVisible();
+  fireEvent.click(screen.getByText('Experiments'));
+  expect(lotto).toBeVisible();
+  expect(within(experiments).getAllByRole('link')).toHaveLength(6);
+  expect(original).not.toBeVisible();
+  fireEvent.click(screen.getByText('History'));
+  expect(original).toBeVisible();
+  expect(screen.getByText(/not stopped, reset or settled/)).toBeVisible();
+});
+
+test('every account link clears other account selections and retains the release marker',()=>{
+  window.history.replaceState(null,'','/?v=release&paper_account=old&lotto_account=old&research_account=old#parlay');
+  render(<AccountDirectory/>);
+  const keys=['paper_account','lotto_account','research_account'];
+  for(const link of screen.getAllByRole('link',{hidden:true})){
+    const url=new URL(link.getAttribute('href')!,'http://localhost');
+    expect(keys.filter(key=>url.searchParams.has(key))).toHaveLength(1);
+    expect(url.searchParams.get('v')).toBe('release');
+  }
 });
 
 test('main account link opens requested preserved account, not the new default',async()=>{
