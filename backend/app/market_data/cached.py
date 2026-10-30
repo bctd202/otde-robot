@@ -58,6 +58,14 @@ class CachedMarketDataProvider:
     def status(self):
         return self.provider.status()
 
+    def option_execution_status(self):
+        method = getattr(self.provider, 'option_execution_status', self.provider.status)
+        return method()
+
+    def completed_candle_evidence(self, evaluation: datetime) -> dict[str, bool]:
+        method = getattr(self.provider, 'completed_candle_evidence', None)
+        return method(evaluation) if method is not None else {}
+
     @staticmethod
     def _fresh(entry: _CacheEntry | None, ttl_seconds: int) -> bool:
         return bool(entry and datetime.now(timezone.utc) - entry.stored_at < timedelta(seconds=ttl_seconds))

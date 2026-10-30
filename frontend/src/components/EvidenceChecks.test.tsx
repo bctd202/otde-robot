@@ -3,6 +3,14 @@ import {afterEach,expect,test} from 'vitest';
 import {CollectionChecks,ShadowEvidenceChecks} from './EvidenceChecks';
 
 afterEach(cleanup);
+test('ticker inputs are distinct from saved evaluations and retain missing candles',()=>{
+  render(<CollectionChecks evidence={{status:'CLOSED',has_coverage_gaps:true,basis:'Saved minutes',sessions:[{
+    date:'2026-10-30',expected_minutes:390,observed_minutes:389,missing_minutes:1,coverage_percent:99.7,complete_session:true,
+    input_evidence_started_at:'2026-10-30T13:30:00Z',input_basis:'Actual cached candles.',
+    input_coverage:[{symbol:'USO',valid_minutes:64,expected_minutes:390}]}]}}/>);
+  expect(screen.getByText('USO: 64/390 valid minute inputs')).toBeInTheDocument();
+  expect(screen.getByText('389/390 minutes · 99.7%')).toBeInTheDocument();
+});
 test('scan timings explain slow work without inventing historical measurements',()=>{
   const evidence={status:'CLOSED' as const,has_coverage_gaps:true,basis:'Saved minutes',sessions:[],
     scan_timing:{measured_scans:2,window_scans:3,over_minute_scans:1,p95_seconds:70,

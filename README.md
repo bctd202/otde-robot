@@ -8,6 +8,8 @@ Implemented: FastAPI APIs, mock plus read-only Tastytrade and Tradier market dat
 
 Placeholders: economic calendar, external push delivery when the browser is closed, full option scenario pricing, realistic fill modeling, and production-grade grouped analytics. See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
+The prospective [collection reliability repair](docs/COLLECTION_RELIABILITY_V2.md) documents DXLink keepalive/recovery, versioned main-account exit timing, per-ticker candle coverage, `/api/readiness`, and optional Main-Mac reports/verified backups. It preserves historical unknown exits and the frozen study's integrity guard; deployment and maintenance-job installation are separate operations.
+
 ## Native macOS setup
 
 Requirements: Python 3.12, Node.js 20+, and npm.

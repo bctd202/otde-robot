@@ -1,11 +1,12 @@
 """Read-only collection diagnostics. Never change selection or ledger records."""
 from datetime import date, datetime, timedelta, timezone
+import json
 import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ScannerRuntime, SignalScan
+from app.db.models import DataQualityEvent, ScannerRuntime, SignalScan
 from app.services.market_calendar import NY, REGULAR_OPEN, is_market_day, market_close, market_session
 
 
@@ -25,21 +26,39 @@ def collection_evidence(db: Session, now: datetime, runtime: ScannerRuntime | No
             days.append(day)
         day -= timedelta(days=1)
     start = datetime.combine(days[-1], REGULAR_OPEN, NY).astimezone(timezone.utc)
-    stamps = db.execute(select(SignalScan.evaluation_candle_at, SignalScan.scanned_at).where(
+    stamps = db.execute(select(SignalScan.evaluation_candle_at, SignalScan.scanned_at, SignalScan.provider_status).where(
         SignalScan.scanned_at >= start, SignalScan.scanned_at <= now)).all()
+    transport = [(utc(candle), payload['collection_v2']) for candle, _, payload in stamps
+                 if isinstance(payload,dict) and isinstance(payload.get('collection_v2'),dict)]
+    for at,message in db.execute(select(DataQualityEvent.timestamp,DataQualityEvent.message).where(
+            DataQualityEvent.timestamp >= start,DataQualityEvent.timestamp <= now,
+            DataQualityEvent.provider.like('collection-close:%'))):
+        try:
+            payload=json.loads(message)
+            transport.append((utc(datetime.fromisoformat(payload['evaluation_at'])),payload))
+        except (KeyError,TypeError,ValueError):
+            continue
     sessions: list[dict] = []
     for day in days:
         opening = datetime.combine(day, REGULAR_OPEN, NY).astimezone(timezone.utc)
         close = datetime.combine(day, market_close(day), NY).astimezone(timezone.utc)
         boundary = min(close, now.replace(second=0, microsecond=0))
         expected = max(0, int((boundary-opening).total_seconds() // 60))
-        minutes = {utc(candle).replace(second=0, microsecond=0) for candle, scanned in stamps
+        minutes = {utc(candle).replace(second=0, microsecond=0) for candle, scanned, _ in stamps
                    if opening <= utc(candle) < boundary
                    and utc(candle) <= utc(scanned) <= close + timedelta(minutes=5)}
+        samples = {at:payload.get('inputs',{}) for at,payload in transport if opening <= at < boundary}
+        symbols = sorted({symbol for inputs in samples.values() for symbol in inputs})
+        input_minutes = max(0,int((boundary-min(samples)).total_seconds()/60)) if samples else 0
+        symbol_coverage = [{'symbol':symbol,'valid_minutes':sum(bool(v.get(symbol)) for v in samples.values()),
+                            'expected_minutes':input_minutes} for symbol in symbols]
         sessions.append({"date": day.isoformat(), "expected_minutes": expected,
                          "observed_minutes": len(minutes), "missing_minutes": max(0, expected-len(minutes)),
                          "coverage_percent": round(100*len(minutes)/expected, 1) if expected else None,
-                         "complete_session": now >= close})
+                         "complete_session": now >= close,
+                         'input_coverage': symbol_coverage,
+                         'input_evidence_started_at': min(samples).isoformat() if samples else None,
+                         'input_basis': 'Actual cached candles since collection-integrity-v2 began. Missing candles remain missing; final-bar observations do not imply new trading decisions.'})
     age = None
     # Read only the latest bounded window, not every saved candidate payload.
     recent = db.execute(select(SignalScan.scanned_at, SignalScan.provider_status).where(
@@ -68,6 +87,7 @@ def collection_evidence(db: Session, now: datetime, runtime: ScannerRuntime | No
     else:
         status = "CURRENT" if age is not None and 0 <= age <= 180 else "STALE"
     return {"status": status, "evaluation_age_seconds": age, "sessions": sessions,
+            'input_observation_errors': sum(bool(payload.get('error_type')) for _,payload in transport),
             "scan_timing": timing_summary,
             "has_coverage_gaps": any(row["missing_minutes"] > 0 for row in sessions),
             "basis": "Unique saved regular-session evaluation minutes; not proof of valid quotes or every ticker's candles.",

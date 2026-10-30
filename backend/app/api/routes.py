@@ -54,7 +54,14 @@ router = APIRouter()
 def retest_research(page: int = 1, view: str = "accounts", db: Session = Depends(get_db)):
     from app.services.retest_report import summary
     try:
-        return summary(db, page=page, view=view)
+        result = summary(db, page=page, view=view)
+        if result.get('policy'):
+            from app.services.retest_trials import code_hash, configuration
+            blocked = result['policy']['code_hash'] != code_hash() or result['policy']['configuration'] != configuration()
+            result['admissions_blocked'] = blocked
+            if blocked:
+                result['verdict'] = 'INCONCLUSIVE'
+        return result
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -471,6 +478,12 @@ def backtest_create(payload: dict, db: Session = Depends(get_db)):
 
 @router.get("/health")
 def health(): return {"status":"ok","paper_only": True}
+
+
+@router.get('/readiness')
+def readiness(db: Session = Depends(get_db)):
+    from app.services.readiness import snapshot
+    return snapshot(db,get_provider())
 
 @router.get("/dashboard", response_model=DashboardOut)
 def dashboard():

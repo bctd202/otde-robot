@@ -15,6 +15,11 @@ export function CollectionChecks({evidence}:{evidence?:CollectionEvidence}){
       {evidence.sessions.map(day=><div className="coverage-day" key={day.date}><span>{day.date}{!day.complete_session?' · so far':''}</span>
         <meter min="0" max={Math.max(1,day.expected_minutes)} value={day.observed_minutes} aria-label={`${day.date} saved evaluation minutes`}/>
         <span>{day.observed_minutes}/{day.expected_minutes} minutes · {day.coverage_percent??'—'}%</span></div>)}
+      {evidence.sessions.some(d=>d.input_coverage?.length)&&<details><summary>Actual candle coverage by ticker</summary>
+        {evidence.sessions.filter(d=>d.input_coverage?.length).map(d=><div key={d.date}><h4>{d.date}</h4>
+          <p>Measured since {formatEasternDateTime(d.input_evidence_started_at)}. {d.input_basis}</p>
+          <ul>{d.input_coverage?.map(s=><li key={s.symbol}>{s.symbol}: {s.valid_minutes}/{s.expected_minutes} valid minute inputs</li>)}</ul></div>)}
+      </details>}
       {evidence.scan_timing&&<details><summary>Scan speed &amp; bottlenecks</summary>
         {evidence.scan_timing.measured_scans?<>
           <p>{evidence.scan_timing.measured_scans} measured scans · 95% finished within {evidence.scan_timing.p95_seconds}s · {evidence.scan_timing.over_minute_scans} took at least a minute.</p>

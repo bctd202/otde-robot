@@ -114,7 +114,9 @@ export interface CollectionEvidence {
     latest_at:string|null;latest_phases_ms:Record<string,number>;basis:string};
   status:'CURRENT'|'STALE'|'CLOSED'|'HELD'|'WARMING_UP';has_coverage_gaps:boolean;basis:string;
   sessions:{date:string;expected_minutes:number;observed_minutes:number;missing_minutes:number;
-    coverage_percent:number|null;complete_session:boolean}[];
+    coverage_percent:number|null;complete_session:boolean;
+    input_coverage?:{symbol:string;valid_minutes:number;expected_minutes:number}[];
+    input_evidence_started_at?:string|null;input_basis?:string}[];
 }
 export interface ScannerHealth {collection_evidence?:CollectionEvidence}
 export interface ExecutionScenarioMetrics {pnl_dollars:number;average_pnl_dollars:number;wins:number;losses:number;breakeven:number}
@@ -173,6 +175,7 @@ export interface PendingPaperAccount {
   activation_required?:boolean;
 }
 export interface ForwardAccount {
+  execution_boundaries?:{at:string;execution_version:string;reason:string}[];
   status:'ACTIVE'|'ARCHIVED';paper_only:true;account_key:string;accounts?:PaperAccountChoice[];activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
   policy:{label?:string;starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
   settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;

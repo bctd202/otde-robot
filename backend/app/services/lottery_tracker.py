@@ -15,6 +15,7 @@ from app.services.contracts import annotate_chain, validate_exit_quote
 from app.services.indicators import spread_pct
 from app.services.setup_engine import lottery_candidates
 from app.services.session_candles import session_candles
+from app.services.collection_integrity import VERSION as COLLECTION_VERSION
 from app.services.market_calendar import market_close
 
 NY = ZoneInfo("America/New_York")
@@ -121,6 +122,7 @@ def _record_point(db: Session, tracker: LotteryTracker, contract: OptionContract
         tracker_id=tracker.id, observed_at=observed_at,
         received_at=now, provider=contract.provider, data_mode=contract.data_mode,
         receipt_evidence={"version": "quote-receipt-v1", "processed_at": now.isoformat(),
+            'collection_version': COLLECTION_VERSION,
             "received_at": _utc(contract.received_at).isoformat() if contract.received_at else None,
             "basis": contract.receipt_basis or "UNKNOWN"},
         quote_timestamp=_utc(contract.timestamp),

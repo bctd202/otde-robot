@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.services import collection_integrity
 from app.db.models import (DailyWatchSymbol, ParlayPaperPosition, ScannerRuntime,
                            SignalAlert, SignalLifecycle, SignalPerformance,
                            SignalScan)
@@ -315,7 +316,8 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         scan = SignalScan(trading_date=(evaluation_at + timedelta(minutes=1)).astimezone(NY).date(),
             scanned_at=completed, evaluation_candle_at=evaluation_at,
             provider_status={**final_status.model_dump(mode="json"), "scan_timing_v1": {
-                "total_ms": round((perf_counter()-started)*1000, 2), "phases_ms": timings}}, universe=universe,
+                "total_ms": round((perf_counter()-started)*1000, 2), "phases_ms": timings},
+                'collection_v2': collection_integrity.snapshot(provider,evaluation_at)}, universe=universe,
             candidates=[candidate.model_dump(mode="json") for candidate in candidates])
         db.add(scan)
         runtime.status = "healthy" if final_status.status == "healthy" else "degraded"
@@ -460,6 +462,13 @@ def session_close_housekeeping(*, now: datetime | None = None) -> None:
         closed_at = now or datetime.now(timezone.utc)
         if market_session(closed_at) == "regular":
             return
+        if _BACKGROUND_PROVIDER is not None:
+            try:
+                with SessionLocal() as db:
+                    collection_integrity.record_close(db,_BACKGROUND_PROVIDER,closed_at)
+                    db.commit()
+            except Exception:
+                logger.exception('Final candle evidence failed; normal close housekeeping retained')
         reconcile_runtime_on_startup(now=closed_at)
         if _BACKGROUND_PROVIDER is not None and hasattr(_BACKGROUND_PROVIDER, "close"):
             _BACKGROUND_PROVIDER.close()

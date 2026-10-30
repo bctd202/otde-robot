@@ -142,7 +142,7 @@ def test_stale_repeated_or_wrong_provider_quotes_do_not_fill(db, change):
 def test_exit_fees_settlement_and_restart_are_preserved(db):
     activate(db); trades = discover(db); fill(db)
     trades[0].exit_reason = 'TARGET'; trades[0].exit_at = START+timedelta(minutes=1)
-    decision = trades[0].exit_at
+    decision = trades[0].exit_at+timedelta(minutes=1)
     expanded.advance_account(db, AllQuotes(decision, bid=.75, ask=.80), now=decision)
     assert db.scalar(select(ForwardPaperPosition)).status == 'OPEN'
     at = decision+timedelta(seconds=2)
