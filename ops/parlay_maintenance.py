@@ -117,8 +117,10 @@ def run(server, project, output, *, backup_now=False, now=None):
     local=now.astimezone(ZoneInfo('America/New_York'))
     saved=output/'last-verified-backup.json'
     prior_backup=json.loads(saved.read_text()) if saved.exists() else {}
-    backup_day=datetime.fromisoformat(prior_backup['copied_at']).astimezone(local.tzinfo).date() if prior_backup else None
-    due=local.weekday()<5 and (local.hour,local.minute)>=(16,20) and backup_day!=local.date()
+    backup_local=datetime.fromisoformat(prior_backup['copied_at']).astimezone(local.tzinfo) if prior_backup else None
+    closing_backup_done=bool(backup_local and backup_local.date()==local.date()
+                             and (backup_local.hour,backup_local.minute)>=(16,20))
+    due=local.weekday()<5 and (local.hour,local.minute)>=(16,20) and not closing_backup_done
     if backup_now or due:
         try:prior_backup=backup(server,project,output,now)
         except (subprocess.SubprocessError,ValueError,OSError,sqlite3.Error) as exc:

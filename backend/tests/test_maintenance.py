@@ -46,3 +46,33 @@ def test_retention_cannot_remove_manual_or_unverified_backups(tmp_path):
     maintenance.retain_backups(tmp_path,keep=2)
     assert manual.read_bytes()==b'preserve'
     assert len(list(tmp_path.glob('parlay-daily-*.gz')))==2
+
+
+@pytest.mark.parametrize(('previous','now','expected'),[
+    ('2026-10-30T11:09:32+00:00','2026-10-30T20:20:00+00:00',1),
+    ('2026-10-30T20:19:59+00:00','2026-10-30T20:20:00+00:00',1),
+    ('2026-10-30T20:20:00+00:00','2026-10-30T21:00:00+00:00',0),
+    ('2026-10-29T21:00:00+00:00','2026-10-30T21:00:00+00:00',1),
+    ('2026-10-30T11:09:32+00:00','2026-10-30T20:19:59+00:00',0),
+    ('2026-10-30T11:09:32+00:00','2026-10-31T21:00:00+00:00',0),
+    ('2026-11-02T12:00:00+00:00','2026-11-02T20:30:00+00:00',0),
+    ('2026-11-02T12:00:00+00:00','2026-11-02T21:20:00+00:00',1),
+])
+def test_preopen_backup_does_not_replace_after_close_backup(tmp_path,monkeypatch,previous,now,expected):
+    monkeypatch.setattr(maintenance,'remote',lambda *a,**kw:SimpleNamespace(stdout=json.dumps(
+        {'status':'SLEEPING','problems':[]})))
+    maintenance.atomic_json(tmp_path/'last-verified-backup.json',{'copied_at':previous})
+    calls=[]
+
+    def save_backup(server,project,output,at):
+        calls.append(at)
+        manifest={'copied_at':at.isoformat()}
+        maintenance.atomic_json(output/'last-verified-backup.json',manifest)
+        return manifest
+
+    monkeypatch.setattr(maintenance,'backup',save_backup)
+    at=datetime.fromisoformat(now)
+    maintenance.run('parlay','/fixture',tmp_path,now=at)
+    assert len(calls)==expected
+    maintenance.run('parlay','/fixture',tmp_path,now=at)
+    assert len(calls)==expected
