@@ -20,6 +20,7 @@ from app.services.forward_account import (HELD, _evidence, _equity_history, _quo
     _record_equity_snapshot, _valuation, cents, settlement_at)
 from app.services.market_calendar import NY, market_close, market_session
 from app.services.option_research import utc
+from app.services.execution_revision import VERSION as EXECUTION_VERSION, ExitEvidenceProvider
 
 KEY = "tasty-capacity-ten-v1"
 LABEL = "Tastytrade · ten-position paper account"
@@ -89,7 +90,8 @@ def refresh_account_quotes(db: Session, provider, *, now: datetime | None = None
     if account is None or market_session(now) != "regular" or not hasattr(provider, "option_chain"):
         return 0
     status = provider.status()
-    if status.status != "healthy" or status.mode != "live":
+    exit_status = ExitEvidenceProvider(provider).status()
+    if exit_status.status != "healthy" or status.mode != "live":
         return 0
     position_ids = select(ForwardPaperPosition.entry_mark_id).where(
         ForwardPaperPosition.account_key == KEY, ForwardPaperPosition.status.in_(("OPEN", "PENDING_ENTRY")))
@@ -102,7 +104,10 @@ def refresh_account_quotes(db: Session, provider, *, now: datetime | None = None
     # Older held marks precede new ones. One request can serve the same chain.
     refreshed = 0
     seen: set[tuple] = set()
+    held_mark_ids = set(db.scalars(held_ids).all())
     for mark in marks:
+        if status.status != 'healthy' and mark.id not in held_mark_ids:
+            continue  # Candle-only failure permits held exits, not new entries.
         key = (mark.ticker, mark.expiration)
         if key in seen:
             continue
@@ -156,6 +161,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
         mark = db.get(AutomatedOptionMark, position.entry_mark_id)
         row = db.get(SignalPerformance, position.signal_id)
         assert mark is not None and row is not None
+        repaired = detail.get('execution_version') == EXECUTION_VERSION
+        quote_provider = ExitEvidenceProvider(provider) if repaired and provider is not None else provider
         end_day = min(mark.expiration, mark.trading_date)
         end = datetime.combine(end_day, market_close(end_day), NY)
         # Do not invent expiry/assignment or recovery fills following an outage.
@@ -163,7 +170,17 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             detail["reason"] = "No verified exit before session end or underlying data gap; debit remains at risk"
             position.status = "UNPRICED"
         elif row.exit_reason != "OPEN":
-            if (row.exit_at is None or now > utc(row.exit_at)+timedelta(seconds=policy["exit_deadline_seconds"])
+            event_end = utc(row.exit_at)+timedelta(minutes=1) if row.exit_at is not None else None
+            if repaired and event_end is not None and now < event_end:
+                continue
+            # Legacy positions retain their original deadline semantics. New
+            # positions admit the decision on a completed-bar clock, then use
+            # only the saved decision's 180-second later-quote deadline.
+            late_event = (repaired and not detail.get('exit_requested_at') and event_end is not None
+                          and now > event_end+timedelta(seconds=policy['exit_deadline_seconds']))
+            legacy_late = (not repaired and row.exit_at is not None
+                           and now > utc(row.exit_at)+timedelta(seconds=policy['exit_deadline_seconds']))
+            if (row.exit_at is None or late_event or legacy_late
                     or utc(row.exit_at)+timedelta(minutes=1) <= datetime.fromisoformat(detail["entry_at"])):
                 detail["reason"] = "Underlying exit is missing, predates entry, or its quote window was missed"
                 position.status = "UNPRICED"
@@ -174,6 +191,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             if not detail.get("exit_requested_at"):
                 detail["exit_requested_at"] = now.isoformat()
                 detail["exit_reason"] = row.exit_reason
+                if repaired:
+                    detail['exit_event_completed_at'] = event_end.isoformat() if event_end else None
                 _event(db, "EXIT_REQUEST", f"{position.id}:exit-request", now,
                        detail={"position_id": position.id, "ticker": detail["ticker"], "reason": row.exit_reason})
             requested = datetime.fromisoformat(detail["exit_requested_at"])
@@ -181,7 +200,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                 position.status = "UNPRICED"
                 detail["reason"] = "Exit quote deadline missed; no guessed proceeds"
             else:
-                quote = _quote(provider, mark, now, requested+timedelta(seconds=policy["minimum_latency_seconds"]), policy)
+                quote = _quote(quote_provider, mark, now, requested+timedelta(seconds=policy["minimum_latency_seconds"]), policy)
                 if quote is not None:
                     sale = max(0, cents(quote.bid*100)-policy["slippage_premium_cents"]*100)
                     due = settlement_at(now)
@@ -194,7 +213,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                         unsettled=sale, fees=close_fee, realized=detail["net_pnl_cents"],
                         detail={"position_id": position.id, **detail})
         else:
-            quote = _quote(provider, mark, now, datetime.fromisoformat(detail["entry_at"]), policy)
+            quote = _quote(quote_provider, mark, now, datetime.fromisoformat(detail["entry_at"]), policy)
             if quote is not None:
                 detail["valuation"] = _evidence(quote, now)
         if position.status == "UNPRICED":
@@ -213,9 +232,17 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
         row = db.get(SignalPerformance, mark.signal_id)
         if row is None or row.source != "LIVE":
             continue
+        if not db.scalar(select(ForwardPaperEvent.id).where(
+                ForwardPaperEvent.account_key == KEY, ForwardPaperEvent.event_key == f'execution:{EXECUTION_VERSION}')):
+            _event(db, 'EXECUTION_BOUNDARY', f'execution:{EXECUTION_VERSION}', now,
+                detail={'execution_version': EXECUTION_VERSION, 'first_mark_id': mark.id,
+                        'reason': 'Prospective decision-clock exits and independent verified option quote health; cash and historical positions preserved',
+                        'entry_deadline_seconds': policy['entry_deadline_seconds'],
+                        'exit_deadline_seconds': policy['exit_deadline_seconds']})
         position = ForwardPaperPosition(account_key=KEY, signal_id=mark.signal_id,
             entry_mark_id=mark.id, status="PENDING_ENTRY", first_seen_at=now,
             detail={"ticker": mark.ticker, "option_symbol": mark.normalized_option_symbol,
+                'execution_version': EXECUTION_VERSION,
                 "strategy_mode": mark.strategy_mode, "strategy_version": row.strategy_version,
                 "strategy_snapshot": row.strategy_snapshot,
                 "underlying_plan": {"entry": row.entry_price, "stop": row.stop_price, "target": row.target_price},
@@ -337,6 +364,9 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
     trades = db.scalars(select(ForwardPaperPosition).where(ForwardPaperPosition.account_key == account_key)
         .order_by(ForwardPaperPosition.id.desc()).offset((trade_page-1)*page_size).limit(page_size)).all()
     return {"status": "ARCHIVED" if archived else "ACTIVE", "paper_only": True, "account_key": account_key,
+        'execution_boundaries': [{'at': utc(e.occurred_at).isoformat(), **e.detail} for e in db.scalars(
+            select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == account_key,
+                ForwardPaperEvent.kind == 'EXECUTION_BOUNDARY').order_by(ForwardPaperEvent.id))],
         "accounts": catalog,
         "activated_at": utc(account.activated_at).isoformat(), "as_of": now.isoformat(), "policy": account.policy,
         "processed_at": utc(account.processed_at).isoformat(),

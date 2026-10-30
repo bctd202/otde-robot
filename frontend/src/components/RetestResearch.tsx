@@ -5,6 +5,7 @@ import './retest-research.css';
 export interface RetestResponse {
   status:string; note:string; verdict?:string; baseline_opportunities?:number; input_coverage?:number|null;
   activated_at?:string; spec_hash?:string;
+  admissions_blocked?:boolean;
   accounts?:{key:string;arm:string;scenario:string;complete:boolean;net_pnl_cents:number|null;
     max_drawdown_cents:number|null;unresolved:number;entry_quote_coverage:number|null;exit_quote_coverage:number|null;
     daily:{date:string;equity_cents:number|null;complete:boolean}[]}[];
@@ -46,7 +47,8 @@ export function RetestResearch({active}:{active:boolean}){
       <button type="button" onClick={()=>setRefresh(n=>n+1)}>Refresh research</button></header>
     {error&&<p role="alert">{error}</p>}
     {!data&&!error&&<p>Loading research status…</p>}
-    {data&&<><p><strong>{data.status==='NOT_ACTIVATED'?'Not activated':data.status==='COLLECTING'?'Collecting — no conclusion yet':'Collection window ended'}</strong></p>
+    {data&&<><p><strong>{data.admissions_blocked?'New admissions stopped — original study preserved':data.status==='NOT_ACTIVATED'?'Not activated':data.status==='COLLECTING'?'Collecting — no conclusion yet':'Collection window ended'}</strong></p>
+      {data.admissions_blocked&&<p role="alert">The collection software changed. This study keeps its original evidence and dates; its full-performance verdict remains inconclusive. Existing exposure continues under its saved rules. A corrected comparison requires a separately reviewed prospective activation.</p>}
       <p>{data.note}</p>
       {data.status!=='NOT_ACTIVATED'&&<>
         <aside className="retest-recording-note"><h3>Research records are separate from account slots</h3>

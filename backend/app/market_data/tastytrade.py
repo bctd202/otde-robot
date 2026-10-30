@@ -8,6 +8,7 @@ import json
 import logging
 import math
 from threading import Condition, Event, RLock, Thread
+from time import monotonic
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -15,10 +16,11 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.market import CandleOut, OptionContractOut, ProviderStatus, Quote
-from app.services.market_calendar import is_market_day, market_close
+from app.services.market_calendar import is_market_day, market_close, market_session
 
 NY = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
+COLLECTION_VERSION = "dxlink-keepalive-v2"
 _RESEARCH_RESERVE: ContextVar[int] = ContextVar('tastytrade_research_reserve', default=0)
 
 
@@ -49,6 +51,17 @@ def _stamp(value: Any, default: datetime | None = None) -> datetime:
 
 def _occ_compact(symbol: str) -> str:
     return symbol.replace(" ", "").upper()
+
+
+def _market_stamp(value: Any) -> datetime:
+    """Market evidence must have an upstream time; never substitute receipt time."""
+    if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value):
+        return _stamp(value).astimezone(timezone.utc)
+    if isinstance(value,str):
+        stamp=datetime.fromisoformat(value.replace('Z','+00:00'))
+        if stamp.tzinfo is not None:
+            return stamp.astimezone(timezone.utc)
+    raise ValueError('Missing or ambiguous market timestamp')
 
 
 def _latest_market_date(now: datetime | None = None) -> date:
@@ -169,6 +182,13 @@ class DXLinkCandleStreamClient:
         self._connected = False
         self._last_event_at: datetime | None = None
         self._last_error: str | None = None
+        self._ready_at: float | None = None
+        self._connections = 0
+        self._disconnects = 0
+        self._last_keepalive_at: datetime | None = None
+        self._recover_symbols: set[str] = set()
+        self._recovery_at: dict[str, float] = {}
+        self._recovery_batches = 0
 
     def start(self) -> None:
         with self._lock:
@@ -191,6 +211,11 @@ class DXLinkCandleStreamClient:
                 "last_event_at": self._last_event_at,
                 "last_error": self._last_error,
                 "subscription_count": len(self.symbols),
+                "connections": self._connections,
+                "disconnects": self._disconnects,
+                "last_keepalive_at": self._last_keepalive_at,
+                "collection_version": COLLECTION_VERSION,
+                "recovery_batches": self._recovery_batches,
             }
 
     def _set_state(self, *, connected: bool | None = None, error: str | None = None) -> None:
@@ -199,13 +224,40 @@ class DXLinkCandleStreamClient:
                 self._connected = connected
             self._last_error = error
 
+    def request_recovery(self, symbols: list[str]) -> None:
+        """Queue same-session subscriptions; no new sockets or REST requests."""
+        with self._lock:
+            self._recover_symbols.update(s for s in symbols if s in self.symbols)
+
+    def _recover(self, ws) -> None:
+        now = monotonic()
+        with self._lock:
+            selected = sorted(s for s in self._recover_symbols
+                              if now-self._recovery_at.get(s, float('-inf')) >= 120)[:3]
+            if not selected:
+                return
+            for symbol in selected:
+                self._recover_symbols.discard(symbol)
+                self._recovery_at[symbol] = now
+            self._recovery_batches += 1
+        subscriptions = [{'type':'Candle','symbol':f'{s}{{=m}}'} for s in selected]
+        ws.send(json.dumps({'type':'FEED_SUBSCRIPTION','channel':3,'remove':subscriptions}))
+        ws.send(json.dumps({'type':'FEED_SUBSCRIPTION','channel':3,'add':[
+            {**item,'fromTime':int(self.start_at.timestamp()*1000)} for item in subscriptions]}))
+
     def _run(self) -> None:
         delay = 1.0
         while not self._stop.is_set():
+            self._ready_at = None
             try:
                 self._session()
                 delay = 1.0
             except Exception as exc:  # the reconnect loop must survive transport failures
+                # A stable session is not a consecutive handshake failure.
+                if self._ready_at is not None and monotonic()-self._ready_at >= 60:
+                    delay = 1.0
+                with self._lock:
+                    self._disconnects += 1
                 self._set_state(connected=False, error=f"{type(exc).__name__}: {exc}")
                 logger.warning("Tastytrade DXLink candle stream disconnected: %s", type(exc).__name__)
             if not self._stop.is_set():
@@ -223,13 +275,29 @@ class DXLinkCandleStreamClient:
             ws.send(json.dumps({"type": "SETUP", "channel": 0, "version": "0.1-DXF-JS/0.3.0",
                                 "keepaliveTimeout": 60, "acceptKeepaliveTimeout": 60}))
             authorized = opened = configured = False
+            interval = 30.0
+            next_keepalive = monotonic()+interval
+            next_recovery = monotonic()
             while not self._stop.is_set():
+                if monotonic() >= next_keepalive:
+                    ws.send(json.dumps({"type": "KEEPALIVE", "channel": 0}))
+                    with self._lock:
+                        self._last_keepalive_at = datetime.now(timezone.utc)
+                    next_keepalive = monotonic()+interval
+                if configured and monotonic() >= next_recovery:
+                    self._recover(ws)
+                    next_recovery = monotonic()+60
                 try:
-                    message = json.loads(ws.recv(timeout=5))
+                    message = json.loads(ws.recv(timeout=min(1.0, max(.05, next_keepalive-monotonic()))))
                 except TimeoutError:
                     continue
                 kind = message.get("type")
-                if kind == "AUTH_STATE" and message.get("state") == "UNAUTHORIZED":
+                if kind == "SETUP":
+                    timeout = message.get("keepaliveTimeout", 60)
+                    if isinstance(timeout, (int, float)) and math.isfinite(timeout) and timeout > 0:
+                        interval = min(30.0, max(.05, timeout/2))
+                        next_keepalive = monotonic()+interval
+                elif kind == "AUTH_STATE" and message.get("state") == "UNAUTHORIZED":
                     ws.send(json.dumps({"type": "AUTH", "channel": 0, "token": self.token}))
                 elif kind == "AUTH_STATE" and message.get("state") == "AUTHORIZED" and not authorized:
                     authorized = True
@@ -245,6 +313,9 @@ class DXLinkCandleStreamClient:
                     ws.send(json.dumps({"type": "FEED_SUBSCRIPTION", "channel": 3,
                                         "reset": True, "add": subscriptions}))
                     self._set_state(connected=True, error=None)
+                    with self._lock:
+                        self._connections += 1
+                        self._ready_at = monotonic()
                 elif kind == "FEED_DATA":
                     events = list(DXLinkSnapshotClient._events(message.get("data"), requested))
                     if events:
@@ -414,7 +485,7 @@ class TastytradeMarketDataProvider:
                 try:
                     event_symbol = str(event["eventSymbol"])
                     symbol = event_symbol.split("{")[0].upper()
-                    stamp = _stamp(event.get("time")).astimezone(NY)
+                    stamp = _market_stamp(event.get("time")).astimezone(NY)
                     # Strategies are regular-session models. Extended-hours bars must not
                     # silently change their indicators or expected candle counts.
                     if stamp.date() != day or not time(9, 30) <= stamp.time() < market_close(day):
@@ -423,6 +494,8 @@ class TastytradeMarketDataProvider:
                         open=float(event["open"]), high=float(event["high"]),
                         low=float(event["low"]), close=float(event["close"]),
                         volume=int(_number(event.get("volume"))))
+                    if not all(math.isfinite(p) and p > 0 for p in (row.open,row.high,row.low,row.close)):
+                        continue
                 except (KeyError, TypeError, ValueError, OSError):
                     continue
                 key = (symbol, "1m")
@@ -437,6 +510,14 @@ class TastytradeMarketDataProvider:
 
     def start(self) -> None:
         self._ensure_candle_stream()
+
+    def completed_candle_evidence(self, evaluation: datetime) -> dict[str, bool]:
+        """Inspect transport cache only, including the last bar at session close."""
+        evaluation = evaluation.astimezone(timezone.utc)
+        with self._candle_condition:
+            return {symbol:any(row.timestamp.astimezone(timezone.utc)==evaluation
+                               for row in self._candle_cache.get((symbol,'1m'),[]))
+                    for symbol in get_settings().parlay_symbol_list}
 
     def close(self) -> None:
         with self._candle_stream_lock:
@@ -497,6 +578,10 @@ class TastytradeMarketDataProvider:
                       for (symbol, timeframe), rows in self._candle_cache.items()
                       if timeframe == "1m"}
         configured = get_settings().parlay_symbol_list
+        now = datetime.now(timezone.utc)
+        boundary = now.replace(second=0, microsecond=0)-timedelta(minutes=1)
+        required = [symbol for symbol in configured
+                    if (stamp := latest.get(symbol)) is None or stamp.astimezone(timezone.utc) < boundary]
         return {
             **stream_health,
             "provider": "tastytrade",
@@ -504,6 +589,9 @@ class TastytradeMarketDataProvider:
             "symbols_with_candles": sum(1 for symbol in configured if latest.get(symbol) is not None),
             "latest_candles": {symbol: stamp.isoformat() if stamp else None
                                for symbol, stamp in latest.items()},
+            "collection_version": COLLECTION_VERSION,
+            "sleeping": market_session(now) != "regular" and stream is None,
+            "stale_symbols": required if market_session(now) == "regular" else [],
         }
 
     def budget_status(self) -> dict[str, Any]:
@@ -528,17 +616,26 @@ class TastytradeMarketDataProvider:
             health = "rate_limited"
         elif self._error or stream_error:
             health = "degraded"
-        elif self._candle_warmup_attempted and symbols_with_candles == 0:
+        elif self._candle_warmup_attempted and symbols_with_candles == 0 and market_session(datetime.now(timezone.utc)) == "regular":
             health = "degraded"
         else:
             health = "healthy"
         message = (self._error or
                    (f"Tastytrade DXLink candle stream unavailable: {stream_error}" if stream_error else None) or
-                   ("Tastytrade DXLink is connected but completed candles are not ready."
+                   ("Market closed; candle stream is sleeping."
+                    if self._candle_stream is None and market_session(datetime.now(timezone.utc)) != "regular" else None) or
+                   ("Tastytrade completed candles are not ready."
                     if self._candle_warmup_attempted and symbols_with_candles == 0 else None) or
                    "Tastytrade funded-account real-time market data; paper research only.")
         return ProviderStatus(provider="tastytrade", mode="live", status=health, delay_seconds=0,
                               latest_timestamp=self._latest, message=message)
+
+    def option_execution_status(self) -> ProviderStatus:
+        """REST health only; an exit still needs exact, fresh, later quote evidence."""
+        ready = self._configuration_error() is None and not self._error and self._last_http_status != 429
+        return ProviderStatus(provider="tastytrade", mode="live", status="healthy" if ready else "degraded",
+            delay_seconds=0, latest_timestamp=self._latest,
+            message="Option REST evidence available" if ready else "Option REST evidence unavailable")
 
     def quotes(self, symbols: list[str]) -> list[Quote]:
         if not symbols:
@@ -550,7 +647,10 @@ class TastytradeMarketDataProvider:
             price = _number(row.get("last") or row.get("mark") or row.get("mid"))
             if price <= 0:
                 continue
-            stamp = _stamp(row.get("updated-at") or row.get("updatedAt")).astimezone(NY)
+            try:
+                stamp = _market_stamp(row.get("updated-at") or row.get("updatedAt")).astimezone(NY)
+            except (ValueError,TypeError,OverflowError,OSError):
+                continue
             result.append(Quote(symbol=str(row.get("symbol", "")).upper(), price=price, timestamp=stamp))
             self._latest = max(self._latest, stamp)
         return result
@@ -573,7 +673,7 @@ class TastytradeMarketDataProvider:
             try:
                 event_symbol = str(event["eventSymbol"])
                 symbol = event_symbol.split("{")[0].upper()
-                stamp = _stamp(event.get("time")).astimezone(NY)
+                stamp = _market_stamp(event.get("time")).astimezone(NY)
                 if stamp < start.astimezone(NY):
                     continue
                 rows.append(CandleOut(symbol=symbol, timeframe=timeframe, timestamp=stamp,
@@ -595,6 +695,14 @@ class TastytradeMarketDataProvider:
                 self._candle_condition.wait(timeout=max(
                     1.0, get_settings().tastytrade_stream_warmup_seconds))
             rows = list(self._candle_cache.get(key, []))
+        now = datetime.now(timezone.utc)
+        if (market_session(now) == 'regular' and self._candle_stream is not None
+                and hasattr(self._candle_stream, 'request_recovery')):
+            opening = datetime.combine(now.astimezone(NY).date(),time(9,30),NY)
+            boundary = now.replace(second=0,microsecond=0)-timedelta(minutes=1)
+            if ((now-opening).total_seconds() >= 120 and
+                    (not rows or max(r.timestamp for r in rows).astimezone(timezone.utc)<boundary)):
+                self._candle_stream.request_recovery([symbol.upper()])
         if timeframe == "1m":
             return rows
         from app.market_data.cached import aggregate_candles

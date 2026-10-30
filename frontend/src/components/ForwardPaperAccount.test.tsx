@@ -17,6 +17,13 @@ function account(overrides:Partial<ForwardAccount>={}):ForwardAccount{
     pagination:{page:1,pages:1,total:1,page_size:20},...overrides};
 }
 
+test('collection boundary labels the continuous balance without rewriting unknown trades',async()=>{
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account({execution_boundaries:[{
+    at:'2026-10-30T13:30:00Z',execution_version:'decision-clock-v2',reason:'Prospective collection repair'}]})} as Response);
+  render(<ForwardPaperAccount/>);
+  expect(await screen.findByText(/The account balance spans both collection versions/)).toBeVisible();
+});
+
 test('separates simulated net profit, buying power, unsettled proceeds and costs',async()=>{
   vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account()} as Response);
   render(<ForwardPaperAccount/>);

@@ -23,6 +23,14 @@ const fixture:RetestResponse={status:'COLLECTING',note:'Paper evidence, not brok
   positions:[{id:1,ticker:'SPY',arm:'treatment',scenario:'base',status:'SKIPPED',detail:{reason:'CAPACITY_SKIP',net_pnl_cents:null}}],
   pagination:{page:1,pages:2,total:24}};
 
+test('a protected source change is visible without presenting ongoing admissions',async()=>{
+  vi.mocked(getRetestResearch).mockResolvedValue({...fixture,admissions_blocked:true});
+  render(<RetestResearch active/>);
+  expect(await screen.findByRole('alert')).toHaveTextContent('The collection software changed');
+  expect(screen.getByText('New admissions stopped — original study preserved')).toBeVisible();
+  expect(screen.queryByText('Collecting — no conclusion yet')).not.toBeInTheDocument();
+});
+
 test('unknown values stay unknown, graph gaps are not joined, and pagination is read-only',async()=>{
   vi.mocked(getRetestResearch).mockResolvedValue(fixture);
   const {container}=render(<RetestResearch active/>);
