@@ -173,6 +173,33 @@ test('full account explicitly explains unresolved slots and links to uncapped re
   expect(screen.getByText(/cannot release them or calculate their profit/)).toBeVisible();
 });
 
+test('ended trades move outside live capacity but keep the full account total unknown',async()=>{
+  const ended={id:86,status:'ENDED_UNRESOLVED',option_symbol:'SPY261029C00772000',
+    entry_debit_cents:7750,expiration:'2026-10-29',entry_dte:0,lifecycle_label:'Expired · exit price missing',capacity_released:true};
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account({equity_cents:null,
+    unpriced_positions:1,unpriced_debit_cents:7750,expired_unresolved_count:1,expired_unresolved_debit_cents:7750,
+    unresolved_expirations:[ended],positions:[],trades:[ended],
+    lifecycle_policy:{version:'session-end-state-v1',ended_contracts_use_live_slots:false,missing_proceeds_are_zero:false}})} as Response);
+  render(<ForwardPaperAccount/>);
+  expect(await screen.findByText('Total pending historical exit evidence')).toBeVisible();
+  expect(screen.getByText('0 open · 0 unresolved exits · 3 slots free.')).toBeVisible();
+  expect(screen.getByText('1 expired/session-ended trade(s) · $77.50 original cost')).toBeVisible();
+  expect(screen.getByText(/slots are released—not their spent entry cash/)).toBeVisible();
+  expect(screen.getByText(/Cash alone is not the total account value or profit/)).toBeVisible();
+  expect(screen.queryByText(/held position\(s\) have unknown value/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Trades'}));
+  expect(screen.getByText('Expired · exit price missing · Paper')).toBeVisible();
+});
+
+test('an old unpriced observation never inherits the current expired-trade explanation',()=>{
+  render(<AccountEquityChart account={account({equity_cents:null,expired_unresolved_count:1,
+    equity_history:{baseline_cents:200000,started_at:equityPoints[0].at,daily:equityPoints,intraday:equityPoints,basis:'Observed'}})}/>);
+  expect(screen.getByText('Total pending historical exit evidence')).toBeVisible();
+  fireEvent.change(screen.getByRole('slider',{name:'Inspect saved account value'}),{target:{value:'1'}});
+  expect(screen.getByText('Value incomplete')).toBeVisible();
+  expect(screen.queryByText('Missing exit proceeds—not a live-price loading problem. Complete account return remains unknown.')).not.toBeInTheDocument();
+});
+
 test('ten-slot display counts held exposure only, not pending entries or unsettled proceeds',()=>{
   const a=account();
   render(<AccountCapacity account={account({policy:{...a.policy,max_positions:10},unpriced_positions:2,

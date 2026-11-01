@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from app.core.config import get_settings
 from app.db.models import ForwardPaperPosition, LottoTrialPosition, RetestRun, ScannerRuntime
 from app.services import expanded_account, retest_trials
+from app.services.paper_lifecycle import ENDED_UNRESOLVED
 from app.services.evidence_health import collection_evidence, utc
 from app.services.market_calendar import market_session, next_market_open, NY
 
@@ -28,7 +29,10 @@ def snapshot(db, provider, *, now=None):
         if quality.get('connected') is False:problems.append('Candle stream disconnected')
         if quality.get('stale_symbols'):problems.append('Required symbol candles are stale')
     unknown=db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(
-        ForwardPaperPosition.account_key==expanded_account.KEY,ForwardPaperPosition.status=='UNPRICED')) or 0
+        ForwardPaperPosition.account_key==expanded_account.KEY,
+        ForwardPaperPosition.status.in_(('UNPRICED',ENDED_UNRESOLVED)))) or 0
+    ended=db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key==expanded_account.KEY,ForwardPaperPosition.status==ENDED_UNRESOLVED)) or 0
     lotto_unknown=db.scalar(select(func.count()).select_from(LottoTrialPosition).where(
         LottoTrialPosition.account_key.like('lotto-v3%'),LottoTrialPosition.status=='UNPRICED')) or 0
     if unknown:problems.append(f'{unknown} main-account exits have unknown proceeds')
@@ -42,6 +46,7 @@ def snapshot(db, provider, *, now=None):
     return {'as_of':now.isoformat(),'paper_only':settings.paper_only,
         'status':'ATTENTION' if problems else 'SLEEPING' if session!='regular' else 'COLLECTING',
         'market_session':session,'problems':problems,'main_unknown_exits':unknown,
+        'main_expired_unresolved_exits':ended,
         'lotto_unknown_exits':lotto_unknown,'retest_admissions_blocked':drift,
         'next_market_open_at':next_market_open(now).isoformat() if session!='regular' else None,
         'last_completed_scan_at':utc(latest).isoformat() if latest else None,

@@ -8,7 +8,7 @@ const percent=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;
 const ranges=['1D','1W','1M','ALL'] as const;
 type Range=typeof ranges[number];
 
-export type EquityAccount=Pick<ForwardAccount,'status'|'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'>&{policy:{starting_cash_cents:number}};
+export type EquityAccount=Pick<ForwardAccount,'status'|'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'|'expired_unresolved_count'>&{policy:{starting_cash_cents:number}};
 export function AccountEquityChart({account}:{account:EquityAccount}){
   const [range,setRange]=useState<Range>('ALL');
   const [unit,setUnit]=useState<'PERCENT'|'DOLLARS'>('PERCENT');
@@ -26,6 +26,7 @@ export function AccountEquityChart({account}:{account:EquityAccount}){
   const points=(range==='1D'?history?.intraday:history?.daily)?.filter(point=>range==='ALL'||range==='1D'||Date.parse(`${point.date}T00:00:00Z`)>=cutoff)??[];
   const selected=points.find(point=>point.at===selectedAt);
   const equity=selected?selected.equity_cents:account.equity_cents;
+  const ended=!selected&&(account.expired_unresolved_count??0)>0;
   const starting=account.policy.starting_cash_cents;
   const change=equity===null?null:equity-starting;
   const performance=change===null?null:change/starting*100;
@@ -44,8 +45,8 @@ export function AccountEquityChart({account}:{account:EquityAccount}){
   const axis=(amount:number)=>unit==='PERCENT'?percent(amount):money(amount);
   const pointLabel=(point:AccountEquityPoint)=>`${formatEasternDateTime(point.at)}: ${point.equity_cents===null?'Unpriced':`${money(point.equity_cents)} · ${percent(point.return_percent!)}`}`;
   return <section className="account-equity" aria-label="Account value and percentage return">
-    <div className="account-equity-heading"><div><span>OPTION-DOLLAR ACCOUNT VALUE · SIMULATED</span><h4>{equity===null?'Value incomplete':money(equity)}</h4>
-      <p className={performance===null?'':performance>=0?'positive-text':'negative-text'}>{change===null?'Return unavailable while positions are unpriced':`${change>0?'+':''}${money(change)} (${percent(performance!)}) since funding`}</p>
+    <div className="account-equity-heading"><div><span>OPTION-DOLLAR ACCOUNT VALUE · SIMULATED</span><h4>{equity===null?ended?'Total pending historical exit evidence':'Value incomplete':money(equity)}</h4>
+      <p className={performance===null?'':performance>=0?'positive-text':'negative-text'}>{change===null?ended?'Missing exit proceeds—not a live-price loading problem. Complete account return remains unknown.':'Return unavailable while positions are unpriced':`${change>0?'+':''}${money(change)} (${percent(performance!)}) since funding`}</p>
       <small>{selected?`Saved observation · ${formatEasternDateTime(selected.at)}`:account.status==='ARCHIVED'?`Archived account · last processed ${formatEasternDateTime(account.processed_at)}`:`Current estimate · ${formatEasternDateTime(account.as_of)}`}</small></div>
       <div className="equity-controls" role="group" aria-label="Account graph units">{(['PERCENT','DOLLARS'] as const).map(option=><button type="button" aria-pressed={unit===option} onClick={()=>setUnit(option)} key={option}>{option==='PERCENT'?'Return %':'Value $'}</button>)}</div>
     </div>

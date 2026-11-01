@@ -14,17 +14,78 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import (AutomatedOptionMark, ForwardPaperAccount, ForwardPaperEvent,
-                           ForwardPaperPosition, SignalPerformance)
+                           ForwardPaperPosition, ForwardPaperEquitySnapshot, SignalPerformance)
 from app.services import forward_account as baseline
 from app.services.forward_account import (HELD, _evidence, _equity_history, _quote,
-    _record_equity_snapshot, _valuation, cents, settlement_at)
+    cents, settlement_at)
 from app.services.market_calendar import NY, market_close, market_session
 from app.services.option_research import utc
 from app.services.execution_revision import VERSION as EXECUTION_VERSION, ExitEvidenceProvider
+from app.services import paper_lifecycle as lifecycle
 
 KEY = "tasty-capacity-ten-v1"
 LABEL = "Tastytrade · ten-position paper account"
 STARTING_CASH = 2000
+FINANCIAL_EXPOSURE = (*HELD, lifecycle.ENDED_UNRESOLVED)
+
+
+def _valuation(active, policy, now, *, archived=False):
+    value = baseline._valuation(active, policy, now, archived=archived)
+    ended = [p for p in active if p.status == lifecycle.ENDED_UNRESOLVED]
+    # Ended contracts no longer reserve live order slots or a future sale fee.
+    # Missing proceeds remain unknown; their entry cash is never refunded.
+    value['unpriced_positions'] += len(ended)
+    value['unpriced_debit_cents'] += sum(p.detail['entry_debit_cents'] for p in ended)
+    value['open_entry_fees_cents'] += sum(p.detail['entry_fee_cents'] for p in ended)
+    return value
+
+
+def _record_equity_snapshot(db, account, now):
+    if db.scalar(select(ForwardPaperEquitySnapshot.id).where(
+            ForwardPaperEquitySnapshot.account_key == account.key,
+            ForwardPaperEquitySnapshot.observed_at == now)) is not None:
+        return
+    exposure = list(db.scalars(select(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key == account.key,
+        ForwardPaperPosition.status.in_(FINANCIAL_EXPOSURE))).all())
+    value = _valuation(exposure, account.policy, now)
+    settled, unsettled = _balance(db, account.key)
+    db.add(ForwardPaperEquitySnapshot(account_key=account.key, observed_at=now,
+        trading_date=now.astimezone(NY).date(), cash_cents=settled+unsettled,
+        equity_cents=None if value['unpriced_positions'] else settled+unsettled+value['known_liquidation_cents'],
+        unpriced_positions=value['unpriced_positions'],
+        detail={'basis': 'CASH_PLUS_VERIFIED_BID_LESS_MODELED_EXIT_COSTS',
+                'policy_version': account.policy['version'], 'lifecycle_version': lifecycle.VERSION,
+                'positions': [{'id': p.id, 'status': p.status, 'valuation': p.detail.get('valuation'),
+                               'strategy_version': p.detail.get('strategy_version')} for p in exposure]}))
+    db.flush()
+
+
+def _end_contract_sessions(db, positions, now):
+    for position in positions:
+        if position.status not in HELD:
+            continue
+        mark = db.get(AutomatedOptionMark, position.entry_mark_id)
+        if mark is None or now < lifecycle.final_session_end(mark):
+            continue  # A same-day quote gap is not an expired longer-dated option.
+        if not db.scalar(select(ForwardPaperEvent.id).where(
+                ForwardPaperEvent.account_key == KEY,
+                ForwardPaperEvent.event_key == f'lifecycle:{lifecycle.VERSION}')):
+            _event(db, 'LIFECYCLE_BOUNDARY', f'lifecycle:{lifecycle.VERSION}', now,
+                detail={'lifecycle_version': lifecycle.VERSION,
+                        'reason': 'Ended contract sessions leave live capacity; missing proceeds and cash history stay unresolved'})
+        previous_status = position.status
+        position.status = lifecycle.ENDED_UNRESOLVED
+        position.detail = {**position.detail, 'lifecycle_version': lifecycle.VERSION,
+                           'session_ended_at': lifecycle.final_session_end(mark).isoformat(),
+                           'ended_observed_at': now.isoformat(), 'expiration': mark.expiration.isoformat()}
+        _event(db, 'SESSION_END_UNRESOLVED', f'{position.id}:session-end-v1', now,
+            detail={'position_id': position.id, 'ticker': mark.ticker,
+                    'previous_status': previous_status, 'original_reason': position.detail.get('reason'),
+                    'expiration': mark.expiration.isoformat(), 'entry_debit_cents': position.detail['entry_debit_cents'],
+                    'session_ended_at': position.detail['session_ended_at'],
+                    'reason': 'No verified exit proceeds. Not a sale, zero-value expiry, exercise or cash credit.',
+                    'lifecycle_version': lifecycle.VERSION})
 
 
 def activate(db: Session, *, revision: str, now: datetime) -> ForwardPaperAccount:
@@ -221,6 +282,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                 detail={"position_id": position.id, "ticker": detail["ticker"], "reason": detail["reason"]})
         position.detail = detail
     db.flush()
+    _end_contract_sessions(db, positions, now)
+    db.flush()
 
     marks = list(db.scalars(select(AutomatedOptionMark).where(
         AutomatedOptionMark.id > account.mark_watermark,
@@ -337,7 +400,7 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
         .execution_options(yield_per=500))
     active = list(db.scalars(select(ForwardPaperPosition).where(
         ForwardPaperPosition.account_key == account_key,
-        ForwardPaperPosition.status.in_(("PENDING_ENTRY", "OPEN", "UNPRICED", "UNSETTLED")))
+        ForwardPaperPosition.status.in_(("PENDING_ENTRY", "OPEN", "UNPRICED", "UNSETTLED", lifecycle.ENDED_UNRESOLVED)))
         .order_by(ForwardPaperPosition.id)).all())
     settled = unsettled = pnl = fees = 0
     daily: dict[str, dict] = {}
@@ -363,7 +426,23 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
     trade_page = max(1, min(requested_page, trade_pages))
     trades = db.scalars(select(ForwardPaperPosition).where(ForwardPaperPosition.account_key == account_key)
         .order_by(ForwardPaperPosition.id.desc()).offset((trade_page-1)*page_size).limit(page_size)).all()
+    ended = [p for p in active if p.status == lifecycle.ENDED_UNRESOLVED]
+    mark_ids = {p.entry_mark_id for p in [*active, *trades]}
+    marks = {m.id: m for m in db.scalars(select(AutomatedOptionMark).where(AutomatedOptionMark.id.in_(mark_ids)))}
+
+    def describe(p):
+        return {'id': p.id, 'status': p.status, **p.detail,
+                **(lifecycle.fields(marks[p.entry_mark_id], p.status, now) if p.entry_mark_id in marks else {})}
+
     return {"status": "ARCHIVED" if archived else "ACTIVE", "paper_only": True, "account_key": account_key,
+        'lifecycle_policy': {'version': lifecycle.VERSION, 'ended_contracts_use_live_slots': False,
+                             'missing_proceeds_are_zero': False},
+        'lifecycle_boundaries': [{'at': utc(e.occurred_at).isoformat(), **e.detail} for e in db.scalars(
+            select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == account_key,
+                ForwardPaperEvent.kind == 'LIFECYCLE_BOUNDARY').order_by(ForwardPaperEvent.id))],
+        'expired_unresolved_count': len(ended),
+        'expired_unresolved_debit_cents': sum(p.detail['entry_debit_cents'] for p in ended),
+        'unresolved_expirations': [describe(p) for p in ended],
         'execution_boundaries': [{'at': utc(e.occurred_at).isoformat(), **e.detail} for e in db.scalars(
             select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == account_key,
                 ForwardPaperEvent.kind == 'EXECUTION_BOUNDARY').order_by(ForwardPaperEvent.id))],
@@ -377,8 +456,8 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
         "equity_cents": None if value["unpriced_positions"] else settled+unsettled+value["known_liquidation_cents"],
         "equity_history": _equity_history(db, account),
         "daily": list(daily.values()),
-        "positions": [{"id": p.id, "status": p.status, **p.detail} for p in active],
-        "trades": [{"id": p.id, "status": p.status, **p.detail,
+        "positions": [describe(p) for p in active if p.status != lifecycle.ENDED_UNRESOLVED],
+        "trades": [{**describe(p),
                     "estimated_net_proceeds_cents": _valuation([p], account.policy, now)["known_liquidation_cents"]
                     if not archived and p.status == "OPEN" and not _valuation([p], account.policy, now)["unpriced_positions"] else None,
                     "net_proceeds_cents": p.detail["sale_cents"]-p.detail.get("exit_fee_cents", 0)

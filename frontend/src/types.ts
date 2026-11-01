@@ -176,6 +176,10 @@ export interface PendingPaperAccount {
 }
 export interface ForwardAccount {
   execution_boundaries?:{at:string;execution_version:string;reason:string}[];
+  lifecycle_boundaries?:{at:string;lifecycle_version:string;reason:string}[];
+  lifecycle_policy?:{version:string;ended_contracts_use_live_slots:boolean;missing_proceeds_are_zero:boolean};
+  expired_unresolved_count?:number;expired_unresolved_debit_cents?:number;
+  unresolved_expirations?:MoneyTrade[];
   status:'ACTIVE'|'ARCHIVED';paper_only:true;account_key:string;accounts?:PaperAccountChoice[];activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
   policy:{label?:string;starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
   settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;
@@ -192,6 +196,7 @@ export interface ForwardAccount {
 
 export interface MoneyTrade {
   id:number;status:string;option_symbol:string;entry_debit_cents?:number;
+  expiration?:string;entry_dte?:number;lifecycle_label?:string|null;capacity_released?:boolean;
   net_proceeds_cents?:number|null;estimated_net_proceeds_cents?:number|null;
   net_pnl_cents?:number;entry_at?:string;exit_at?:string;exit_reason?:string;reason?:string;
   valuation?:{bid_at:string;[key:string]:unknown};
