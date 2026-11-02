@@ -39,3 +39,20 @@ test('OCC symbols have a human-readable direction, strike and expiration',()=>{
   render(<TradeResultCards trades={[trade({option_symbol:'SPY   261019P00760000'})]}/>);
   expect(screen.getByText('SPY PUT $760 · 10/19/2026')).toBeInTheDocument();
 });
+
+test('expired missing proceeds are distinct from open positions and known zero proceeds',()=>{
+  const ended=trade({status:'ENDED_UNRESOLVED',lifecycle_label:'Expired · exit price missing',expiration:'2026-10-29',entry_dte:0});
+  expect(tradeOutcome(ended)).toBeNull();
+  render(<TradeResultCards trades={[ended]}/>);
+  expect(screen.getByText('Expired · exit price missing · Paper')).toBeVisible();
+  expect(screen.getByText('0DTE · expires 2026-10-29')).toBeVisible();
+  expect(screen.getByText(/original debit stays spent/)).toBeVisible();
+  expect(screen.queryByText(/Open · estimated/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/-100.0%/)).not.toBeInTheDocument();
+});
+
+test('a completed sale awaiting settlement is not an unknown exit',()=>{
+  render(<TradeResultCards trades={[trade({status:'UNSETTLED',net_proceeds_cents:0})]}/>);
+  expect(screen.getByText('Sold · awaiting settlement · Paper')).toBeVisible();
+  expect(screen.getByText('loss $20.00 · -100.0%')).toBeVisible();
+});

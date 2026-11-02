@@ -23,10 +23,12 @@ export function TradeResultCards({trades,onInspect}:{trades:MoneyTrade[];onInspe
   </div><p>Option-trade results after modeled costs—not stock movement or account return. These are simulated trades, not broker fills.</p>
   {trades.length===0?<p>No paper trades yet. No historical trades are imported.</p>:<div className="trade-result-grid">{trades.map(trade=>{
     const result=tradeOutcome(trade);
-    const label=trade.status==='SKIPPED'?'Not entered':trade.status==='PENDING_ENTRY'?'Waiting for entry':result?.closed?'Closed':trade.status==='UNPRICED'?'Exit unknown':'Open · estimated';
+    const label=trade.lifecycle_label??(trade.status==='ENDED_UNRESOLVED'?'Session ended · exit price missing':trade.status==='SKIPPED'?'Not entered':trade.status==='PENDING_ENTRY'?'Waiting for entry':trade.status==='UNSETTLED'?'Sold · awaiting settlement':result?.closed?'Closed':trade.status==='UNPRICED'?'Exit unknown':'Open · estimated');
     return <article className="trade-result-card" key={trade.id}><header><strong>{contractLabel(trade.option_symbol)}</strong><span>{label} · Paper</span></header>
       <div className="trade-cash-flow"><span>Cost incl. fees<strong>{trade.entry_debit_cents==null?'Not spent':money(trade.entry_debit_cents)}</strong></span><span aria-hidden="true">→</span><span>{result?.closed?'Net proceeds':trade.status==='OPEN'?'Estimated net sale value':'Proceeds'}<strong>{result?money(result.proceeds):trade.entry_debit_cents==null?'—':'Unknown'}</strong></span></div>
       <h4 className={result?(result.pnl>=0?'positive-text':'negative-text'):''}>{result?`${result.closed?'':'Estimated '}${result.pnl>=0?'gain':'loss'} ${money(Math.abs(result.pnl))} · ${unit==='PERCENT'?`${result.percent>0?'+':''}${result.percent.toFixed(1)}%`:`${result.multiple.toFixed(2)}× returned`}`:trade.status==='SKIPPED'||trade.status==='PENDING_ENTRY'?'No trade result':'Result unknown — missing price evidence'}</h4>
+      {trade.entry_dte===0&&<p>0DTE · expires {trade.expiration}</p>}
+      {trade.status==='ENDED_UNRESOLVED'&&<p>No longer in the paper account’s live-slot count. Its original debit stays spent; missing proceeds are not assumed to be zero. Exercise and settlement outcomes are not inferred.</p>}
       {trade.exit_reason&&<p>Exit: {trade.exit_reason.replaceAll('_',' ').toLowerCase()}</p>}{trade.reason&&<p>{trade.reason}</p>}
       {trade.entry_at&&<small>Entered {formatEasternDateTime(trade.entry_at)}{trade.exit_at?` · Exited ${formatEasternDateTime(trade.exit_at)}`:''}</small>}
       {trade.status==='OPEN'&&trade.valuation?.bid_at&&<p>Bid observed {formatEasternDateTime(trade.valuation.bid_at)}. Not a completed sale.</p>}
