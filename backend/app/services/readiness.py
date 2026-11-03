@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.db.models import ForwardPaperPosition, LottoTrialPosition, RetestRun, ScannerRuntime
 from app.services import expanded_account, retest_trials
 from app.services.paper_lifecycle import ENDED_UNRESOLVED
+from app.services.paper_writeoffs import STATUS as WRITTEN_OFF
 from app.services.evidence_health import collection_evidence, utc
 from app.services.market_calendar import market_session, next_market_open, NY
 
@@ -36,6 +37,9 @@ def snapshot(db, provider, *, now=None):
     lotto_unknown=db.scalar(select(func.count()).select_from(LottoTrialPosition).where(
         LottoTrialPosition.account_key.like('lotto-v3%'),LottoTrialPosition.status=='UNPRICED')) or 0
     if unknown:problems.append(f'{unknown} main-account exits have unknown proceeds')
+    written_off = db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key == expanded_account.KEY, ForwardPaperPosition.status == WRITTEN_OFF)) or 0
+    if written_off:problems.append(f'{written_off} main-account trades use manual write-off assumptions; actual exits remain unverified')
     if lotto_unknown:problems.append(f'{lotto_unknown} lotto exits have unknown proceeds')
     run=db.get(RetestRun,retest_trials.KEY)
     drift=bool(run and (run.policy['code_hash']!=retest_trials.code_hash()
@@ -47,6 +51,7 @@ def snapshot(db, provider, *, now=None):
         'status':'ATTENTION' if problems else 'SLEEPING' if session!='regular' else 'COLLECTING',
         'market_session':session,'problems':problems,'main_unknown_exits':unknown,
         'main_expired_unresolved_exits':ended,
+        'main_manual_write_offs':written_off,
         'lotto_unknown_exits':lotto_unknown,'retest_admissions_blocked':drift,
         'next_market_open_at':next_market_open(now).isoformat() if session!='regular' else None,
         'last_completed_scan_at':utc(latest).isoformat() if latest else None,

@@ -32,7 +32,7 @@ export function AppShell({activePage,onNavigate,data,stale,refreshing,onRefresh,
   return <div className="app-shell">
     <a className="skip-link" href="#app-content" onClick={event=>{event.preventDefault();document.getElementById('app-content')?.focus()}}>Skip to workspace</a>
     <aside className="app-rail" aria-label="Parlay app navigation">
-      <div className="app-brand"><img src="/favicon.svg" alt="" width="36" height="36"/><div><strong>PARLAY</strong><small>Research workspace</small></div></div>
+      <div className="app-brand"><img src="/parlay-icon-192-v2.png" alt="" width="36" height="36"/><div><strong>PARLAY</strong><small>Research workspace</small></div></div>
       <nav aria-label="Primary">{navigation.map(item=><a key={item.id} href={`#${item.id}`} aria-label={item.label} aria-current={activePage===item.id?'page':undefined} onClick={event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();onNavigate(item.id)}} title={item.label}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.path}/></svg><span>{item.label}<small>{item.caption}</small></span>
       </a>)}</nav>

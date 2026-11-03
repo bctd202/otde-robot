@@ -8,11 +8,12 @@ function contractLabel(symbol:string){
   return match?`${match[1]} ${match[5]==='C'?'CALL':'PUT'} $${Number(match[6])/1000} · ${match[3]}/${match[4]}/20${match[2]}`:symbol;
 }
 export function tradeOutcome(trade:MoneyTrade){
-  const closed=['CLOSED','UNSETTLED'].includes(trade.status);
-  const proceeds=closed?trade.net_proceeds_cents:trade.status==='OPEN'?trade.estimated_net_proceeds_cents:null;
+  const writtenOff=trade.status==='WRITTEN_OFF'&&trade.manual_write_off?.assumed_proceeds_cents===0&&trade.manual_write_off.actual_exit_verified===false;
+  const closed=writtenOff||['CLOSED','UNSETTLED'].includes(trade.status);
+  const proceeds=writtenOff?0:closed?trade.net_proceeds_cents:trade.status==='OPEN'?trade.estimated_net_proceeds_cents:null;
   const cost=trade.entry_debit_cents;
   if(proceeds==null||cost==null||cost<=0)return null;
-  return {closed,proceeds,pnl:proceeds-cost,percent:(proceeds/cost-1)*100,multiple:proceeds/cost};
+  return {closed,writtenOff,proceeds,pnl:proceeds-cost,percent:(proceeds/cost-1)*100,multiple:proceeds/cost};
 }
 
 export function TradeResultCards({trades,onInspect}:{trades:MoneyTrade[];onInspect?:(trade:MoneyTrade)=>void}){
@@ -23,13 +24,14 @@ export function TradeResultCards({trades,onInspect}:{trades:MoneyTrade[];onInspe
   </div><p>Option-trade results after modeled costs—not stock movement or account return. These are simulated trades, not broker fills.</p>
   {trades.length===0?<p>No paper trades yet. No historical trades are imported.</p>:<div className="trade-result-grid">{trades.map(trade=>{
     const result=tradeOutcome(trade);
-    const label=trade.lifecycle_label??(trade.status==='ENDED_UNRESOLVED'?'Session ended · exit price missing':trade.status==='SKIPPED'?'Not entered':trade.status==='PENDING_ENTRY'?'Waiting for entry':trade.status==='UNSETTLED'?'Sold · awaiting settlement':result?.closed?'Closed':trade.status==='UNPRICED'?'Exit unknown':'Open · estimated');
+    const label=trade.status==='WRITTEN_OFF'?'Manual write-off · assumed $0 proceeds':trade.lifecycle_label??(trade.status==='ENDED_UNRESOLVED'?'Session ended · exit price missing':trade.status==='SKIPPED'?'Not entered':trade.status==='PENDING_ENTRY'?'Waiting for entry':trade.status==='UNSETTLED'?'Sold · awaiting settlement':result?.closed?'Closed':trade.status==='UNPRICED'?'Exit unknown':'Open · estimated');
     return <article className="trade-result-card" key={trade.id}><header><strong>{contractLabel(trade.option_symbol)}</strong><span>{label} · Paper</span></header>
-      <div className="trade-cash-flow"><span>Cost incl. fees<strong>{trade.entry_debit_cents==null?'Not spent':money(trade.entry_debit_cents)}</strong></span><span aria-hidden="true">→</span><span>{result?.closed?'Net proceeds':trade.status==='OPEN'?'Estimated net sale value':'Proceeds'}<strong>{result?money(result.proceeds):trade.entry_debit_cents==null?'—':'Unknown'}</strong></span></div>
-      <h4 className={result?(result.pnl>=0?'positive-text':'negative-text'):''}>{result?`${result.closed?'':'Estimated '}${result.pnl>=0?'gain':'loss'} ${money(Math.abs(result.pnl))} · ${unit==='PERCENT'?`${result.percent>0?'+':''}${result.percent.toFixed(1)}%`:`${result.multiple.toFixed(2)}× returned`}`:trade.status==='SKIPPED'||trade.status==='PENDING_ENTRY'?'No trade result':'Result unknown — missing price evidence'}</h4>
+      <div className="trade-cash-flow"><span>Cost incl. fees<strong>{trade.entry_debit_cents==null?'Not spent':money(trade.entry_debit_cents)}</strong></span><span aria-hidden="true">→</span><span>{result?.writtenOff?'Assumed proceeds':result?.closed?'Net proceeds':trade.status==='OPEN'?'Estimated net sale value':'Proceeds'}<strong>{result?money(result.proceeds):trade.entry_debit_cents==null?'—':'Unknown'}</strong></span></div>
+      <h4 className={result?(result.pnl>=0?'positive-text':'negative-text'):''}>{result?`${result.writtenOff?'Write-off ':result.closed?'':'Estimated '}${result.pnl>=0?'gain':'loss'} ${money(Math.abs(result.pnl))} · ${unit==='PERCENT'?`${result.percent>0?'+':''}${result.percent.toFixed(1)}%`:`${result.multiple.toFixed(2)}× returned`}`:trade.status==='SKIPPED'||trade.status==='PENDING_ENTRY'?'No trade result':'Result unknown — missing price evidence'}</h4>
+      {trade.manual_write_off&&<p>Manual full-loss assumption recorded {formatEasternDateTime(trade.manual_write_off.at)}. No verified sale or worthless-expiry evidence exists. Original quotes and missing-exit records are preserved; no cash was deducted again or refunded.</p>}
       {trade.entry_dte===0&&<p>0DTE · expires {trade.expiration}</p>}
       {trade.status==='ENDED_UNRESOLVED'&&<p>No longer in the paper account’s live-slot count. Its original debit stays spent; missing proceeds are not assumed to be zero. Exercise and settlement outcomes are not inferred.</p>}
-      {trade.exit_reason&&<p>Exit: {trade.exit_reason.replaceAll('_',' ').toLowerCase()}</p>}{trade.reason&&<p>{trade.reason}</p>}
+      {trade.exit_reason&&<p>{result?.writtenOff?'Original underlying exit request':'Exit'}: {trade.exit_reason.replaceAll('_',' ').toLowerCase()}</p>}{trade.reason&&<p>{trade.reason}</p>}
       {trade.entry_at&&<small>Entered {formatEasternDateTime(trade.entry_at)}{trade.exit_at?` · Exited ${formatEasternDateTime(trade.exit_at)}`:''}</small>}
       {trade.status==='OPEN'&&trade.valuation?.bid_at&&<p>Bid observed {formatEasternDateTime(trade.valuation.bid_at)}. Not a completed sale.</p>}
       {onInspect&&<button onClick={()=>onInspect(trade)}>Inspect quote path</button>}

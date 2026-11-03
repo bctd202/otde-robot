@@ -8,7 +8,7 @@ const percent=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;
 const ranges=['1D','1W','1M','ALL'] as const;
 type Range=typeof ranges[number];
 
-export type EquityAccount=Pick<ForwardAccount,'status'|'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'|'expired_unresolved_count'>&{policy:{starting_cash_cents:number}};
+export type EquityAccount=Pick<ForwardAccount,'status'|'account_key'|'as_of'|'processed_at'|'equity_cents'|'equity_history'|'expired_unresolved_count'|'write_off_adjustments'>&{policy:{starting_cash_cents:number}};
 export function AccountEquityChart({account}:{account:EquityAccount}){
   const [range,setRange]=useState<Range>('ALL');
   const [unit,setUnit]=useState<'PERCENT'|'DOLLARS'>('PERCENT');
@@ -25,6 +25,8 @@ export function AccountEquityChart({account}:{account:EquityAccount}){
   const cutoff=Date.parse(`${today}T00:00:00Z`)-(range==='1W'?7:30)*86400000;
   const points=(range==='1D'?history?.intraday:history?.daily)?.filter(point=>range==='ALL'||range==='1D'||Date.parse(`${point.date}T00:00:00Z`)>=cutoff)??[];
   const selected=points.find(point=>point.at===selectedAt);
+  const adjustmentCount=selected?(selected.manual_write_off_count??0):(account.write_off_adjustments?.count??0);
+  const adjusted=adjustmentCount>0;
   const equity=selected?selected.equity_cents:account.equity_cents;
   const ended=!selected&&(account.expired_unresolved_count??0)>0;
   const starting=account.policy.starting_cash_cents;
@@ -43,17 +45,18 @@ export function AccountEquityChart({account}:{account:EquityAccount}){
   const y=(amount:number)=>top+(max-amount)/(max-min)*(height-top-bottom);
   const segments=equitySegments(points,range==='1D');
   const axis=(amount:number)=>unit==='PERCENT'?percent(amount):money(amount);
-  const pointLabel=(point:AccountEquityPoint)=>`${formatEasternDateTime(point.at)}: ${point.equity_cents===null?'Unpriced':`${money(point.equity_cents)} · ${percent(point.return_percent!)}`}`;
+  const pointLabel=(point:AccountEquityPoint)=>`${formatEasternDateTime(point.at)}: ${point.equity_cents===null?'Unpriced':`${money(point.equity_cents)} · ${percent(point.return_percent!)}`}${point.manual_write_off_count?' · manual write-off adjusted':''}`;
   return <section className="account-equity" aria-label="Account value and percentage return">
-    <div className="account-equity-heading"><div><span>OPTION-DOLLAR ACCOUNT VALUE · SIMULATED</span><h4>{equity===null?ended?'Total pending historical exit evidence':'Value incomplete':money(equity)}</h4>
+    <div className="account-equity-heading"><div><span>{adjusted?'WRITE-OFF ADJUSTED ACCOUNT VALUE · SIMULATED':'OPTION-DOLLAR ACCOUNT VALUE · SIMULATED'}</span><h4>{equity===null?ended?'Total pending historical exit evidence':'Value incomplete':money(equity)}</h4>
       <p className={performance===null?'':performance>=0?'positive-text':'negative-text'}>{change===null?ended?'Missing exit proceeds—not a live-price loading problem. Complete account return remains unknown.':'Return unavailable while positions are unpriced':`${change>0?'+':''}${money(change)} (${percent(performance!)}) since funding`}</p>
       <small>{selected?`Saved observation · ${formatEasternDateTime(selected.at)}`:account.status==='ARCHIVED'?`Archived account · last processed ${formatEasternDateTime(account.processed_at)}`:`Current estimate · ${formatEasternDateTime(account.as_of)}`}</small></div>
       <div className="equity-controls" role="group" aria-label="Account graph units">{(['PERCENT','DOLLARS'] as const).map(option=><button type="button" aria-pressed={unit===option} onClick={()=>setUnit(option)} key={option}>{option==='PERCENT'?'Return %':'Value $'}</button>)}</div>
     </div>
+    {(account.write_off_adjustments?.count??0)>0&&<p className="execution-warning">Includes {account.write_off_adjustments!.count} manual $0-proceeds write-off(s), totaling {money(account.write_off_adjustments!.loss_cents)} in modeled losses. Adjusted values start when the adjustments were recorded—not at the original missing exits. Earlier gaps are preserved. This is not a fully verified account return.</p>}
     <div className="equity-controls" role="group" aria-label="Account graph range">{ranges.map(option=><button type="button" aria-pressed={range===option} onClick={()=>{setRange(option);setSelectedAt(null)}} key={option}>{option}</button>)}</div>
     <div ref={container}>
       {points.length===0?<p className="equity-empty">No saved equity observations in this range. {account.status==='ARCHIVED'?'This account is archived; missing history will not be backfilled.':'This graph starts collecting when the trial is initialized; old trades are not converted into invented account returns.'}</p>:<>
-        <svg className="account-equity-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={unit==='PERCENT'?'Paper account percentage return since funding':'Paper account liquidation value in dollars'}
+        <svg className="account-equity-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${account.write_off_adjustments?.count?'Write-off adjusted ':''}${unit==='PERCENT'?'Paper account percentage return since funding':'Paper account liquidation value in dollars'}`}
           onPointerMove={event=>{const rect=event.currentTarget.getBoundingClientRect();const at=from+((event.clientX-rect.left)/rect.width*width-left)/(width-left-right)*(to-from);setSelectedAt(points.reduce((nearest,point)=>Math.abs(Date.parse(point.at)-at)<Math.abs(Date.parse(nearest.at)-at)?point:nearest).at)}}>
           {[0,.5,1].map(t=>{const amount=min+t*(max-min);return <g key={t}><line className="graph-grid" x1={left} x2={width-right} y1={y(amount)} y2={y(amount)}/><text className="graph-axis" x={left-8} y={y(amount)+4} textAnchor="end">{axis(amount)}</text></g>})}
           <line className="equity-baseline" x1={left} x2={width-right} y1={y(baseline)} y2={y(baseline)}/>
