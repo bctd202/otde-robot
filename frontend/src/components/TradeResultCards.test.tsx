@@ -56,3 +56,20 @@ test('a completed sale awaiting settlement is not an unknown exit',()=>{
   expect(screen.getByText('Sold · awaiting settlement · Paper')).toBeVisible();
   expect(screen.getByText('loss $20.00 · -100.0%')).toBeVisible();
 });
+
+test('manual write-offs show assumed losses without manufacturing a verified sale',()=>{
+  const writtenOff=trade({status:'WRITTEN_OFF',entry_debit_cents:7750,net_proceeds_cents:null,
+    exit_reason:'TARGET',manual_write_off:{version:'manual-zero-write-off-v1',at:'2026-11-03T17:00:00Z',
+      approval_ref:'explicit-user-approval',assumed_proceeds_cents:0,modeled_loss_cents:7750,
+      actual_exit_verified:false,reason:'Manual full-loss assumption'}});
+  expect(tradeOutcome(writtenOff)).toMatchObject({writtenOff:true,pnl:-7750,proceeds:0,percent:-100});
+  expect(tradeOutcome(trade({status:'WRITTEN_OFF',net_proceeds_cents:null}))).toBeNull();
+  render(<TradeResultCards trades={[writtenOff]}/>);
+  expect(screen.getByText('Manual write-off · assumed $0 proceeds · Paper')).toBeVisible();
+  expect(screen.getByText('Assumed proceeds')).toBeVisible();
+  expect(screen.getByText('Write-off loss $77.50 · -100.0%')).toBeVisible();
+  expect(screen.getByText('Original underlying exit request: target')).toBeVisible();
+  expect(screen.getByText(/No verified sale or worthless-expiry evidence exists/)).toBeVisible();
+  expect(screen.queryByText('Closed · Paper')).not.toBeInTheDocument();
+  expect(screen.queryByText('Net proceeds')).not.toBeInTheDocument();
+});

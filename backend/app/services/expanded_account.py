@@ -22,6 +22,7 @@ from app.services.market_calendar import NY, market_close, market_session
 from app.services.option_research import utc
 from app.services.execution_revision import VERSION as EXECUTION_VERSION, ExitEvidenceProvider
 from app.services import paper_lifecycle as lifecycle
+from app.services.paper_writeoffs import adjustment_summary
 
 KEY = "tasty-capacity-ten-v1"
 LABEL = "Tastytrade · ten-position paper account"
@@ -50,15 +51,34 @@ def _record_equity_snapshot(db, account, now):
         ForwardPaperPosition.status.in_(FINANCIAL_EXPOSURE))).all())
     value = _valuation(exposure, account.policy, now)
     settled, unsettled = _balance(db, account.key)
+    adjustments = adjustment_summary(db, account.key)
     db.add(ForwardPaperEquitySnapshot(account_key=account.key, observed_at=now,
         trading_date=now.astimezone(NY).date(), cash_cents=settled+unsettled,
         equity_cents=None if value['unpriced_positions'] else settled+unsettled+value['known_liquidation_cents'],
         unpriced_positions=value['unpriced_positions'],
-        detail={'basis': 'CASH_PLUS_VERIFIED_BID_LESS_MODELED_EXIT_COSTS',
+        detail={'basis': ('MANUAL_WRITE_OFF_ADJUSTED_CASH_PLUS_VERIFIED_BID'
+                          if adjustments['count'] else 'CASH_PLUS_VERIFIED_BID_LESS_MODELED_EXIT_COSTS'),
+                'manual_write_off_count': adjustments['count'],
+                'manual_write_off_loss_cents': adjustments['loss_cents'],
                 'policy_version': account.policy['version'], 'lifecycle_version': lifecycle.VERSION,
                 'positions': [{'id': p.id, 'status': p.status, 'valuation': p.detail.get('valuation'),
                                'strategy_version': p.detail.get('strategy_version')} for p in exposure]}))
     db.flush()
+
+
+def _adjusted_equity_history(db, account, adjustments):
+    """Annotate the existing observed history, without filling any historical gaps."""
+    history = _equity_history(db, account)
+    if not adjustments['count']:
+        return history
+    for series in ('daily', 'intraday'):
+        for point in history[series]:
+            count = sum(a['at'] <= point['at'] for a in adjustments['adjustments'])
+            point['manual_write_off_count'] = count
+            point['basis'] = 'MANUAL_WRITE_OFF_ADJUSTED' if count else 'ORIGINAL_OBSERVATION'
+    history['basis'] = ('Observed account values; from the adjustment time onward, '
+                        'manual $0-proceeds write-offs are assumed. Earlier gaps remain unfilled.')
+    return history
 
 
 def _end_contract_sessions(db, positions, now):
@@ -432,9 +452,16 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
 
     def describe(p):
         return {'id': p.id, 'status': p.status, **p.detail,
-                **(lifecycle.fields(marks[p.entry_mark_id], p.status, now) if p.entry_mark_id in marks else {})}
+                **(lifecycle.fields(marks[p.entry_mark_id], p.status, now) if p.entry_mark_id in marks else {}),
+                **({'lifecycle_label': 'Manual write-off · assumed $0 proceeds', 'capacity_released': True}
+                   if p.status == 'WRITTEN_OFF' else {})}
 
+    adjustments = adjustment_summary(db, account_key)
     return {"status": "ARCHIVED" if archived else "ACTIVE", "paper_only": True, "account_key": account_key,
+        'write_off_adjustments': adjustments,
+        'confirmed_realized_cents': pnl + adjustments['loss_cents'],
+        'equity_basis': 'MANUAL_WRITE_OFF_ADJUSTED' if adjustments['count'] else 'OBSERVED_PAPER_EQUITY',
+        'complete_verified_account_return': False if adjustments['count'] else value['unpriced_positions'] == 0,
         'lifecycle_policy': {'version': lifecycle.VERSION, 'ended_contracts_use_live_slots': False,
                              'missing_proceeds_are_zero': False},
         'lifecycle_boundaries': [{'at': utc(e.occurred_at).isoformat(), **e.detail} for e in db.scalars(
@@ -454,7 +481,7 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
         "available_cents": settled-value["reserved_exit_fees_cents"],
         "realized_cents": pnl, "charged_fees_cents": fees, **value,
         "equity_cents": None if value["unpriced_positions"] else settled+unsettled+value["known_liquidation_cents"],
-        "equity_history": _equity_history(db, account),
+        "equity_history": _adjusted_equity_history(db, account, adjustments),
         "daily": list(daily.values()),
         "positions": [describe(p) for p in active if p.status != lifecycle.ENDED_UNRESOLVED],
         "trades": [{**describe(p),

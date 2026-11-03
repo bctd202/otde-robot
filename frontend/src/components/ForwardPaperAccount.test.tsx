@@ -222,3 +222,37 @@ test('new ten-position account requires explicit activation and never shows pret
   expect(await screen.findByText(/requires explicit after-hours activation/)).toBeVisible();
   expect(screen.queryByText('$2,000.00 starting cash')).not.toBeInTheDocument();
 });
+
+const writeoffs:NonNullable<ForwardAccount['write_off_adjustments']>={version:'manual-zero-write-off-v1',
+  count:3,loss_cents:17950,first_recorded_at:'2026-10-12T13:32:00Z',last_recorded_at:'2026-10-12T13:32:00Z',
+  verified_exit_evidence:false,historical_snapshots_rewritten:false,adjustments:[]};
+
+test('adjusted totals keep completed-trade results separate and label graph assumptions',async()=>{
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account({write_off_adjustments:writeoffs,
+    realized_cents:5050,confirmed_realized_cents:23000})} as Response);
+  render(<ForwardPaperAccount/>);
+  const warning=await screen.findByLabelText('Manual write-off adjustments');
+  expect(warning).toHaveTextContent('3 manual write-off(s) · $179.50 modeled loss');
+  expect(warning).toHaveTextContent('Completed simulated trades: $230.00 net P/L. Including manual write-offs: $50.50.');
+  expect(warning).toHaveTextContent('cash was not debited again');
+  expect(screen.getByText('WRITE-OFF ADJUSTED ACCOUNT VALUE · SIMULATED')).toBeVisible();
+  expect(screen.getByText(/This is not a fully verified account return/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Account details'}));
+  expect(screen.getByText('Realized P/L · write-off adjusted')).toBeVisible();
+  expect(screen.getByRole('img',{name:'Forward account P/L including manual write-offs'})).toBeVisible();
+});
+
+test('historical gaps remain gaps and earlier observations are not relabeled as adjusted',()=>{
+  const points=equityPoints.map((point,i)=>({...point,manual_write_off_count:i===2?3:0}));
+  render(<AccountEquityChart account={account({write_off_adjustments:writeoffs,
+    equity_history:{baseline_cents:200000,started_at:points[0].at,daily:points,intraday:points,basis:'Observed'}})}/>);
+  expect(screen.getByRole('img',{name:'Write-off adjusted Paper account percentage return since funding'})).toBeVisible();
+  expect(screen.getAllByTestId('equity-segment')).toHaveLength(2);
+  fireEvent.change(screen.getByRole('slider',{name:'Inspect saved account value'}),{target:{value:'0'}});
+  expect(screen.getByText('OPTION-DOLLAR ACCOUNT VALUE · SIMULATED')).toBeVisible();
+  expect(screen.queryByText('WRITE-OFF ADJUSTED ACCOUNT VALUE · SIMULATED')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('slider',{name:'Inspect saved account value'}),{target:{value:'1'}});
+  expect(screen.getByText('Value incomplete')).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Show current estimate'}));
+  expect(screen.getByText('WRITE-OFF ADJUSTED ACCOUNT VALUE · SIMULATED')).toBeVisible();
+});

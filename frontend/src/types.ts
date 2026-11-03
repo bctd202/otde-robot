@@ -166,6 +166,13 @@ export interface PerformanceResponse {option_path_research?:OptionPathResearch;s
 export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
 export interface AccountEquityPoint {
   at:string;date:string;equity_cents:number|null;return_percent:number|null;unpriced_positions:number;
+  manual_write_off_count?:number;basis?:string;
+}
+
+export interface WriteOffAdjustments {
+  version:string;count:number;loss_cents:number;first_recorded_at:string|null;last_recorded_at:string|null;
+  verified_exit_evidence:boolean|null;historical_snapshots_rewritten:false;
+  adjustments:{event_id:number;at:string;position_id:number;option_symbol:string;loss_cents:number;assumed_proceeds_cents:0;approval_ref:string}[];
 }
 
 export interface PaperAccountChoice {key:string;label:string;archived:boolean}
@@ -175,6 +182,8 @@ export interface PendingPaperAccount {
   activation_required?:boolean;
 }
 export interface ForwardAccount {
+  write_off_adjustments?:WriteOffAdjustments;confirmed_realized_cents?:number;
+  equity_basis?:string;complete_verified_account_return?:boolean;
   execution_boundaries?:{at:string;execution_version:string;reason:string}[];
   lifecycle_boundaries?:{at:string;lifecycle_version:string;reason:string}[];
   lifecycle_policy?:{version:string;ended_contracts_use_live_slots:boolean;missing_proceeds_are_zero:boolean};
@@ -200,6 +209,7 @@ export interface MoneyTrade {
   net_proceeds_cents?:number|null;estimated_net_proceeds_cents?:number|null;
   net_pnl_cents?:number;entry_at?:string;exit_at?:string;exit_reason?:string;reason?:string;
   valuation?:{bid_at:string;[key:string]:unknown};
+  manual_write_off?:{version:string;at:string;approval_ref:string;assumed_proceeds_cents:0;modeled_loss_cents:number;actual_exit_verified:false;reason:string;[key:string]:unknown};
   tracker_id?:string;[key:string]:unknown;
 }
 

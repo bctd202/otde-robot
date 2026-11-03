@@ -61,6 +61,11 @@ export function ForwardPaperAccount(){
       {data.lifecycle_boundaries?.map(boundary=><p key={boundary.lifecycle_version} className="execution-warning">Lifecycle update {formatEasternDateTime(boundary.at)}: ended contract sessions no longer use live position slots. Entry cash, original quotes and missing-exit evidence are preserved. Earlier capacity skips are not replayed.</p>)}
       {data.processing_stale&&<p role="alert" className="execution-warning">Account processing is behind during market hours. Check scanner health; these figures do not confirm that new entries or exits are being tracked.</p>}
       <AccountCapacity account={data}/>
+      {!!data.write_off_adjustments?.count&&<aside className="execution-warning" aria-label="Manual write-off adjustments">
+        <strong>{data.write_off_adjustments.count} manual write-off(s) · {money(data.write_off_adjustments.loss_cents)} modeled loss</strong>
+        <p>These ended trades use explicitly approved $0 proceeds, not verified sales or proven worthless expirations. Their original costs were already spent; cash was not debited again. No historical gap or quote evidence was rewritten.</p>
+        <p>Completed simulated trades: {money(data.confirmed_realized_cents??data.realized_cents+data.write_off_adjustments.loss_cents)} net P/L. Including manual write-offs: {money(data.realized_cents)}. Neither is a fully verified total account return.</p>
+      </aside>}
       {pane==='ACCOUNT'&&<AccountEquityChart key={data.account_key} account={data}/>}
       {(data.expired_unresolved_count??0)>0&&<aside className="execution-warning" aria-label="Ended trades needing reconciliation">
         <strong>{data.expired_unresolved_count} expired/session-ended trade(s) · {money(data.expired_unresolved_debit_cents??0)} original cost</strong>
@@ -73,7 +78,7 @@ export function ForwardPaperAccount(){
       {pane==='DETAILS'&&<>
       <div className="performance-metrics headline-metrics">
         {[
-          ['Net realized P/L',money(data.realized_cents)],
+          [data.write_off_adjustments?.count?'Realized P/L · write-off adjusted':'Net realized P/L',money(data.realized_cents)],
           ['Settled cash',money(data.settled_cents)],
           ['Available to enter',money(data.available_cents)],
           ['Unsettled proceeds',money(data.unsettled_cents)],
@@ -81,10 +86,10 @@ export function ForwardPaperAccount(){
           ['Costs charged so far',money(data.charged_fees_cents)],
         ].map(([label,value])=><div className="metric" key={label}><span>{label}</span><strong>{value}</strong></div>)}
       </div>
-      <p>Realized P/L includes opening and closing costs for completed simulated trades only. Cash is not profit. {money(data.reserved_exit_fees_cents)} is reserved for closing costs; {money(data.open_entry_fees_cents)} of charged costs belong to positions not yet closed.</p>
+      <p>Realized P/L includes opening and closing costs for completed simulated trades{data.write_off_adjustments?.count?' and separately labeled manual full-loss write-offs':' only'}. Cash is not profit. {money(data.reserved_exit_fees_cents)} is reserved for closing costs; {money(data.open_entry_fees_cents)} of charged costs belong to positions not yet closed.</p>
       {data.unpriced_positions>0&&<p className="execution-warning">Account result is incomplete: {data.unpriced_positions} unresolved trade(s), with {money(data.unpriced_debit_cents)} in entry debits, lack verified value or exit proceeds. Their value is unknown—not zero, and not their purchase cost.</p>}
       <div className="performance-chart-grid">
-        <div><h4>Net realized P/L · after modeled costs</h4><MoneyChart daily={data.daily} field="realized_cents" title="Forward account net realized P/L"/></div>
+        <div><h4>Net realized P/L · after modeled costs{data.write_off_adjustments?.count?' · includes manual write-offs':''}</h4><MoneyChart daily={data.daily} field="realized_cents" title={data.write_off_adjustments?.count?'Forward account P/L including manual write-offs':'Forward account net realized P/L'}/></div>
         <div><h4>Cash held · settled + unsettled, excludes options</h4><MoneyChart daily={data.daily} field="cash_cents" title="Forward account cash held, not profit"/></div>
       </div>
       <details><summary>Frozen assumptions &amp; limitations</summary><p>One contract per entry; {data.policy.max_positions} simultaneous positions maximum. {money(data.policy.max_entry_cents)} maximum entry debit including closing-cost reserve. Ask + {money(data.policy.slippage_premium_cents)} premium at entry; bid − {money(data.policy.slippage_premium_cents)} premium at exit, floored at zero. Options use a 100-share multiplier.</p><p>Opening commission {money(data.policy.opening_commission_cents)}; closing commission {money(data.policy.closing_commission_cents)}. Additional fee allowance {money(data.policy.fee_allowance_per_side_cents)} per side is an assumption, not a broker invoice. Quotes must be live, exact-contract and at most {data.policy.quote_age_seconds}s old, after the decision. Fills happen on a later scanner observation, not the signal candle. Entry deadline {data.policy.entry_deadline_seconds}s; exit deadline {data.policy.exit_deadline_seconds}s after the exit request.</p><p>Unchanged underlying stop/target/time exits. Proceeds become available on the next eligible banking and market day at 9:30 ET, when the scanner processes settlement. No margin, partial fills, queue guarantees, assignment or exercise simulation. {data.lifecycle_policy?'Unresolved exits consume live slots only until the contract’s final regular session ends; missing proceeds remain unresolved afterward.':'Missing exit prices stay unresolved and consume a position slot.'} Settings changes cannot reset this account or rewrite its policy. This is a more constrained estimate—not proof of executable returns.</p></details>
