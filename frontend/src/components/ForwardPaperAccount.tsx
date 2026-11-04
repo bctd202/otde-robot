@@ -5,6 +5,7 @@ import type {ForwardAccount,PaperAccountChoice} from '../types';
 import {AccountEquityChart} from './AccountEquityChart';
 import {TradeResultCards} from './TradeResultCards';
 import {AccountCapacity} from './AccountCapacity';
+import './research-overview.css';
 
 const money=(cents:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100);
 const human=(text:string)=>text.replaceAll('_',' ').toLowerCase();
@@ -26,14 +27,16 @@ function MoneyChart({daily,field,title}:{daily:ForwardAccount['daily'];field:'ca
 export function ForwardPaperAccount(){
   const [data,setData]=useState<ForwardAccount|null>(null);
   const [page,setPage]=useState(1);
-  const [pane,setPane]=useState<'ACCOUNT'|'TRADES'|'DETAILS'>('ACCOUNT');
+  const [pane,setPane]=useState<'ACCOUNT'|'TRADES'|'DETAILS'|'EXCLUDED'>('ACCOUNT');
   const [accountKey,setAccountKey]=useState<string|undefined>(()=>new URLSearchParams(window.location.search).get('paper_account')??undefined);
   const [accounts,setAccounts]=useState<PaperAccountChoice[]>([]);
   const [status,setStatus]=useState('Loading the forward account…');
   const [error,setError]=useState('');
+  const tradeView=pane==='EXCLUDED'?'EXCLUDED':'INCLUDED';
+  const simple=!!data?.research_view?.excluded_count;
   useEffect(()=>{
     let active=true;
-    const load=()=>getForwardPaperAccount(page,accountKey).then(result=>{
+    const load=()=>getForwardPaperAccount(page,accountKey,tradeView).then(result=>{
       if(!active)return;
       setAccounts(result.accounts??[]);
       if(result.status==='SCHEDULED'||result.status==='NOT_STARTED'){
@@ -46,35 +49,46 @@ export function ForwardPaperAccount(){
     }).catch(()=>{if(active)setError('Account update unavailable. Any figures below are the last saved response, not a live balance.')});
     void load();const timer=window.setInterval(()=>{void load()},30000);
     return()=>{active=false;window.clearInterval(timer)};
-  },[page,accountKey]);
+  },[page,accountKey,tradeView]);
   return <section className="forward-account graph-panel" aria-label="Forward simulated cash account">
-    <header><div><span>FORWARD CASH ACCOUNT · SIMULATED, NOT BROKER FILLS</span><h3>What could this account actually keep?</h3></div><strong>{data?`${money(data.policy.starting_cash_cents)} starting cash`:'New account'}</strong></header>
-    <p>Both automated engines share this account. Lotto and manual trades stay separate. History filters and replay sliders below do not change it.</p>
-    {accounts.length>0&&<label className="account-trial-selector">Paper trial <select value={accountKey??accounts[0].key} onChange={event=>{setAccountKey(event.target.value);setPage(1);setData(null);setError('');setStatus('Loading selected account…')}}>{accounts.map(account=><option key={account.key} value={account.key}>{account.label}</option>)}</select></label>}
+    <header><div><span>{simple?'MAIN · PAPER RESEARCH':'FORWARD CASH ACCOUNT · SIMULATED, NOT BROKER FILLS'}</span><h3>{simple?'Your results':'What could this account actually keep?'}</h3></div><strong>{data?`${money(data.policy.starting_cash_cents)} ${simple?'research baseline':'starting cash'}`:'New account'}</strong></header>
+    {(!simple||pane==='DETAILS')&&<p>Both automated engines share this account. Lotto and manual trades stay separate. History filters and replay sliders below do not change it.</p>}
+    {accounts.length>0&&(!simple||pane==='DETAILS')&&<label className="account-trial-selector">Paper trial <select value={accountKey??accounts[0].key} onChange={event=>{setAccountKey(event.target.value);setPane('ACCOUNT');setPage(1);setData(null);setError('');setStatus('Loading selected account…')}}>{accounts.map(account=><option key={account.key} value={account.key}>{account.label}</option>)}</select></label>}
     {error&&<p role="alert" className="execution-warning">{error}</p>}
     {!data&&!error&&<p>{status}</p>}
     {data&&<>
-      <nav className="workspace-tabs" aria-label="Cash account sections">{(['ACCOUNT','TRADES','DETAILS'] as const).map(value=><button key={value} aria-current={pane===value?'page':undefined} onClick={()=>{setPane(value);setPage(1)}}>{value==='ACCOUNT'?'Balance':value==='TRADES'?'Trades':'Account details'}</button>)}</nav>
+      <nav className="workspace-tabs" aria-label="Cash account sections">{(['ACCOUNT','TRADES','DETAILS'] as const).map(value=><button key={value} aria-current={pane===value?'page':undefined} onClick={()=>{if(pane==='EXCLUDED'){setData(null);setStatus('Loading included results…')}setPane(value);setPage(1)}}>{value==='ACCOUNT'?(simple?'Overview':'Balance'):value==='TRADES'?'Trades':'Account details'}</button>)}</nav>
+      {simple&&<div className="research-view-meta"><span>Included trades · research results</span><button type="button" className="research-exclusion-link" onClick={()=>{setPane('EXCLUDED');setPage(1);setData(null);setStatus('Loading data exclusions…')}}>{data.research_view!.excluded_count} data exclusions</button></div>}
+      {data.data_exclusions?.state==='SCOPE_REQUIRES_REVIEW'&&<p role="alert" className="execution-warning">The exclusion list needs review. Showing the unchanged account figures; no trades were silently removed.</p>}
+      {(!simple||pane==='DETAILS')&&<>
       {data.status==='ARCHIVED'?<p className="execution-warning">Legacy research — read-only. These balances and position states are preserved, not settled or forgiven. Held exposure remains unknown; no new entries, exits or settlements are processed here. It is not included in the corrected trial.</p>:<p>{data.policy.label??'Corrected Tastytrade trial'} — its own starting capital, saved rules and results. Restarting does not reset it. Other accounts remain separate; do not add their balances or overlapping trades together.</p>}
       <p className="forward-account-dates">Started {formatEasternDateTime(data.activated_at)} · Account last processed {formatEasternDateTime(data.processed_at)} · Snapshot {formatEasternDateTime(data.as_of)}</p>
       {data.execution_boundaries?.map(boundary=><p key={boundary.execution_version} className="execution-warning">Collection update {formatEasternDateTime(boundary.at)}: new trades use corrected decision-based exit timing and independently verified option quotes. Earlier trades and unknown exits retain their saved outcomes. The account balance spans both collection versions.</p>)}
       {data.lifecycle_boundaries?.map(boundary=><p key={boundary.lifecycle_version} className="execution-warning">Lifecycle update {formatEasternDateTime(boundary.at)}: ended contract sessions no longer use live position slots. Entry cash, original quotes and missing-exit evidence are preserved. Earlier capacity skips are not replayed.</p>)}
+      </>}
       {data.processing_stale&&<p role="alert" className="execution-warning">Account processing is behind during market hours. Check scanner health; these figures do not confirm that new entries or exits are being tracked.</p>}
-      <AccountCapacity account={data}/>
-      {!!data.write_off_adjustments?.count&&<aside className="execution-warning" aria-label="Manual write-off adjustments">
+      {(!simple||pane==='DETAILS')&&<AccountCapacity account={data}/>}
+      {(!simple||pane==='DETAILS')&&!!data.write_off_adjustments?.count&&<aside className="execution-warning" aria-label="Manual write-off adjustments">
         <strong>{data.write_off_adjustments.count} manual write-off(s) · {money(data.write_off_adjustments.loss_cents)} modeled loss</strong>
         <p>These ended trades use explicitly approved $0 proceeds, not verified sales or proven worthless expirations. Their original costs were already spent; cash was not debited again. No historical gap or quote evidence was rewritten.</p>
         <p>Completed simulated trades: {money(data.confirmed_realized_cents??data.realized_cents+data.write_off_adjustments.loss_cents)} net P/L. Including manual write-offs: {money(data.realized_cents)}. Neither is a fully verified total account return.</p>
       </aside>}
-      {pane==='ACCOUNT'&&<AccountEquityChart key={data.account_key} account={data}/>}
-      {(data.expired_unresolved_count??0)>0&&<aside className="execution-warning" aria-label="Ended trades needing reconciliation">
+      {pane==='ACCOUNT'&&<><AccountEquityChart key={data.account_key} account={data}/>
+        {simple&&<><div className="research-cash-line"><span>Available paper cash</span><strong>{money(data.available_cents)}</strong><small>Actual buying power · not the adjusted research value</small></div>
+          <section className="research-overview-list" aria-label="Open positions"><h4>Open positions</h4>{data.open_trades?.length?<TradeResultCards trades={data.open_trades} compact/>:<p>No open positions.</p>}</section>
+          <section className="research-overview-list" aria-label="Recent trades"><h4>Recent trades</h4>{data.recent_trades?.length?<TradeResultCards trades={data.recent_trades} compact/>:<p>Completed trades will appear here.</p>}</section>
+        </>}
+      </>}
+      {(!simple||pane==='DETAILS')&&(data.expired_unresolved_count??0)>0&&<aside className="execution-warning" aria-label="Ended trades needing reconciliation">
         <strong>{data.expired_unresolved_count} expired/session-ended trade(s) · {money(data.expired_unresolved_debit_cents??0)} original cost</strong>
         <p>Paper monitoring has ended for these contracts; their final proceeds remain unverified. No cash has been refunded and no sale, worthless expiry or exercise has been invented.</p>
         <p>Cash on record: {money(data.settled_cents+data.unsettled_cents)}, including {money(data.unsettled_cents)} awaiting settlement. Cash alone is not the total account value or profit.</p>
         <details><summary>Which contracts need reconciliation?</summary><ul>{data.unresolved_expirations?.map(trade=><li key={trade.id}><strong>{trade.option_symbol}</strong> · {trade.lifecycle_label} · {trade.entry_dte===0?'0DTE · ':''}expiration {trade.expiration} · original cost {money(trade.entry_debit_cents??0)}</li>)}</ul><p>Missing historical exit prices will not fix themselves when the market opens. They require separately verified evidence; until then the account-total graph keeps its gaps.</p></details>
       </aside>}
+      {simple&&data.research_view!.included_manual_write_off_count>0&&pane!=='DETAILS'&&<p className="research-view-meta">{data.research_view!.included_manual_write_off_count} other manual assumption(s) remain included. See Account details.</p>}
       {pane!=='DETAILS'&&data.unpriced_positions-(data.expired_unresolved_count??0)>0&&<p className="execution-warning">Account result is incomplete: {data.unpriced_positions-(data.expired_unresolved_count??0)} held position(s) have unknown value—not zero. Open Account details for the preserved exposure.</p>}
       {pane==='TRADES'&&<><TradeResultCards trades={data.trades??[]}/><nav className="forward-pagination" aria-label="Paper trade pages"><button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>Previous trades</button><span>Page {data.trade_pagination?.page??1} of {data.trade_pagination?.pages??1}</span><button disabled={page>=(data.trade_pagination?.pages??1)} onClick={()=>setPage(value=>value+1)}>Next trades</button></nav></>}
+      {pane==='EXCLUDED'&&<section aria-label="Data exclusions archive"><h4>Excluded · missing exit data</h4><p>These trades are not scored in the research overview. Original entries, write-offs and cash records remain in Account details. Excluding them does not restore spending power or recreate skipped trades.</p><TradeResultCards trades={data.trades??[]}/></section>}
       {pane==='DETAILS'&&<>
       <div className="performance-metrics headline-metrics">
         {[

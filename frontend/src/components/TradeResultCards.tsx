@@ -16,12 +16,12 @@ export function tradeOutcome(trade:MoneyTrade){
   return {closed,writtenOff,proceeds,pnl:proceeds-cost,percent:(proceeds/cost-1)*100,multiple:proceeds/cost};
 }
 
-export function TradeResultCards({trades,onInspect}:{trades:MoneyTrade[];onInspect?:(trade:MoneyTrade)=>void}){
+export function TradeResultCards({trades,onInspect,compact=false}:{trades:MoneyTrade[];onInspect?:(trade:MoneyTrade)=>void;compact?:boolean}){
   const [unit,setUnit]=useState<'PERCENT'|'MULTIPLE'>('PERCENT');
-  return <section aria-label="Paper trade outcomes"><div className="equity-controls" role="group" aria-label="Trade result display">
+  return <section aria-label="Paper trade outcomes">{!compact&&<><div className="equity-controls" role="group" aria-label="Trade result display">
     <button aria-pressed={unit==='PERCENT'} onClick={()=>setUnit('PERCENT')}>Gain / loss %</button>
     <button aria-pressed={unit==='MULTIPLE'} onClick={()=>setUnit('MULTIPLE')}>Money back ×</button>
-  </div><p>Option-trade results after modeled costs—not stock movement or account return. These are simulated trades, not broker fills.</p>
+  </div><p>Option-trade results after modeled costs—not stock movement or account return. These are simulated trades, not broker fills.</p></>}
   {trades.length===0?<p>No paper trades yet. No historical trades are imported.</p>:<div className="trade-result-grid">{trades.map(trade=>{
     const result=tradeOutcome(trade);
     const label=trade.status==='WRITTEN_OFF'?'Manual write-off · assumed $0 proceeds':trade.lifecycle_label??(trade.status==='ENDED_UNRESOLVED'?'Session ended · exit price missing':trade.status==='SKIPPED'?'Not entered':trade.status==='PENDING_ENTRY'?'Waiting for entry':trade.status==='UNSETTLED'?'Sold · awaiting settlement':result?.closed?'Closed':trade.status==='UNPRICED'?'Exit unknown':'Open · estimated');

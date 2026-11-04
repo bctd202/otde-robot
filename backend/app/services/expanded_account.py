@@ -23,6 +23,7 @@ from app.services.option_research import utc
 from app.services.execution_revision import VERSION as EXECUTION_VERSION, ExitEvidenceProvider
 from app.services import paper_lifecycle as lifecycle
 from app.services.paper_writeoffs import adjustment_summary
+from app.services import research_exclusions
 
 KEY = "tasty-capacity-ten-v1"
 LABEL = "Tastytrade · ten-position paper account"
@@ -400,10 +401,15 @@ def account_catalog(db: Session) -> list[dict]:
             *[a for a in baseline.account_catalog(db)[1:] if a["key"] != KEY]]
 
 
-def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: datetime | None = None) -> dict:
+def account_summary(db: Session, *, page: int = 1, account_key: str = KEY,
+                    trade_view: str = 'INCLUDED', now: datetime | None = None) -> dict:
+    if trade_view not in {'INCLUDED', 'EXCLUDED', 'ALL'}:
+        raise ValueError('Unknown paper trade view')
     now = utc(now or datetime.now(timezone.utc))
     catalog = account_catalog(db)
     if account_key != KEY:
+        if trade_view != 'INCLUDED':
+            raise ValueError('Data exclusion views are only available for the main account')
         result = baseline.account_summary(db, page=page, account_key=account_key, now=now)
         result["accounts"] = catalog
         return result
@@ -412,6 +418,8 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
         return {"status": "NOT_STARTED", "paper_only": True,
                 "account_key": KEY, "accounts": catalog, "activation_required": True,
                 "starting_cash_cents": cents(STARTING_CASH)}
+    exclusions = research_exclusions.approved_scope(db, account_key)
+    excluded_ids = [p['id'] for p in exclusions['positions']]
     archived = account_key != KEY
     # Never load every event's potentially large strategy/quote JSON for polling.
     event_totals = db.execute(select(ForwardPaperEvent.occurred_at, ForwardPaperEvent.settled_cents,
@@ -440,14 +448,24 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
     page = max(1, min(page, pages))
     visible = db.scalars(select(ForwardPaperEvent).where(ForwardPaperEvent.account_key == account_key)
         .order_by(ForwardPaperEvent.id.desc()).offset((page-1)*page_size).limit(page_size)).all()
-    trade_count = db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(
-        ForwardPaperPosition.account_key == account_key)) or 0
+    selection = [ForwardPaperPosition.account_key == account_key]
+    if trade_view == 'INCLUDED':
+        selection.append(ForwardPaperPosition.id.not_in(excluded_ids))
+    elif trade_view == 'EXCLUDED':
+        selection.append(ForwardPaperPosition.id.in_(excluded_ids))
+    trade_count = db.scalar(select(func.count()).select_from(ForwardPaperPosition).where(*selection)) or 0
     trade_pages = max(1, math.ceil(trade_count/page_size))
     trade_page = max(1, min(requested_page, trade_pages))
-    trades = db.scalars(select(ForwardPaperPosition).where(ForwardPaperPosition.account_key == account_key)
+    trades = db.scalars(select(ForwardPaperPosition).where(*selection)
         .order_by(ForwardPaperPosition.id.desc()).offset((trade_page-1)*page_size).limit(page_size)).all()
+    recent = list(db.scalars(select(ForwardPaperPosition).where(
+        ForwardPaperPosition.account_key == account_key,
+        ForwardPaperPosition.id.not_in(excluded_ids),
+        ForwardPaperPosition.status.in_(('CLOSED', 'UNSETTLED')))
+        .order_by(ForwardPaperPosition.detail['exit_at'].as_string().desc(), ForwardPaperPosition.id.desc())
+        .limit(5)))
     ended = [p for p in active if p.status == lifecycle.ENDED_UNRESOLVED]
-    mark_ids = {p.entry_mark_id for p in [*active, *trades]}
+    mark_ids = {p.entry_mark_id for p in [*active, *trades, *recent]}
     marks = {m.id: m for m in db.scalars(select(AutomatedOptionMark).where(AutomatedOptionMark.id.in_(mark_ids)))}
 
     def describe(p):
@@ -457,7 +475,23 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
                    if p.status == 'WRITTEN_OFF' else {})}
 
     adjustments = adjustment_summary(db, account_key)
+    account_equity = None if value['unpriced_positions'] else settled+unsettled+value['known_liquidation_cents']
+    research = research_exclusions.research_summary(db, account, exclusions, now=now,
+        account_equity_cents=account_equity, realized_cents=pnl)
+    if research is not None:
+        research['included_manual_write_off_count'] = adjustments['count']-exclusions['excluded_count']
+
+    def trade(p):
+        return {**describe(p),
+                'estimated_net_proceeds_cents': _valuation([p], account.policy, now)['known_liquidation_cents']
+                if not archived and p.status == 'OPEN' and not _valuation([p], account.policy, now)['unpriced_positions'] else None,
+                'net_proceeds_cents': p.detail['sale_cents']-p.detail.get('exit_fee_cents', 0)
+                if 'sale_cents' in p.detail else None}
+
     return {"status": "ARCHIVED" if archived else "ACTIVE", "paper_only": True, "account_key": account_key,
+        'research_view': research, 'data_exclusions': exclusions,
+        'open_trades': [trade(p) for p in active if p.status in {'OPEN', 'PENDING_ENTRY', 'UNPRICED'}],
+        'recent_trades': [trade(p) for p in recent],
         'write_off_adjustments': adjustments,
         'confirmed_realized_cents': pnl + adjustments['loss_cents'],
         'equity_basis': 'MANUAL_WRITE_OFF_ADJUSTED' if adjustments['count'] else 'OBSERVED_PAPER_EQUITY',
@@ -484,12 +518,8 @@ def account_summary(db: Session, *, page: int = 1, account_key: str = KEY, now: 
         "equity_history": _adjusted_equity_history(db, account, adjustments),
         "daily": list(daily.values()),
         "positions": [describe(p) for p in active if p.status != lifecycle.ENDED_UNRESOLVED],
-        "trades": [{**describe(p),
-                    "estimated_net_proceeds_cents": _valuation([p], account.policy, now)["known_liquidation_cents"]
-                    if not archived and p.status == "OPEN" and not _valuation([p], account.policy, now)["unpriced_positions"] else None,
-                    "net_proceeds_cents": p.detail["sale_cents"]-p.detail.get("exit_fee_cents", 0)
-                    if "sale_cents" in p.detail else None} for p in trades],
-        "trade_pagination": {"page": trade_page, "pages": trade_pages, "total": trade_count},
+        "trades": [trade(p) for p in trades],
+        "trade_pagination": {"page": trade_page, "pages": trade_pages, "total": trade_count, 'view': trade_view},
         "events": [{"id": e.id, "kind": e.kind, "at": utc(e.occurred_at).isoformat(),
             "settled_cents": e.settled_cents, "unsettled_cents": e.unsettled_cents,
             "fee_cents": e.fee_cents, "realized_cents": e.realized_cents, "detail": e.detail} for e in visible],
