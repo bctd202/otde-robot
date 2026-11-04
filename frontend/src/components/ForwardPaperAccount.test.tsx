@@ -256,3 +256,64 @@ test('historical gaps remain gaps and earlier observations are not relabeled as 
   fireEvent.click(screen.getByRole('button',{name:'Show current estimate'}));
   expect(screen.getByText('WRITE-OFF ADJUSTED ACCOUNT VALUE · SIMULATED')).toBeVisible();
 });
+
+const includedTrade={id:200,status:'CLOSED',option_symbol:'QQQ included trade',entry_debit_cents:2000,net_proceeds_cents:9400};
+const archivedTrade={id:86,status:'WRITTEN_OFF',option_symbol:'SPY excluded data failure',entry_debit_cents:7750,net_proceeds_cents:null};
+function researchAccount():ForwardAccount{
+  const points=[{at:'2026-10-12T13:30:00Z',date:'2026-10-12',equity_cents:200000,return_percent:0,unpriced_positions:0},
+    {at:'2026-10-12T14:00:00Z',date:'2026-10-12',equity_cents:207400,return_percent:3.7,unpriced_positions:0}];
+  return account({account_key:'tasty-capacity-ten-v1',write_off_adjustments:writeoffs,
+    equity_cents:189450,settled_cents:189450,unsettled_cents:0,available_cents:189450,
+    realized_cents:-10550,confirmed_realized_cents:7400,open_trades:[],recent_trades:[includedTrade],trades:[includedTrade],
+    data_exclusions:{version:'test-exclusions',state:'APPLIED_TO_RESEARCH_VIEW',excluded_count:3,excluded_debit_cents:17950,reason:'Missing exit data',positions:[]},
+    research_view:{version:'test-exclusions',excluded_count:3,excluded_debit_cents:17950,equity_cents:207400,
+      realized_cents:7400,basis:'ADJUSTED_RESEARCH_VALUE_NOT_CASH',cash_ledger_changed:false,capacity_replayed:false,
+      included_manual_write_off_count:0,reason:'Missing exit data',
+      equity_history:{baseline_cents:200000,started_at:points[0].at,daily:points,intraday:points,basis:'Derived comparison'}},
+    execution_boundaries:[{at:'2026-10-12T13:30:00Z',execution_version:'test',reason:'Frozen history'}]});
+}
+
+test('simple overview has one research graph, open positions and recent trades without giant historical banners',async()=>{
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>researchAccount()} as Response);
+  render(<ForwardPaperAccount/>);
+  expect(await screen.findByRole('heading',{name:'Your results'})).toBeVisible();
+  expect(screen.getByText('$2,074.00')).toBeVisible();
+  expect(screen.getByText('+$74.00 (+3.70%) · included trades')).toBeVisible();
+  expect(screen.getByRole('button',{name:'3 data exclusions'})).toBeVisible();
+  expect(screen.getByLabelText('Open positions')).toHaveTextContent('No open positions.');
+  expect(screen.getByLabelText('Recent trades')).toHaveTextContent('QQQ included trade');
+  expect(screen.getByText('Actual buying power · not the adjusted research value')).toBeVisible();
+  expect(screen.queryByLabelText('Manual write-off adjustments')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Paper account capacity')).not.toBeInTheDocument();
+  expect(screen.queryByText(/The account balance spans both collection versions/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Account details'}));
+  expect(screen.getByLabelText('Manual write-off adjustments')).toBeVisible();
+  expect(screen.getByText(/The account balance spans both collection versions/)).toBeVisible();
+  expect(screen.getByText('Realized P/L · write-off adjusted').parentElement).toHaveTextContent('-$105.50');
+});
+
+test('exclusion archive is a separate read-only request and does not leak excluded rows back into included results',async()=>{
+  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(async(url)=>({ok:true,json:async()=>({
+    ...researchAccount(),trades:String(url).includes('trade_view=EXCLUDED')?[archivedTrade]:[includedTrade],
+  })}) as Response);
+  render(<ForwardPaperAccount/>);
+  await screen.findByRole('button',{name:'3 data exclusions'});
+  expect(screen.queryByText('SPY excluded data failure')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'3 data exclusions'}));
+  const archive=await screen.findByLabelText('Data exclusions archive');
+  expect(archive).toHaveTextContent('SPY excluded data failure');
+  expect(archive).not.toHaveTextContent('QQQ included trade');
+  expect(fetch).toHaveBeenCalledWith('/api/forward-paper-account?page=1&trade_view=EXCLUDED');
+  fireEvent.click(screen.getByRole('button',{name:'Overview'}));
+  await screen.findByLabelText('Recent trades');
+  expect(screen.queryByText('SPY excluded data failure')).not.toBeInTheDocument();
+  expect(fetch.mock.calls.every(call=>call.length===1)).toBe(true);
+});
+
+test('new missing included valuations stay incomplete even when the approved exclusions exist',()=>{
+  const data=researchAccount();data.research_view!.equity_cents=null;
+  render(<AccountEquityChart account={data}/>);
+  expect(screen.getByText('Result incomplete')).toBeVisible();
+  expect(screen.getByText('Included trades still have missing price evidence.')).toBeVisible();
+  expect(screen.queryByText('$2,074.00')).not.toBeInTheDocument();
+});

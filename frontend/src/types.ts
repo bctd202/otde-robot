@@ -175,6 +175,12 @@ export interface WriteOffAdjustments {
   adjustments:{event_id:number;at:string;position_id:number;option_symbol:string;loss_cents:number;assumed_proceeds_cents:0;approval_ref:string}[];
 }
 
+export interface MainResearchView {
+  version:string;excluded_count:number;excluded_debit_cents:number;equity_cents:number|null;realized_cents:number;
+  equity_history:NonNullable<ForwardAccount['equity_history']>;basis:'ADJUSTED_RESEARCH_VALUE_NOT_CASH';
+  cash_ledger_changed:false;capacity_replayed:false;reason:string;included_manual_write_off_count:number;
+}
+
 export interface PaperAccountChoice {key:string;label:string;archived:boolean}
 export interface PendingPaperAccount {
   status:'NOT_STARTED'|'SCHEDULED';paper_only:true;account_key?:string;accounts?:PaperAccountChoice[];
@@ -182,6 +188,10 @@ export interface PendingPaperAccount {
   activation_required?:boolean;
 }
 export interface ForwardAccount {
+  research_view?:MainResearchView|null;
+  data_exclusions?:{version:string;state:string;excluded_count:number;excluded_debit_cents:number;reason:string;
+    positions:{id:number;option_symbol:string;entry_debit_cents:number;entry_at:string;reason:string}[]};
+  open_trades?:MoneyTrade[];recent_trades?:MoneyTrade[];
   write_off_adjustments?:WriteOffAdjustments;confirmed_realized_cents?:number;
   equity_basis?:string;complete_verified_account_return?:boolean;
   execution_boundaries?:{at:string;execution_version:string;reason:string}[];
@@ -200,7 +210,7 @@ export interface ForwardAccount {
   events:{id:number;kind:string;at:string;settled_cents:number;unsettled_cents:number;fee_cents:number;realized_cents:number;detail:{ticker?:string;reason?:string;[key:string]:unknown}}[];
   pagination:{page:number;pages:number;total:number;page_size:number};
   trades?:MoneyTrade[];
-  trade_pagination?:{page:number;pages:number;total:number};
+  trade_pagination?:{page:number;pages:number;total:number;view?:'INCLUDED'|'EXCLUDED'|'ALL'};
 }
 
 export interface MoneyTrade {

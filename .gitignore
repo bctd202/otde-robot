@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .env
 liquidity_hunter.db
+liquidity_hunter.db-shm
+liquidity_hunter.db-wal
 node_modules/
 dist/
 *.tsbuildinfo

@@ -67,9 +67,10 @@ def retest_research(page: int = 1, view: str = "accounts", db: Session = Depends
 
 
 @router.get("/forward-paper-account")
-def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY, db: Session = Depends(get_db)):
+def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY,
+                          trade_view: str = 'INCLUDED', db: Session = Depends(get_db)):
     try:
-        return account_summary(db, page=page, account_key=account_key)
+        return account_summary(db, page=page, account_key=account_key, trade_view=trade_view)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
