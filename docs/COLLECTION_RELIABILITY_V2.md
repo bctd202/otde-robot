@@ -36,6 +36,11 @@ The activated breakout-retest-v1 source guard includes the repaired feed/cache f
 
 This is deliberate preservation, not a new approved 60-session experiment. A successor comparison requires a separately versioned specification/implementation and explicit prospective activation; this release does not create another four accounts or move the original start/end dates.
 
+Subsequent operator instruction: continue the existing comparison instead of
+creating a successor. The [maintenance repair](RETEST_MAINTENANCE.md) adds an
+explicit reviewed-fingerprint acknowledgment to unblock that same comparison,
+without replacing its original policy, balances, dates, trades or missing data.
+
 ## Main-Mac reports and backups
 
 `ops/parlay_maintenance.py` runs on Main Mac and accesses Parlay-Mac through the existing `ssh parlay` connection. It writes local `status.json`, an append-only status-change log and verified compressed backups. No email or webhook is configured, per the user's preference.

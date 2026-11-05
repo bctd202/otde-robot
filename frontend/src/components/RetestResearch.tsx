@@ -6,6 +6,7 @@ export interface RetestResponse {
   status:string; note:string; verdict?:string; baseline_opportunities?:number; input_coverage?:number|null;
   activated_at?:string; spec_hash?:string;
   admissions_blocked?:boolean;
+  maintenance?:{resumed_at:string;revision:string;scope:string}|null;
   accounts?:{key:string;arm:string;scenario:string;complete:boolean;net_pnl_cents:number|null;
     max_drawdown_cents:number|null;unresolved:number;entry_quote_coverage:number|null;exit_quote_coverage:number|null;
     daily:{date:string;equity_cents:number|null;complete:boolean}[]}[];
@@ -48,7 +49,8 @@ export function RetestResearch({active}:{active:boolean}){
     {error&&<p role="alert">{error}</p>}
     {!data&&!error&&<p>Loading research status…</p>}
     {data&&<><p><strong>{data.admissions_blocked?'New admissions stopped — original study preserved':data.status==='NOT_ACTIVATED'?'Not activated':data.status==='COLLECTING'?'Collecting — no conclusion yet':'Collection window ended'}</strong></p>
-      {data.admissions_blocked&&<p role="alert">The collection software changed. This study keeps its original evidence and dates; its full-performance verdict remains inconclusive. Existing exposure continues under its saved rules. A corrected comparison requires a separately reviewed prospective activation.</p>}
+      {data.admissions_blocked&&<p role="alert">The collection software changed. New entries need a maintenance review. Existing exposure continues under its saved rules; saved results and balances are preserved.</p>}
+      {!data.admissions_blocked&&data.maintenance&&<p role="status">Resumed after feed maintenance · same accounts and trading rules.</p>}
       <p>{data.note}</p>
       {data.status!=='NOT_ACTIVATED'&&<>
         <aside className="retest-recording-note"><h3>Research records are separate from account slots</h3>
@@ -82,7 +84,8 @@ export function RetestResearch({active}:{active:boolean}){
           <button disabled={data.pagination.page<=1} onClick={()=>setPage(p=>p-1)}>Previous</button>
           <span>Page {data.pagination.page} of {data.pagination.pages}</span>
           <button disabled={data.pagination.page>=data.pagination.pages} onClick={()=>setPage(p=>p+1)}>Next</button></nav>}
-        <details><summary>Frozen research identity</summary><p>Activated {data.activated_at}</p><code>{data.spec_hash}</code></details>
+        <details><summary>Research history &amp; method</summary><p>Activated {data.activated_at}</p><code>{data.spec_hash}</code>
+          {data.maintenance&&<p>Maintenance acknowledged {data.maintenance.resumed_at}. Collection continues in the same accounts. Missing sessions remain unknown; the original uninterrupted-protocol verdict remains inconclusive.</p>}</details>
       </>}
     </>}
   </section>;

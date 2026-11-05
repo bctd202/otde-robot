@@ -41,7 +41,7 @@ def configuration() -> dict:
 
 def code_hash() -> str:
     root = Path(__file__).parent
-    names = ("retest_trials.py", "retest_research.py", "retest_evaluation.py", "retest_report.py",
+    names = ("retest_trials.py", "retest_research.py", "retest_evaluation.py", "retest_report.py", "retest_maintenance.py",
              "research_session_policy.py", "parlay.py", "structured_intraday.py", "contracts.py",
              "market_calendar.py", "forward_account.py")
     paths = [root/name for name in names]+[root.parent/'market_data'/name for name in ('tastytrade.py','cached.py')]
@@ -492,7 +492,8 @@ def process(db: Session, provider=None, *, candidates=(), evaluation_at=None, ca
                                                        RetestObservation.evaluation_at == evaluation_at)):
             return
     run.processed_at = now
-    drift = configuration() != run.policy["configuration"] or code_hash() != run.policy["code_hash"]
+    from app.services.retest_maintenance import admission_status
+    drift = admission_status(db, run)["admissions_blocked"]
     if drift:
         event(db, "protocol-drift", now, "PROTOCOL_DRIFT", detail={"new_entries_disabled": True})
     positions = list(db.scalars(select(RetestPosition).join(RetestOpportunity).where(
