@@ -55,12 +55,6 @@ def retest_research(page: int = 1, view: str = "accounts", db: Session = Depends
     from app.services.retest_report import summary
     try:
         result = summary(db, page=page, view=view)
-        if result.get('policy'):
-            from app.services.retest_trials import code_hash, configuration
-            blocked = result['policy']['code_hash'] != code_hash() or result['policy']['configuration'] != configuration()
-            result['admissions_blocked'] = blocked
-            if blocked:
-                result['verdict'] = 'INCONCLUSIVE'
         return result
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

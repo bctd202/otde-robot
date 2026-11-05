@@ -135,8 +135,11 @@ empty startup cache as proof that candles are missing. Old expired holdings rema
 unknown; there is no post-outage backfill.
 
 Source/configuration drift disables new research admissions and marks evaluation
-inconclusive. Do not patch an activated trial in place to improve outcomes; review
-a new identity instead. Scanning never changes existing run policy or spec hash.
+inconclusive. Scanning never changes the existing run policy or spec hash. The
+operator may explicitly resume the same accounts after reviewed feed maintenance
+using an exact-fingerprint, zero-cash acknowledgment; see [maintenance procedure](RETEST_MAINTENANCE.md).
+This preserves gaps and the inconclusive original-protocol verdict. It is not an
+automatic exception, an outcome-driven rules change or a new pristine evaluation.
 
 ## Frozen 60-session evaluation
 

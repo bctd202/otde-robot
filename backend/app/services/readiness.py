@@ -42,8 +42,8 @@ def snapshot(db, provider, *, now=None):
     if written_off:problems.append(f'{written_off} main-account trades use manual write-off assumptions; actual exits remain unverified')
     if lotto_unknown:problems.append(f'{lotto_unknown} lotto exits have unknown proceeds')
     run=db.get(RetestRun,retest_trials.KEY)
-    drift=bool(run and (run.policy['code_hash']!=retest_trials.code_hash()
-                       or run.policy['configuration']!=retest_trials.configuration()))
+    from app.services.retest_maintenance import admission_status
+    drift=bool(run and admission_status(db,run)['admissions_blocked'])
     if drift:problems.append('Frozen retest study: source changed; new admissions blocked')
     day=now.astimezone(NY).date()
     latest=db.scalar(select(func.max(ScannerRuntime.last_scan_completed_at)))

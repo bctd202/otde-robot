@@ -31,6 +31,19 @@ test('a protected source change is visible without presenting ongoing admissions
   expect(screen.queryByText('Collecting — no conclusion yet')).not.toBeInTheDocument();
 });
 
+test('reviewed maintenance resumes the same comparison without hiding evidence limitations',async()=>{
+  vi.mocked(getRetestResearch).mockResolvedValue({...fixture,admissions_blocked:false,
+    maintenance:{resumed_at:'2026-11-05T01:00:00Z',revision:'a'.repeat(40),scope:'existing-test-feed-maintenance'}});
+  render(<RetestResearch active/>);
+  expect(await screen.findByRole('status')).toHaveTextContent('Resumed after feed maintenance · same accounts and trading rules.');
+  expect(screen.getByText('Collecting — no conclusion yet')).toBeVisible();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByText('INCONCLUSIVE')).toBeVisible();
+  fireEvent.click(screen.getByText('Research history & method'));
+  expect(screen.getByText(/Missing sessions remain unknown/)).toBeVisible();
+  expect(screen.queryByRole('button',{name:/activate|reset|resume/i})).not.toBeInTheDocument();
+});
+
 test('unknown values stay unknown, graph gaps are not joined, and pagination is read-only',async()=>{
   vi.mocked(getRetestResearch).mockResolvedValue(fixture);
   const {container}=render(<RetestResearch active/>);

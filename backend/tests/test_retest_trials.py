@@ -214,6 +214,112 @@ def test_no_backfill_and_config_drift_disables_admission(db,monkeypatch):
     assert summary(db,now=feed.now)['protocol_drift']
 
 
+def test_maintenance_resumes_same_accounts_without_rewriting_policy_money_or_gaps(db,monkeypatch):
+    from app.services.retest_maintenance import admission_status, resume_existing
+    run=activate(db)
+    policy=json.dumps(run.policy,sort_keys=True)
+    original_hash=run.policy['code_hash']
+    cash={a:trial.balance(db,a) for a in (trial.account_key(arm,s) for arm in trial.ARMS for s in trial.SCENARIOS)}
+    monkeypatch.setattr(trial,'code_hash',lambda:'b'*64)
+    feed=Feed();tick(db,feed,0,feed.candidates)
+    assert admission_status(db,run)['admissions_blocked']
+    assert db.scalar(select(func.count()).select_from(RetestOpportunity))==0
+    previous=[(p.id,p.detail) for p in db.scalars(select(RetestObservation))]
+    kwargs=dict(revision='c'*40,expected_code_hash='b'*64,expected_frozen_hash=original_hash,
+                now=BASE.replace(hour=21))
+    result=resume_existing(db,**kwargs);db.commit()
+    assert not result['admissions_blocked'] and result['maintenance']
+    assert resume_existing(db,**kwargs)==result;db.commit()
+    assert json.dumps(run.policy,sort_keys=True)==policy
+    assert db.scalar(select(func.count()).select_from(RetestAccount))==4
+    assert db.scalar(select(func.count()).select_from(RetestEvent).where(RetestEvent.kind=='FUNDING'))==4
+    assert db.scalar(select(func.count()).select_from(RetestEvent).where(RetestEvent.kind=='MAINTENANCE_RESUME'))==1
+    assert cash=={a:trial.balance(db,a) for a in cash}
+    assert previous==[(p.id,p.detail) for p in db.scalars(select(RetestObservation))]
+    before=db.connection().connection.driver_connection.total_changes
+    report=summary(db,now=BASE.replace(hour=21))
+    assert not report['admissions_blocked'] and not report['protocol_drift']
+    assert report['historical_protocol_drift'] and report['verdict']=='INCONCLUSIVE'
+    from app.api.routes import retest_research
+    from app.services.readiness import snapshot
+    assert not retest_research(db=db)['admissions_blocked']
+    assert not snapshot(db,feed,now=BASE.replace(hour=21))['retest_admissions_blocked']
+    assert db.connection().connection.driver_connection.total_changes==before
+    # No old opportunities are replayed. Both arms take the next actual fresh setup.
+    next_base=BASE+timedelta(days=1)
+    c=candidate(ticker='QQQ');c.generated_at=next_base+timedelta(minutes=1,seconds=5)
+    c.input_evidence={**c.input_evidence,'session_date':next_base.date().isoformat()}
+    c.contract=c.contract.model_copy(update={'expiration':next_base.date(),
+        'option_symbol':'QQQ261028C00100000','normalized_symbol':'QQQ261028C00100000'})
+    feed=Feed([c]);feed.now=next_base+timedelta(minutes=1,seconds=5)
+    feed.bars=[candle(0).model_copy(update={'timestamp':next_base,'symbol':'QQQ'})]
+    trial.process(db,feed,candidates=[c],evaluation_at=next_base,
+        capture={'QQQ':{'bars':[b.model_dump(mode='json') for b in feed.bars],'planning_risk':2}},now=feed.now)
+    db.commit()
+    assert db.scalar(select(func.count()).select_from(RetestOpportunity))==1
+    assert position(db,ticker='QQQ').status=='PENDING_ENTRY'
+    assert position(db,arm='treatment',ticker='QQQ').status=='WAIT_RETEST'
+    for minute in (1,2):
+        feed.now=next_base+timedelta(minutes=minute+1,seconds=5)
+        feed.bars.append(candle(minute,low=99.9 if minute==1 else 100.1).model_copy(
+            update={'timestamp':next_base+timedelta(minutes=minute),'symbol':'QQQ'}))
+        trial.process(db,feed,evaluation_at=next_base+timedelta(minutes=minute),now=feed.now)
+        db.commit()
+    assert position(db,ticker='QQQ').status=='OPEN'
+    assert position(db,arm='treatment',ticker='QQQ').status=='OPEN'
+    # One acknowledgment never approves a subsequent software or settings change.
+    monkeypatch.setattr(trial,'code_hash',lambda:'d'*64)
+    assert admission_status(db,run)['admissions_blocked']
+    monkeypatch.setattr(trial,'code_hash',lambda:'b'*64)
+    monkeypatch.setattr(trial,'configuration',lambda:{'changed':True})
+    assert admission_status(db,run)['admissions_blocked']
+
+
+@pytest.mark.parametrize('failure',['daytime','revision','fingerprint','frozen','configuration','policy','funding','chronology'])
+def test_maintenance_rejects_unreviewed_or_incomplete_state_without_writes(db,monkeypatch,failure):
+    from app.services.retest_maintenance import resume_existing
+    run=activate(db);original=run.policy['code_hash']
+    monkeypatch.setattr(trial,'code_hash',lambda:'b'*64)
+    kwargs=dict(revision='c'*40,expected_code_hash='b'*64,expected_frozen_hash=original,now=BASE.replace(hour=21))
+    if failure=='daytime':kwargs['now']=BASE
+    elif failure=='revision':kwargs['revision']='main'
+    elif failure=='fingerprint':kwargs['expected_code_hash']='d'*64
+    elif failure=='frozen':kwargs['expected_frozen_hash']='d'*64
+    elif failure=='configuration':monkeypatch.setattr(trial,'configuration',lambda:{'changed':True})
+    elif failure=='policy':run.policy={**run.policy,'starting_cash_cents':900000}
+    elif failure=='funding':db.delete(db.scalar(select(RetestAccount).limit(1)))
+    elif failure=='chronology':kwargs['now']=ACTIVATION-timedelta(days=1)
+    db.flush()
+    count=db.connection().connection.driver_connection.total_changes
+    with pytest.raises(ValueError):resume_existing(db,**kwargs)
+    assert db.connection().connection.driver_connection.total_changes==count
+
+
+def test_maintenance_cannot_activate_an_unfunded_test_or_self_approve_on_read(db):
+    from app.services.retest_maintenance import resume_existing
+    with pytest.raises(ValueError,match='Existing comparison'):
+        resume_existing(db,revision='a'*40,expected_code_hash='b'*64,expected_frozen_hash='c'*64,now=ACTIVATION)
+    assert summary(db)['status']=='NOT_ACTIVATED'
+    assert db.scalar(select(func.count()).select_from(RetestEvent))==0
+
+
+@pytest.mark.parametrize('invalid',['scope','configuration','spec_hash','original_code_hash','revision','money'])
+def test_incomplete_or_unrelated_maintenance_receipt_cannot_unblock_entries(db,monkeypatch,invalid):
+    from app.services.retest_maintenance import admission_status, resume_existing, SCOPE
+    run=activate(db)
+    monkeypatch.setattr(trial,'code_hash',lambda:'b'*64)
+    detail={'scope':SCOPE,'configuration':run.policy['configuration'],'spec_hash':run.policy['spec_hash'],
+        'original_code_hash':run.policy['code_hash'],'reviewed_code_hash':'b'*64,'revision':'c'*40}
+    if invalid!='money':detail[invalid]='invalid'
+    trial.event(db,'maintenance-resume:'+'b'*64,ACTIVATION,'MAINTENANCE_RESUME',
+        settled=1 if invalid=='money' else 0,detail=detail)
+    db.commit()
+    assert admission_status(db,run)['admissions_blocked']
+    with pytest.raises(ValueError,match='invalid'):
+        resume_existing(db,revision='c'*40,expected_code_hash='b'*64,
+            expected_frozen_hash=run.policy['code_hash'],now=BASE.replace(hour=21))
+
+
 def test_budget_reserve_unknown_budget_and_shared_refresh(db):
     activate(db); feed=Feed(); tick(db,feed,0,feed.candidates)
     feed.now=BASE

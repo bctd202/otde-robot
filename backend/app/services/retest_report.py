@@ -119,9 +119,14 @@ def summary(db: Session, *, page: int = 1, view: str = "accounts", now: datetime
     by_key = {m["key"]: m for m in metrics}
     opportunities = db.scalar(select(func.count()).select_from(RetestOpportunity).where(
         RetestOpportunity.run_key == KEY, RetestOpportunity.mode == "ONE_MIN_0DTE")) or 0
-    drift = bool(db.scalar(select(RetestEvent.id).where(RetestEvent.run_key == KEY, RetestEvent.kind == "PROTOCOL_DRIFT")))
+    from app.services.retest_maintenance import admission_status
+    admission = admission_status(db, run)
+    drift = admission["admissions_blocked"]
+    historical_drift = bool(admission["maintenance"] or db.scalar(select(RetestEvent.id).where(
+        RetestEvent.run_key == KEY, RetestEvent.kind == "PROTOCOL_DRIFT")))
     end = session_limits(dates[-1])["close"]
-    adequate = now >= end and opportunities >= 100 and coverage is not None and coverage >= 95 and not drift
+    adequate = (now >= end and opportunities >= 100 and coverage is not None and coverage >= 95
+                and not drift and not historical_drift)
     gates = {}; intervals = {}
     for scenario in SCENARIOS:
         c, t = (by_key[account_key(arm, scenario)] for arm in ARMS)
@@ -155,6 +160,7 @@ def summary(db: Session, *, page: int = 1, view: str = "accounts", now: datetime
     return {"status": "COMPLETE" if now >= end else "COLLECTING", "paper_only": True,
         "run_key": KEY, "activated_at": utc(run.activated_at).isoformat(), "policy": run.policy,
         "spec_hash": run.policy["spec_hash"], "protocol_drift": drift, "baseline_opportunities": opportunities,
+        **admission, "historical_protocol_drift": historical_drift,
         "input_coverage": coverage, "candle_coverage": candle_coverage, "retest_input_coverage": retest_coverage,
         "planning_coverage": planning_coverage, "input_observations": input_n, "expected_inputs": expected,
         "accounts": metrics, "latest": latest, "verdict": verdict, "gates": gates, "uncertainty": intervals,
