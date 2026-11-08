@@ -24,6 +24,7 @@ from app.services.option_research import utc
 from app.services.research_session_policy import VERSION as SESSION_VERSION, session_limits
 from app.services.retest_evaluation import evaluation_sessions
 from app.services.retest_research import FrozenSetup, TimingState, advance, canonical, stamp, start
+from app.services.cost_model import from_policy, CONTRACT_MULTIPLIER
 
 KEY = "breakout-retest-v1"
 ARMS = ("control", "treatment")
@@ -43,7 +44,7 @@ def code_hash() -> str:
     root = Path(__file__).parent
     names = ("retest_trials.py", "retest_research.py", "retest_evaluation.py", "retest_report.py", "retest_maintenance.py",
              "research_session_policy.py", "parlay.py", "structured_intraday.py", "contracts.py",
-             "market_calendar.py", "forward_account.py")
+             "market_calendar.py", "forward_account.py", "cost_model.py", "one_minute_gate.py", "result_model.py")
     paths = [root/name for name in names]+[root.parent/'market_data'/name for name in ('tastytrade.py','cached.py')]
     return hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()
 
@@ -91,7 +92,7 @@ def activate(db: Session, *, revision: str, now: datetime) -> RetestRun:
     policy = {"version": KEY, "baseline_account": MAIN_KEY, "baseline_policy": baseline,
         "session_version": SESSION_VERSION, "revision": revision, "code_hash": code_hash(),
         "configuration": config, "sessions": dates, "starting_cash_cents": 200000,
-        "stress_slippage_premium_cents": 3, "pending_consumes_slot": False,
+        "stress_slippage_cents_per_share": 3, "pending_consumes_slot": False,
         "selection": "FIRST_QUALIFIED_BUY_PER_TICKER_DAY_ACROSS_ENGINES",
         "bootstrap": "paired-overlapping-noncircular-five-session-blocks-v1",
         "input_coverage_denominator": "every scheduled minute x frozen base universe, including outages",
@@ -123,9 +124,10 @@ def balance(db: Session, key: str) -> tuple[int, int]:
 
 def _costs(policy: dict, scenario: str) -> tuple[int, int, int]:
     base = policy["baseline_policy"]
-    slip = 3 if scenario == "stress" else base["slippage_premium_cents"]
-    return (slip*100, base["opening_commission_cents"]+base["fee_allowance_per_side_cents"],
-            base["closing_commission_cents"]+base["fee_allowance_per_side_cents"])
+    cost = from_policy(base)
+    stress = policy.get("stress_slippage_cents_per_share", policy.get("stress_slippage_premium_cents",3))
+    slip = stress if scenario == "stress" else cost.slippage_cents_per_share
+    return (slip*CONTRACT_MULTIPLIER, cost.opening_cost_cents, cost.closing_cost_cents)
 
 
 def _capacity(db: Session, position: RetestPosition, policy: dict, ask: float | None) -> bool:

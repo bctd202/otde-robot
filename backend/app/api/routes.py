@@ -31,6 +31,8 @@ from app.services.paper_positions import (create_position, market_mark,
                                           expire_if_past_expiration,
                                           refresh_position, serialize)
 from app.services.backtest import run_backtest
+from app.services.cost_model import (DEFAULT_ROUND_TRIP_COMMISSION, DEFAULT_ROUND_TRIP_FEES,
+                                     DEFAULT_SLIPPAGE_PER_SHARE)
 from app.services.option_research import option_path_research
 from app.services.evidence_health import collection_evidence
 from app.services.shadow_audit import shadow_evidence_audit
@@ -39,7 +41,7 @@ from app.services.lotto_trials import lotto_trial_summary
 from app.services.performance import (analytics_exclusion_reason, automated_origin,
                                       deduplicate_positions,
                                       execution_cost_analysis, link_paper_position,
-                                      market_movement_data, metrics,
+                                      market_movement_data, metrics, measurement_integrity,
                                       option_shadow_results,
                                       paper_portfolio_results, performance_chart_data,
                                       research_breakdowns)
@@ -360,9 +362,9 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
                 start: date | None = None, end: date | None = None, min_score: float | None = None,
                 max_score: float | None = None, deduplicate: bool = True, view: str = "ALL",
                 page: int = 1, page_size: int = 25, paper_starting_cash: float | None = None,
-                commission_per_contract: float = 1.0,
-                additional_fees_per_contract: float = 0.0,
-                extra_slippage_per_side: float = 0.01,
+                commission_per_contract: float = DEFAULT_ROUND_TRIP_COMMISSION,
+                additional_fees_per_contract: float = DEFAULT_ROUND_TRIP_FEES,
+                extra_slippage_per_side: float = DEFAULT_SLIPPAGE_PER_SHARE,
                 db: Session = Depends(get_db)):
     if paper_starting_cash is not None and not 50 <= paper_starting_cash <= 1_000_000:
         raise HTTPException(status_code=422, detail="Paper starting cash must be between $50 and $1,000,000")
@@ -417,6 +419,7 @@ def performance(source: str = "LIVE", ticker: str | None = None, direction: str 
     page_start = (bounded_page-1)*bounded_page_size
     page_rows = newest_first[page_start:page_start+bounded_page_size]
     return {"metrics": metrics(rows), "raw_metrics": metrics(raw_rows),
+        "measurement_integrity": measurement_integrity(rows),
         "selection_integrity": {
             "basis": "AUTOMATED_ORIGIN_INCLUDING_JOURNAL_LINKS" if not user_entered else "MANUAL_JOURNAL",
             "legacy_linked_rows_included": sum(bool(row.user_entered) for row in rows) if not user_entered else 0,

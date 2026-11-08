@@ -196,9 +196,9 @@ def test_performance_defaults_to_auto_only_true_0dte_and_deduplicated():
         assert payload["metrics"]["total_triggered_signals"]==1
         assert payload["execution_cost_analysis"]["assumptions"] == {
             "commission_per_contract_dollars": 1.0,
-            "additional_fees_per_contract_dollars": 0.0,
+            "additional_fees_per_contract_dollars": 1.0,
             "extra_slippage_per_side_option_dollars": .01,
-            "round_trip_fixed_cost_dollars": 1.0,
+            "round_trip_fixed_cost_dollars": 2.0,
             "observed_fill_basis": "Verified entry ask to verified exit bid",
             "stress_fill_basis": "Entry ask plus slippage; exit bid minus slippage",
         }
@@ -307,14 +307,16 @@ def test_distinct_same_day_lifecycles_each_get_a_performance_row():
         assert [item.dedupe_key.rsplit(":", 1)[-1] for item in rows] == ["setup-1", "setup-2"]
 
 
-def test_zero_risk_plan_is_not_added_to_the_performance_ledger():
+def test_zero_risk_plan_remains_auditable_and_excluded_from_stats():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         candidate=structured_missed("zero-risk",30)
-        candidate.underlying_invalidation=candidate.underlying_trigger
+        candidate.underlying_invalidation=candidate.underlying_price
         track_candidates(db,[candidate],LiveTradierProvider())
-        assert list(db.scalars(select(SignalPerformance)).all())==[]
+        selected=list(db.scalars(select(SignalPerformance)).all())
+        assert len(selected)==1 and selected[0].result_r is None
+        assert analytics_exclusion_reason(selected[0])=='ZERO_RISK'
 
 
 SHADOW_START = datetime(2026, 8, 3, 14, 30, tzinfo=timezone.utc)
@@ -339,7 +341,7 @@ def shadow_candidate(lifecycle="shadow-1", strategy="ONE_MIN_0DTE"):
 class ShadowProvider:
     def __init__(self, *, exit_contract=True, remaining=80):
         self.latest = SHADOW_START+timedelta(minutes=3)
-        exit_stamp = SHADOW_START+timedelta(minutes=1, seconds=30)
+        exit_stamp = SHADOW_START+timedelta(minutes=2, seconds=30)
         self.exit_contract = shadow_contract(bid=.75, ask=.80, stamp=exit_stamp) if exit_contract else None
         self.remaining = remaining
         self.chain_calls = 0
@@ -349,7 +351,8 @@ class ShadowProvider:
                               latest_timestamp=self.latest, message="live test")
 
     def candles(self, ticker, timeframe="1m"):
-        return [candle(SHADOW_START+timedelta(minutes=1), 101.5, 99.8, 101.2)]
+        return [candle(SHADOW_START,100.2,99.8,100.1),
+                candle(SHADOW_START+timedelta(minutes=1), 101.5, 99.8, 101.2)]
 
     def option_chain(self, ticker, expiration=None):
         self.chain_calls += 1

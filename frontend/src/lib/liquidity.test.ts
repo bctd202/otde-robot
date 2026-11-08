@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   clampScore,
+  buildLiquidityLevels,
   detectLiquidityEvents,
   nearestLevelAbove,
   nearestLevelBelow,
@@ -21,6 +22,14 @@ function candle(time: number, high: number, low: number, close: number): OhlcCan
 }
 
 describe('liquidity context', () => {
+  test('omits unavailable prior-session levels without inventing replacements',()=>{
+    const observed=buildLiquidityLevels({previous_day_high:null,previous_day_low:null,
+      opening_range_high:101,opening_range_low:99,session_high:102,session_low:98,vwap:100,
+      equal_highs:[],equal_lows:[]});
+    expect(observed.some(l=>l.label==='PDH'||l.label==='PDL')).toBe(false);
+    expect(observed.find(l=>l.label==='HOD')?.price).toBe(102);
+    expect(observed.find(l=>l.label==='LOD')?.price).toBe(98);
+  });
   test('finds the nearest level above current price', () => {
     expect(nearestLevelAbove(100.25, levels)?.label).toBe('PDH');
   });

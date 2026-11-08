@@ -40,7 +40,7 @@ export interface LotteryTrackerList {
 export interface LotteryTrackerDetail {
   tracker:LotteryTrackerSummary;points:LotteryTrackerPoint[];entry_basis:string;performance_basis:string;paper_only:boolean;
 }
-export interface LiquidityLevels { previous_day_high:number; previous_day_low:number; opening_range_high:number; opening_range_low:number; session_high:number; session_low:number; vwap:number; equal_highs:number[]; equal_lows:number[] }
+export interface LiquidityLevels { previous_day_high:number|null; previous_day_low:number|null; opening_range_high:number; opening_range_low:number; session_high:number; session_low:number; vwap:number; equal_highs:number[]; equal_lows:number[] }
 export interface Dashboard { provider_status:ProviderStatus; quotes:Quote[]; market_session:string; volatility_proxy:number|null; levels:Record<string,LiquidityLevels>; directional_bias:Record<string,string>; news_warning:string; normal_setups:Setup[]; lottery_setups:Lottery[]; no_trade:boolean; paper_account:Record<string,string|number|boolean> }
 export interface JournalSignal { id:number; symbol:string; signal_type:string; status:string; generated_at:string; payload:Record<string,unknown> }
 export interface Analytics { minimum_sample_size:number; sample_size:number; statistically_promising:boolean; win_rate:number; profit_factor:number|null; average_winner:number; average_loser:number; expectancy:number; message:string }
@@ -162,8 +162,8 @@ export interface MarketMovementData {resolved_with_prices:number;average_directi
 export interface PerformanceOutcomePoint {outcome:string;count:number}
 export interface PerformanceChartData {daily:PerformanceDailyPoint[];outcomes:PerformanceOutcomePoint[]}
 export interface Pagination {page:number;page_size:number;total_items:number;total_pages:number}
-export interface PerformanceResponse {option_path_research?:OptionPathResearch;selection_integrity?:{basis:string;legacy_linked_rows_included:number;historical_records_changed:false};metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
-export interface BacktestRun {id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
+export interface PerformanceResponse {measurement_integrity?:{current_model:string;mixed_models:boolean;historical_records_changed:false;cohorts:{basis:string;label:string;selected_plays:number;resolved_plays:number;total_r:number}[]};option_path_research?:OptionPathResearch;selection_integrity?:{basis:string;legacy_linked_rows_included:number;historical_records_changed:false};metrics:PerformanceMetrics;raw_metrics:PerformanceMetrics;option_shadow_metrics:AutomatedOptionShadowMetrics;execution_cost_analysis:ExecutionCostAnalysis;paper_money_tracker:PaperMoneyTracker;research_breakdowns:ResearchBreakdowns;chart_data:PerformanceChartData;market_movement:MarketMovementData;pagination:Pagination;signals:PerformanceSignal[];scope:{source:string;strategy_mode:string;user_entered:boolean;deduplication:string};timezone:string;underlying_only:boolean;paper_only:boolean}
+export interface BacktestRun {strategy_snapshot?:{evidence_mode?:string;result_model_version?:string;diagnostics?:{verified_buy_entries:number;underlying_only_entries:number;rejected_live_gate:number;input_gaps:number}};id:string;requested_start:string;requested_end:string;actual_start:string|null;actual_end:string|null;tickers:string[];status:string;warnings:string[];failures:Record<string,string>;started_at:string;completed_at:string|null}
 export interface AccountEquityPoint {
   at:string;date:string;equity_cents:number|null;return_percent:number|null;unpriced_positions:number;
   manual_write_off_count?:number;basis?:string;
@@ -200,7 +200,7 @@ export interface ForwardAccount {
   expired_unresolved_count?:number;expired_unresolved_debit_cents?:number;
   unresolved_expirations?:MoneyTrade[];
   status:'ACTIVE'|'ARCHIVED';paper_only:true;account_key:string;accounts?:PaperAccountChoice[];activated_at:string;as_of:string;processed_at:string;processing_stale:boolean;
-  policy:{label?:string;starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
+  policy:{label?:string;starting_cash_cents:number;max_positions:number;max_entry_cents:number;slippage_premium_cents?:number;slippage_cents_per_share?:number;opening_commission_cents:number;closing_commission_cents:number;fee_allowance_per_side_cents:number;quote_age_seconds:number;entry_deadline_seconds:number;exit_deadline_seconds:number};
   settled_cents:number;unsettled_cents:number;available_cents:number;reserved_exit_fees_cents:number;
   realized_cents:number;charged_fees_cents:number;open_entry_fees_cents:number;
   known_liquidation_cents:number;unpriced_positions:number;unpriced_debit_cents:number;equity_cents:number|null;

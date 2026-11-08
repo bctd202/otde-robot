@@ -10,7 +10,8 @@ from app.services.session_candles import session_candles, session_evidence, utc
 def levels_for(candles):
     or5 = opening_range(candles, 5)
     highs, lows = swings(candles)
-    return {"previous_day_high": max(c.high for c in candles)+0.8, "previous_day_low": min(c.low for c in candles)-0.8, "opening_range_high": or5["high"], "opening_range_low": or5["low"], "session_high": max(c.high for c in candles), "session_low": min(c.low for c in candles), "vwap": vwap(candles), "equal_highs": equal_levels(highs), "equal_lows": equal_levels(lows)}
+    # This input contains today's session only. No prior-session value is known.
+    return {"previous_day_high": None, "previous_day_low": None, "opening_range_high": or5["high"], "opening_range_low": or5["low"], "session_high": max(c.high for c in candles), "session_low": min(c.low for c in candles), "vwap": vwap(candles), "equal_highs": equal_levels(highs), "equal_lows": equal_levels(lows)}
 
 def _freshness(status: ProviderStatus | None) -> str:
     if status is None:

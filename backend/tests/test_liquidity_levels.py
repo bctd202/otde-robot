@@ -21,6 +21,16 @@ def test_no_equal_levels() -> None:
     assert equal_levels([level(550.0, 0), level(551.0, 1)]) == []
 
 
+def test_current_session_context_does_not_fabricate_prior_day_levels():
+    from app.services.setup_engine import levels_for
+    from app.schemas.market import CandleOut
+    rows=[CandleOut(symbol='SPY',timeframe='1m',timestamp=level(100,i)[0],
+        open=100,high=101+i*.1,low=99-i*.1,close=100,volume=1000) for i in range(8)]
+    result=levels_for(rows)
+    assert result['previous_day_high'] is None and result['previous_day_low'] is None
+    assert result['session_high']==101.7 and result['session_low']==98.3
+
+
 def test_one_equal_high_level() -> None:
     assert equal_levels([level(550.0, 0), level(550.04, 1)]) == [550.02]
 

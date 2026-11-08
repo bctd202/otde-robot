@@ -17,6 +17,8 @@ from app.services.retest_research import canonical
 
 KIND = "MAINTENANCE_RESUME"
 SCOPE = "existing-test-feed-maintenance"
+RESULT_SCOPE = "existing-test-result-maintenance"
+SCOPES = (SCOPE, RESULT_SCOPE)
 
 
 def admission_status(db, run) -> dict:
@@ -32,7 +34,7 @@ def admission_status(db, run) -> dict:
     reviewed = bool(approval and config_matches
         and utc(approval.at) >= utc(run.activated_at)
         and not any((approval.settled, approval.unsettled, approval.realized))
-        and detail.get("scope") == SCOPE
+        and detail.get("scope") in SCOPES
         and detail.get("reviewed_code_hash") == current
         and detail.get("original_code_hash") == run.policy["code_hash"]
         and detail.get("spec_hash") == run.policy["spec_hash"]
@@ -41,15 +43,17 @@ def admission_status(db, run) -> dict:
     blocked = not config_matches or (current != run.policy["code_hash"] and not reviewed)
     return {"admissions_blocked": blocked,
         "maintenance": {"resumed_at": utc(approval.at).isoformat(),
-                        "revision": detail["revision"], "scope": SCOPE} if reviewed else None}
+                        "revision": detail["revision"], "scope": detail["scope"]} if reviewed else None}
 
 
 def resume_existing(db, *, revision: str, expected_code_hash: str,
-                    expected_frozen_hash: str, now: datetime) -> dict:
+                    expected_frozen_hash: str, now: datetime, scope: str = SCOPE) -> dict:
     """Operator-only transaction; no policy edits, funding, imports or replay."""
     from app.services import retest_trials as trial
 
     now = utc(now)
+    if scope not in SCOPES:
+        raise ValueError("Reviewed maintenance scope required")
     if market_session(now) == "regular":
         raise ValueError("Resume outside the market session")
     if not re.fullmatch(r"[a-f0-9]{40}", revision):
@@ -83,10 +87,10 @@ def resume_existing(db, *, revision: str, expected_code_hash: str,
         return status
     # Serialize with the scanner before the append-only, zero-cash receipt.
     db.execute(update(RetestRun).where(RetestRun.key == run.key).values(revision=RetestRun.revision+1))
-    trial.event(db, key, now, KIND, detail={"scope": SCOPE, "revision": revision,
+    trial.event(db, key, now, KIND, detail={"scope": scope, "revision": revision,
         "reviewed_code_hash": expected_code_hash, "original_code_hash": expected_frozen_hash,
         "spec_hash": run.policy["spec_hash"], "configuration": run.policy["configuration"],
-        "basis": "Operator-authorized continuation after feed reliability maintenance; same accounts and rules. "
+        "basis": "Operator-authorized continuation after reviewed collection/result maintenance; same accounts and entry rules. "
                  "Original gaps remain unknown; no backfill or original-protocol performance claim."})
     return admission_status(db, run)
 
@@ -100,11 +104,12 @@ def main():
     parser.add_argument("--revision", required=True)
     parser.add_argument("--expected-code-hash", required=True)
     parser.add_argument("--expected-frozen-hash", required=True)
+    parser.add_argument("--scope", choices=SCOPES, default=SCOPE)
     parser.add_argument("--confirm", required=True, choices=["RESUME-EXISTING-PAPER-TEST"])
     args = parser.parse_args()
     with SessionLocal.begin() as db:
         result = resume_existing(db, revision=args.revision, expected_code_hash=args.expected_code_hash,
-            expected_frozen_hash=args.expected_frozen_hash, now=datetime.now(timezone.utc))
+            expected_frozen_hash=args.expected_frozen_hash, now=datetime.now(timezone.utc), scope=args.scope)
         print(json.dumps(result))
 
 

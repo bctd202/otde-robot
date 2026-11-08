@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +15,10 @@ from app.services.contracts import (ACCEPTED_ACTIONABLE_PROVIDERS,
                                     validate_exit_quote)
 from app.services.parlay import PRODUCTION_TIMEFRAME
 from app.services.option_research import research_definition
+from app.services import result_model
+from app.services.research_session_policy import session_limits
+from app.services.cost_model import (DEFAULT_ROUND_TRIP_COMMISSION, DEFAULT_ROUND_TRIP_FEES,
+                                     DEFAULT_SLIPPAGE_PER_SHARE, cents, quote_net_cents)
 
 NY = ZoneInfo("America/New_York")
 SESSION_CUTOFF = time(15, 45)
@@ -51,6 +56,8 @@ def analytics_exclusion_reason(row: SignalPerformance) -> str | None:
     This is deliberately derived rather than persisted so historical research rows
     stay intact and auditable.
     """
+    if row.source == "BACKTEST" and row.backend_status == "UNDERLYING_ONLY":
+        return "UNVERIFIED_HISTORICAL_OPTION_GATE"
     if abs(row.entry_price - row.stop_price) <= 1e-9:
         return "ZERO_RISK"
     if row.exit_reason == "DATA_GAP":
@@ -87,7 +94,8 @@ def automated_origin(row: SignalPerformance) -> bool:
     )
 
 
-def _mark_data_gap(row: SignalPerformance, observed_at: datetime) -> None:
+def _mark_data_gap(row: SignalPerformance, observed_at: datetime,
+                   reason: str = "No completed same-session candle reached the 15:45 ET cutoff") -> None:
     row.exit_reason = "DATA_GAP"
     row.result_r = None
     row.result_return_pct = None
@@ -97,7 +105,7 @@ def _mark_data_gap(row: SignalPerformance, observed_at: datetime) -> None:
     row.updated_at = observed_at
     details = dict(row.condition_snapshot or {})
     details["analytics_data_quality"] = {
-        "reason": "No completed same-session candle reached the 15:45 ET cutoff",
+        "reason": reason,
         "observed_at": observed_at.isoformat(),
     }
     row.condition_snapshot = details
@@ -250,12 +258,18 @@ def evaluate_open_signals(db: Session, provider) -> None:
             candle_day = stamp.astimezone(NY).date()
             if candle_day != row.trading_date:
                 continue
-            cutoff = stamp.astimezone(NY).time() >= SESSION_CUTOFF
-            update_outcome(row, candle.high, candle.low, candle.close, stamp, cutoff=cutoff)
+            cutoff = (stamp >= session_limits(row.trading_date)["timed_exit_candle"] if result_model.definition(row)
+                      else stamp.astimezone(NY).time() >= SESSION_CUTOFF)
+            high, low, close, uncertainty = result_model.candle_range(row, candle)
+            if uncertainty:
+                _mark_data_gap(row, latest, uncertainty)
+                break
+            update_outcome(row, high, low, close, stamp, cutoff=cutoff)
             row.last_evaluated_at = stamp
             if row.exit_reason != "OPEN":
                 break
-        cutoff_ready = datetime.combine(row.trading_date, SESSION_CUTOFF, NY) + timedelta(minutes=1)
+        cutoff_ready = ((session_limits(row.trading_date)["timed_exit_candle"] if result_model.definition(row)
+                         else datetime.combine(row.trading_date, SESSION_CUTOFF, NY))+timedelta(minutes=1))
         if (row.exit_reason == "OPEN" and provider_status.status == "healthy"
                 and latest >= cutoff_ready.astimezone(timezone.utc)):
             _mark_data_gap(row, latest)
@@ -296,11 +310,11 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                                         "setup_type": candidate.strategy_mode.lower()}))
             continue
         if existing is None and candidate.signal_status in {"BUY", "MISSED"}:
-            entry = (candidate.underlying_trigger if candidate.underlying_trigger is not None
-                     else candidate.underlying_price)
+            measurement = result_model.benchmark(candidate)
+            entry = candidate.underlying_price
             stop = candidate.underlying_invalidation
             target = candidate.first_underlying_target
-            if entry is None or stop is None or target is None or abs(entry - stop) <= 1e-9:
+            if any(value is None or not math.isfinite(value) or value <= 0 for value in (entry, stop, target)):
                 continue
             contract = candidate.contract.model_dump(mode="json") if candidate.contract else None
             row = SignalPerformance(signal_id=str(uuid4()), source="LIVE", dedupe_key=dedupe_key,
@@ -311,6 +325,7 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 strategy_snapshot={**STRATEGY_SNAPSHOT, "origin": "AUTOMATED",
                                    "input_evidence": candidate.input_evidence,
                                    "option_research": research_definition(), "strategy_mode": candidate.strategy_mode,
+                                   "result_model": measurement,
                                    "strategy_version": candidate.strategy_version,
                                    "timeframe_context": candidate.timeframe_context,
                                    "target_dte": candidate.target_dte},
@@ -319,7 +334,8 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 triggered_at=stamp, entry_price=entry, stop_price=stop, target_price=target,
                 exit_reason="MISSED" if candidate.signal_status == "MISSED" else "OPEN", result_r=None,
                 mfe_r=0, mae_r=0, score=candidate.score, user_entered=False, option_snapshot=contract,
-                conservative_same_candle=False, created_at=now, updated_at=now, last_evaluated_at=stamp,
+                conservative_same_candle=False, created_at=now, updated_at=now,
+                last_evaluated_at=datetime.fromisoformat(measurement["confirmation_candle_at"]),
                 provenance_provider=candidate.contract.provider if candidate.contract else provider_status.provider,
                 provenance_data_mode=candidate.contract.data_mode if candidate.contract else provider_status.mode,
                 verification_status=candidate.contract.verification_status if candidate.contract else "underlying_only",
@@ -335,6 +351,8 @@ def track_candidates(db: Session, candidates: list, provider=None) -> None:
                 contract_strike=candidate.contract.strike if candidate.contract else None,
                 contract_option_type=candidate.contract.right if candidate.contract else None)
             db.add(row)
+            if measurement["quality_error"] and candidate.signal_status == "BUY":
+                _mark_data_gap(row, now, measurement["quality_error"])
             db.flush()
             if candidate.signal_status == "BUY" and verified_contract and candidate.contract is not None:
                 observed_at = provider_status.latest_timestamp if provider_status is not None else stamp
@@ -367,7 +385,8 @@ def update_outcome(row: SignalPerformance, high: float, low: float, close: float
         reason, price = "TIMED_EXIT", close
     else:
         return
-    row.exit_reason, row.exit_price, row.exit_at = reason, price, _utc(stamp)
+    row.exit_reason, row.exit_price = reason, price
+    row.exit_at = _utc(stamp)+(timedelta(minutes=1) if result_model.definition(row) else timedelta())
     signed = (price-row.entry_price) if row.direction == "CALL" else (row.entry_price-price)
     row.result_r = round(signed/risk, 4)
     row.result_return_pct = round(signed / row.entry_price * 100, 4) if row.entry_price else None
@@ -461,9 +480,9 @@ def option_shadow_results(db: Session, rows: list[SignalPerformance]) -> tuple[d
 
 
 def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[str, dict],
-                            commission_per_contract: float = 1.0,
-                            additional_fees_per_contract: float = 0.0,
-                            extra_slippage_per_side: float = 0.01) -> dict:
+                            commission_per_contract: float = DEFAULT_ROUND_TRIP_COMMISSION,
+                            additional_fees_per_contract: float = DEFAULT_ROUND_TRIP_FEES,
+                            extra_slippage_per_side: float = DEFAULT_SLIPPAGE_PER_SHARE) -> dict:
     """Stress immutable ask-to-bid marks without changing the saved option evidence.
 
     Observed P/L already crosses the displayed spread by entering at ask and exiting
@@ -490,10 +509,10 @@ def execution_cost_analysis(rows: list[SignalPerformance], option_shadows: dict[
         entry_ask = float(shadow["entry_ask"])
         exit_bid = float(shadow["exit_bid"])
         observed = (exit_bid-entry_ask)*multiplier
-        net = observed-round_trip_cost
-        stressed_entry = entry_ask+slippage
-        stressed_exit = max(0.0, exit_bid-slippage)
-        stress = (stressed_exit-stressed_entry)*multiplier-round_trip_cost
+        net = quote_net_cents(entry_ask, exit_bid, multiplier=multiplier,
+                             round_trip_fixed_cents=cents(round_trip_cost))/100
+        stress = quote_net_cents(entry_ask, exit_bid, multiplier=multiplier,
+            round_trip_fixed_cents=cents(round_trip_cost), slippage_cents_per_share=slippage*100)/100
         values = {"observed": observed, "net": net, "stress": stress}
         for key, value in values.items():
             scenarios[key].append(value)
@@ -887,6 +906,22 @@ def market_movement_data(rows: list[SignalPerformance]) -> dict:
         "average_raw_underlying_move_pct": round(sum(raw_moves) / count, 3) if count else 0,
         "daily": points,
     }
+
+
+def measurement_integrity(rows: list[SignalPerformance]) -> dict:
+    groups: dict[str,list[SignalPerformance]] = {}
+    for row in rows:
+        policy = result_model.definition(row)
+        key = policy["basis"] if policy else "LEGACY_TRIGGER_BENCHMARK"
+        groups.setdefault(key,[]).append(row)
+    labels = {"LEGACY_TRIGGER_BENCHMARK": "Legacy trigger benchmark",
+        "UNDERLYING_QUOTE_BENCHMARK_NOT_OPTION_FILL": "Post-confirmation quote benchmark",
+        "NEXT_BAR_OPEN_BENCHMARK_NOT_OPTION_FILL": "Next-bar open replay benchmark"}
+    return {"current_model": result_model.VERSION, "mixed_models": len(groups)>1,
+        "historical_records_changed": False,
+        "cohorts": [{"basis": key, "label": labels.get(key,key), "selected_plays": len(values),
+            "resolved_plays": metrics(values)["resolved_signals"], "total_r": metrics(values)["cumulative_r"]}
+            for key,values in sorted(groups.items())]}
 
 
 def metrics(rows: list[SignalPerformance]) -> dict:

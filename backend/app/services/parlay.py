@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -7,6 +7,7 @@ from app.schemas.market import CandleOut, OptionContractOut, ParlayCandidateOut
 from app.services.indicators import opening_range, spread_pct, vwap
 from app.services.contracts import annotate_chain
 from app.services.session_candles import session_candles, session_evidence
+from app.services.one_minute_gate import evaluate as entry_gate
 
 Direction = Literal["call", "put"]
 SignalStatus = Literal["BUY", "WATCH", "MISSED", "PASS"]
@@ -86,8 +87,9 @@ def _directional_plan(candles: list[CandleOut]) -> tuple[Direction | None, int, 
     return direction, sum(checks), [label for label, passed in zip(labels, checks) if passed], trigger, invalidation, confirmed
 
 
-def _eligible_contract(chain: list[OptionContractOut], direction: Direction, target: float) -> tuple[OptionContractOut | None, list[str]]:
-    today = datetime.now(NY).date()
+def _eligible_contract(chain: list[OptionContractOut], direction: Direction, target: float,
+                       *, session_day: date | None = None) -> tuple[OptionContractOut | None, list[str]]:
+    today = session_day or datetime.now(NY).date()
     rejection: set[str] = set()
     eligible = []
     for contract in chain:
@@ -186,7 +188,7 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
         if research_capture is not None and setup.direction is not None:
             research_capture[symbol]["planning_risk"] = max(abs(setup.trigger-setup.stop), quote.price*.002)
         direction, checks, reasons = setup.direction, setup.checks, setup.reasons
-        trigger, invalidation, confirmed = setup.trigger, setup.stop, setup.confirmed
+        trigger, invalidation = setup.trigger, setup.stop
         if direction is None:
             output.append(ParlayCandidateOut(symbol=symbol, rank="PASS", direction="none", signal_status="PASS",
                 score=min(54, 25 + checks * 6), score_label="PASS", underlying_price=quote.price,
@@ -224,25 +226,12 @@ def rank_parlays(provider: Any, symbols: list[str], *, completed_at: datetime | 
                 demo_mode=provider_status.mode == "mock" and bool(chain)))
             continue
         midpoint = round((contract.bid + contract.ask) / 2, 2)
-        preferred_entry = min(midpoint, contract.last) if contract.last > 0 else midpoint
-        entry_low = round(preferred_entry, 2)
-        entry_high = round(min(1.0, preferred_entry * 1.08), 2)
-        no_chase = round(min(1.25, max(entry_high + .05, preferred_entry * 1.25)), 2)
+        gate = entry_gate(setup, contract)
+        entry_low, entry_high, no_chase = gate.entry_low, gate.entry_high, gate.no_chase
         spread = spread_pct(contract.bid, contract.ask)
-        extension = setup.extension_r
-        score = max(0, min(100, 42 + checks * 8 + min(contract.volume / 250, 8)
-            + min(contract.open_interest / 1000, 4) - spread / 4))
+        score = gate.score
         premium_exceeded = contract.ask > no_chase
-        underlying_extended = extension > 1.35
-        missed = confirmed and (premium_exceeded or underlying_extended)
-        if missed:
-            signal: SignalStatus = "MISSED"
-        elif score >= 85 and confirmed and contract.ask <= entry_high and extension <= 1.35:
-            signal = "BUY"
-        elif score >= 70:
-            signal = "WATCH"
-        else:
-            signal = "PASS"
+        signal: SignalStatus = gate.signal
         if signal == "PASS":
             output.append(ParlayCandidateOut(symbol=symbol, rank=_score_label(score), direction=direction,
                 signal_status="PASS", score=round(score, 1), score_label=_score_label(score),

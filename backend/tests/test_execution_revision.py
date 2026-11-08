@@ -13,6 +13,21 @@ from test_forward_account import candidate
 db = fixtures.db
 
 
+def test_new_result_clock_is_not_delayed_by_an_extra_minute(db):
+    from app.services.result_model import VERSION
+    activate(db);trades=discover(db);fill(db)
+    trade=trades[0]
+    trade.strategy_snapshot={**trade.strategy_snapshot,'result_model':{'version':VERSION}}
+    trade.exit_reason='STOP';trade.exit_at=START+timedelta(minutes=10)
+    requested=trade.exit_at+timedelta(seconds=5)
+    expanded.advance_account(db,AllQuotes(requested),now=requested)
+    p=db.scalar(select(ForwardPaperPosition))
+    assert p.detail['exit_requested_at']==requested.isoformat()
+    assert p.detail['exit_event_completed_at']==trade.exit_at.isoformat()
+    expanded.advance_account(db,AllQuotes(requested+timedelta(seconds=2)),now=requested+timedelta(seconds=2))
+    assert p.status=='UNSETTLED'
+
+
 def test_spy_timeline_uses_full_post_decision_deadline_without_same_scan_fill(db):
     activate(db); trades=discover(db); fill(db)
     trade=trades[0]; trade.exit_reason='STOP'; trade.exit_at=START+timedelta(minutes=10)

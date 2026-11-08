@@ -23,7 +23,7 @@ export const paperEnter=(candidate:ParlayCandidate,providerMode:string)=>{
 };
 export const exitPaperPosition=(id:number,reason:string)=>send<PaperPosition>(`/paper-positions/${id}/exit`,{reason,paper_only:true});
 export const getPerformance=(strategyMode:'ONE_MIN_0DTE'|'STRUCTURED_INTRADAY'='ONE_MIN_0DTE',options:{page?:number;pageSize?:number;view?:'ALL'|'OPEN'|'COMPLETED'|'EXCLUDED';paperStartingCash?:number;commissionPerContract?:number;additionalFeesPerContract?:number;extraSlippagePerSide?:number}={})=>{
-  const params=new URLSearchParams({strategy_mode:strategyMode,page:String(options.page??1),page_size:String(options.pageSize??25),view:options.view??'ALL',paper_starting_cash:String(options.paperStartingCash??2000),commission_per_contract:String(options.commissionPerContract??1),additional_fees_per_contract:String(options.additionalFeesPerContract??0),extra_slippage_per_side:String(options.extraSlippagePerSide??.01)});
+  const params=new URLSearchParams({strategy_mode:strategyMode,page:String(options.page??1),page_size:String(options.pageSize??25),view:options.view??'ALL',paper_starting_cash:String(options.paperStartingCash??2000),commission_per_contract:String(options.commissionPerContract??1),additional_fees_per_contract:String(options.additionalFeesPerContract??1),extra_slippage_per_side:String(options.extraSlippagePerSide??.01)});
   return request<import('../types').PerformanceResponse>(`/performance?${params.toString()}`);
 };
 export const getBacktests=()=>request<import('../types').BacktestRun[]>('/backtests');

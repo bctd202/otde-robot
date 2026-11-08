@@ -50,7 +50,7 @@ export function RetestResearch({active}:{active:boolean}){
     {!data&&!error&&<p>Loading research status…</p>}
     {data&&<><p><strong>{data.admissions_blocked?'New admissions stopped — original study preserved':data.status==='NOT_ACTIVATED'?'Not activated':data.status==='COLLECTING'?'Collecting — no conclusion yet':'Collection window ended'}</strong></p>
       {data.admissions_blocked&&<p role="alert">The collection software changed. New entries need a maintenance review. Existing exposure continues under its saved rules; saved results and balances are preserved.</p>}
-      {!data.admissions_blocked&&data.maintenance&&<p role="status">Resumed after feed maintenance · same accounts and trading rules.</p>}
+      {!data.admissions_blocked&&data.maintenance&&<p role="status">{data.maintenance.scope==='existing-test-result-maintenance'?'Resumed after measurement maintenance · same accounts and entry rules.':'Resumed after feed maintenance · same accounts and trading rules.'}</p>}
       <p>{data.note}</p>
       {data.status!=='NOT_ACTIVATED'&&<>
         <aside className="retest-recording-note"><h3>Research records are separate from account slots</h3>

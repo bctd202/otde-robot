@@ -30,6 +30,7 @@ python -m app.services.retest_maintenance \
   --revision REVIEWED_FULL_GIT_SHA \
   --expected-code-hash REVIEWED_DEPLOYED_CODE_HASH \
   --expected-frozen-hash ORIGINAL_RUN_CODE_HASH \
+  --scope existing-test-result-maintenance \
   --confirm RESUME-EXISTING-PAPER-TEST
 ```
 
@@ -39,3 +40,8 @@ It appends one zero-cash event. Repeating it is a no-op. Verify no policy, cash,
 account or historical position changes, confirm the admission block is cleared
 in readiness and the research API, and confirm both arms still use their saved
 entry chronology and quote checks. No database migration is needed.
+
+The original `existing-test-feed-maintenance` scope remains readable. A result
+measurement/shared-cost repair uses the explicit scope above. Scope does not
+approve a future fingerprint or rewrite policy. Neither scope is applied by GET,
+startup or scanning. The app labels the reviewed maintenance type.

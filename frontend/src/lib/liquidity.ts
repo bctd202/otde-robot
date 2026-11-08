@@ -39,8 +39,8 @@ const DUPLICATE_TOLERANCE = 0.01;
 
 export function buildLiquidityLevels(levels: LiquidityLevels): ChartLiquidityLevel[] {
   const candidates: ChartLiquidityLevel[] = [
-    { levelType: 'previous_day_high', label: 'PDH', price: levels.previous_day_high, side: 'high' },
-    { levelType: 'previous_day_low', label: 'PDL', price: levels.previous_day_low, side: 'low' },
+    ...(levels.previous_day_high===null?[]:[{ levelType: 'previous_day_high' as const, label: 'PDH', price: levels.previous_day_high, side: 'high' as const }]),
+    ...(levels.previous_day_low===null?[]:[{ levelType: 'previous_day_low' as const, label: 'PDL', price: levels.previous_day_low, side: 'low' as const }]),
     { levelType: 'opening_range_high', label: 'ORH', price: levels.opening_range_high, side: 'high' },
     { levelType: 'opening_range_low', label: 'ORL', price: levels.opening_range_low, side: 'low' },
     { levelType: 'session_high', label: 'HOD', price: levels.session_high, side: 'high' },
