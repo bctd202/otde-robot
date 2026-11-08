@@ -44,6 +44,14 @@ test('reviewed maintenance resumes the same comparison without hiding evidence l
   expect(screen.queryByRole('button',{name:/activate|reset|resume/i})).not.toBeInTheDocument();
 });
 
+test('measurement maintenance keeps the existing comparison and honest scope label',async()=>{
+  vi.mocked(getRetestResearch).mockResolvedValue({...fixture,admissions_blocked:false,
+    maintenance:{resumed_at:'2026-11-07T17:00:00Z',revision:'b'.repeat(40),scope:'existing-test-result-maintenance'}});
+  render(<RetestResearch active/>);
+  expect(await screen.findByRole('status')).toHaveTextContent('Resumed after measurement maintenance · same accounts and entry rules.');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
 test('unknown values stay unknown, graph gaps are not joined, and pagination is read-only',async()=>{
   vi.mocked(getRetestResearch).mockResolvedValue(fixture);
   const {container}=render(<RetestResearch active/>);

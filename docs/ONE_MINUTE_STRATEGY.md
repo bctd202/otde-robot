@@ -17,8 +17,9 @@ The entry band's preferred premium is the lesser of midpoint and positive last p
 
 - Call invalidation is the lesser of VWAP and opening-range high; put invalidation is the greater of VWAP and opening-range low.
 - Target-planning distance is the larger of trigger-to-invalidation distance and 0.2% of underlying price. First target is 1.5 times that distance; the displayed stretch target uses 2.5 times it.
-- The automated underlying ledger resolves at the saved stop, first target, or completed 3:45 PM ET candle. If one candle touches both stop and target, stop takes precedence. Gaps remain exclusions rather than invented fills.
-- Recorded R divides the direction-adjusted underlying move by the **actual saved trigger-to-stop distance**, not the minimum target-planning distance. Thus targets can resolve above 1.5R. Prices are rounded when the plan is saved.
+- New underlying research rows benchmark entry at the observed quote after confirmation, retaining the original breakout trigger separately. This quote is not proof of an option or stock fill. Legacy trigger-based records remain unchanged.
+- New rows inspect the entry minute instead of skipping it. A partial-minute wick touch cannot establish whether it occurred before entry, so ambiguous entry-bar hits remain unknown. A close beyond one boundary can establish an after-entry hit. New exit clocks use completed candle end, with the planned exit candle 15 minutes before the exchange close (including early closes). Legacy rows retain their saved convention. Full held-minute stop/target ties still use the conservative stop.
+- Recorded R divides the direction-adjusted underlying benchmark move by the **saved entry-to-stop distance**, not the minimum target-planning distance. Thus targets can resolve above 1.5R. Original stop/target planning is unchanged; historical R is not recomputed.
 - Displayed option-premium targets do not drive these underlying exits. The separate option shadow uses the entry ask and the first verified bid after the underlying exit. It is quote evidence, not a broker fill or live account.
 - The normal performance view selects the first automated BUY per ticker/day and then applies quality exclusions. Manual journal links do not remove automated origin. The option-shadow slot remains shared across the two engines; this patch does not increase exposure or change selection.
 
@@ -29,3 +30,5 @@ We preserve the baseline and collect new accepted-contract bid/ask paths from th
 The next decision is whether a specific rule improves **net option dollars** on new data—not whether it increases the displayed R or cherry-picks a peak. The existing SPY/QQQ/IWM comparison and separate lotto experiment remain visible. No ticker is removed, score lowered, stop widened, or live order enabled here.
 
 See [research accounting and verification](RESEARCH_ACCOUNTING.md) for assumptions and known limitations.
+See [result-integrity repair](RESULT_INTEGRITY_REPAIR.md) for prospective timing,
+replay eligibility, shared costs, uncertainty and preservation details.

@@ -214,7 +214,8 @@ def test_no_backfill_and_config_drift_disables_admission(db,monkeypatch):
     assert summary(db,now=feed.now)['protocol_drift']
 
 
-def test_maintenance_resumes_same_accounts_without_rewriting_policy_money_or_gaps(db,monkeypatch):
+@pytest.mark.parametrize('scope',['existing-test-feed-maintenance','existing-test-result-maintenance'])
+def test_maintenance_resumes_same_accounts_without_rewriting_policy_money_or_gaps(db,monkeypatch,scope):
     from app.services.retest_maintenance import admission_status, resume_existing
     run=activate(db)
     policy=json.dumps(run.policy,sort_keys=True)
@@ -226,9 +227,10 @@ def test_maintenance_resumes_same_accounts_without_rewriting_policy_money_or_gap
     assert db.scalar(select(func.count()).select_from(RetestOpportunity))==0
     previous=[(p.id,p.detail) for p in db.scalars(select(RetestObservation))]
     kwargs=dict(revision='c'*40,expected_code_hash='b'*64,expected_frozen_hash=original_hash,
-                now=BASE.replace(hour=21))
+                now=BASE.replace(hour=21),scope=scope)
     result=resume_existing(db,**kwargs);db.commit()
     assert not result['admissions_blocked'] and result['maintenance']
+    assert result['maintenance']['scope']==scope
     assert resume_existing(db,**kwargs)==result;db.commit()
     assert json.dumps(run.policy,sort_keys=True)==policy
     assert db.scalar(select(func.count()).select_from(RetestAccount))==4

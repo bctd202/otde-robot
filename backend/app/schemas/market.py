@@ -117,8 +117,8 @@ class LotteryOut(BaseModel):
     worthless_reasons: list[str]
 
 class LiquidityLevelsOut(BaseModel):
-    previous_day_high: float
-    previous_day_low: float
+    previous_day_high: float | None = None
+    previous_day_low: float | None = None
     opening_range_high: float
     opening_range_low: float
     session_high: float

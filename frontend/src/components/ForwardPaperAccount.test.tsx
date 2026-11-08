@@ -24,6 +24,17 @@ test('collection boundary labels the continuous balance without rewriting unknow
   expect(await screen.findByText(/The account balance spans both collection versions/)).toBeVisible();
 });
 
+test.each(['legacy','canonical'])('frozen %s cost units display as cents per share',async(kind)=>{
+  const policy={...account().policy};
+  if(kind==='canonical'){delete policy.slippage_premium_cents;policy.slippage_cents_per_share=1}
+  vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account({policy})} as Response);
+  render(<ForwardPaperAccount/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Account details'}));
+  fireEvent.click(screen.getByText('Frozen assumptions & limitations'));
+  expect(screen.getByText(/Ask \+ \$0.01 premium per share at entry/)).toBeVisible();
+  expect(screen.queryByText(/Ask \+ \$1.00 premium/)).not.toBeInTheDocument();
+});
+
 test('separates simulated net profit, buying power, unsettled proceeds and costs',async()=>{
   vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>account()} as Response);
   render(<ForwardPaperAccount/>);

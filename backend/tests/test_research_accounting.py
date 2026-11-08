@@ -203,7 +203,7 @@ def test_closing_one_lotto_position_keeps_other_open_debits_in_book_equity():
 def test_cost_outcome_counts_are_exclusive_at_float_roundoff_breakeven():
     trade = row()
     result = execution_cost_analysis([trade], {trade.signal_id:{"status":"CLOSED",
-        "entry_ask":.20, "exit_bid":.21, "contract_multiplier":100}})
+        "entry_ask":.20, "exit_bid":.22, "contract_multiplier":100}})
     net = result["net_after_costs"]
     assert net["pnl_dollars"] == 0
     assert net["wins"] == net["losses"] == 0

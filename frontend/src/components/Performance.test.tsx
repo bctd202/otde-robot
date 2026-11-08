@@ -5,6 +5,22 @@ import type {PerformanceMetrics,PerformanceResponse,PerformanceSignal} from '../
 
 afterEach(()=>{cleanup();vi.restoreAllMocks()});
 
+test('legacy and current benchmark groups remain distinct in research',async()=>{
+  const data=response('ONE_MIN_0DTE',[signal({})]);
+  data.measurement_integrity={current_model:'post-confirmation-quote-v1',mixed_models:true,
+    historical_records_changed:false,cohorts:[
+      {basis:'LEGACY_TRIGGER_BENCHMARK',label:'Legacy trigger benchmark',selected_plays:10,resolved_plays:9,total_r:4},
+      {basis:'UNDERLYING_QUOTE_BENCHMARK_NOT_OPTION_FILL',label:'Post-confirmation quote benchmark',selected_plays:2,resolved_plays:1,total_r:-1}]};
+  vi.spyOn(globalThis,'fetch').mockImplementation(async(url)=>({ok:true,json:async()=>
+    String(url).includes('forward-paper-account')?{status:'NOT_STARTED',paper_only:true}:data}) as Response);
+  render(<Performance/>);
+  fireEvent.click(screen.getByRole('button',{name:'Research'}));
+  fireEvent.click(await screen.findByText('Result assumptions · earlier records preserved'));
+  expect(screen.getByText(/Different measurement bases are present/)).toBeVisible();
+  expect(screen.getByText(/Legacy trigger benchmark: 10 selected/)).toBeVisible();
+  expect(screen.getByText(/Post-confirmation quote benchmark: 2 selected/)).toBeVisible();
+});
+
 const signal=(overrides:Partial<PerformanceSignal>):PerformanceSignal=>({
   signal_id:'sig',source:'LIVE',ticker:'SPY',direction:'CALL',setup_type:'directional-liquidity',
   strategy_mode:'ONE_MIN_0DTE',strategy_version:'parlay-v1',trading_date:'2026-08-04',
@@ -125,7 +141,7 @@ test('shows visual strategy graphs and expandable play cards',async()=>{
   expect(within(strategyMetrics).getByText('Total Selected Plays').closest('.metric')).toHaveTextContent('2');
   expect(within(strategyMetrics).getByText('Total R').closest('.metric')).toHaveTextContent('2');
   expect(within(strategyMetrics).getByText('Open Plays')).toBeInTheDocument();
-  expect(screen.getByText('R = strategy performance normalized by trade risk')).toBeInTheDocument();
+  expect(screen.getByText('R = underlying benchmark movement divided by entry-to-stop risk; not option P/L')).toBeInTheDocument();
   expect(screen.getByLabelText('Play outcome distribution')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Research'}));
   expect(screen.getByRole('region',{name:'Core and experimental cohort comparison'})).toBeInTheDocument();

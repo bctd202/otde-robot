@@ -4,7 +4,6 @@ The caller commits the position projection and immutable cash events together.
 All monetary amounts are integer USD cents. GET summaries never create accounts.
 """
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
 import math
 
 from sqlalchemy import case, func, or_, select, update
@@ -17,6 +16,9 @@ from app.services.contracts import validate_exit_quote
 from app.services.market_calendar import HOLIDAYS_BY_YEAR, NY, is_market_day, market_close, market_session
 from app.services.option_research import utc
 from app.services.session_candles import INPUT_VERSION
+from app.services.cost_model import (CostPolicy, CONTRACT_MULTIPLIER, cents as cents,
+                                     from_policy, entry_premium_cents, exit_premium_cents)
+from app.services.result_model import exit_completed_at, entry_evidence_current
 
 LEGACY_KEY = "forward-cash-v1"
 # A permanent research identity, not a reset-on-restart or weekly-reset setting.
@@ -24,10 +26,6 @@ KEY = "tasty-session-v2-20261019"
 TRIAL_START = datetime(2026, 10, 19, 9, 30, tzinfo=NY).astimezone(timezone.utc)
 STARTING_CASH = 2000
 HELD = ("OPEN", "UNPRICED")
-
-
-def cents(dollars: float) -> int:
-    return int((Decimal(str(dollars)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _event(db: Session, kind: str, key: str, now: datetime, *, settled: int = 0,
@@ -56,8 +54,7 @@ def ensure_account(db: Session, now: datetime) -> ForwardPaperAccount | None:
                                   "STRUCTURED_INTRADAY": "structured-intraday-v1-session-v2"},
             "legacy_account": LEGACY_KEY,
             "max_positions": 3, "max_entry_cents": 10000,
-            "opening_commission_cents": 100, "closing_commission_cents": 0,
-            "fee_allowance_per_side_cents": 50, "slippage_premium_cents": 1,
+            **CostPolicy().as_dict(),
             "entry_deadline_seconds": 120, "exit_deadline_seconds": 180,
             "minimum_latency_seconds": 1, "quote_age_seconds": 60,
             "entry_max_spread_percent": 20, "settlement": "NEXT_BANK_AND_MARKET_DAY_0930_ET",
@@ -192,7 +189,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
         return  # A backwards clock cannot retroactively create fills or settlement.
     account.processed_at = now
     policy = account.policy
-    close_fee = policy["closing_commission_cents"] + policy["fee_allowance_per_side_cents"]
+    costs = from_policy(policy)
+    close_fee = costs.closing_cost_cents
     positions = list(db.scalars(select(ForwardPaperPosition).where(
         ForwardPaperPosition.account_key == KEY,
         ForwardPaperPosition.status.in_(("PENDING_ENTRY", "OPEN", "UNPRICED", "UNSETTLED")))
@@ -220,8 +218,9 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             detail["reason"] = "No verified exit before session end or underlying data gap; debit remains at risk"
             position.status = "UNPRICED"
         elif row.exit_reason != "OPEN":
+            event_end = exit_completed_at(row)
             if (row.exit_at is None or now > utc(row.exit_at)+timedelta(seconds=policy["exit_deadline_seconds"])
-                    or utc(row.exit_at)+timedelta(minutes=1) <= datetime.fromisoformat(detail["entry_at"])):
+                    or event_end is None or event_end <= datetime.fromisoformat(detail["entry_at"])):
                 detail["reason"] = "Underlying exit is missing, predates entry, or its quote window was missed"
                 position.status = "UNPRICED"
                 _event(db, "QUOTE_GAP", f"{position.id}:gap", now,
@@ -240,7 +239,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             else:
                 quote = _quote(provider, mark, now, requested+timedelta(seconds=policy["minimum_latency_seconds"]), policy)
                 if quote is not None:
-                    sale = max(0, cents(quote.bid*100)-policy["slippage_premium_cents"]*100)
+                    sale = exit_premium_cents(quote.bid, costs, mark.contract_multiplier)
                     due = settlement_at(now)
                     detail.update(sale_cents=sale, exit_fee_cents=close_fee, exit_at=now.isoformat(),
                         exit_quote=_evidence(quote, now),
@@ -307,6 +306,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             reason = "Entry is outside its trading session"
         elif held >= policy["max_positions"]:
             reason = "Concurrent position limit (includes unresolved quote gaps)"
+        elif not entry_evidence_current(row, now):
+            detail['entry_evidence_wait'] = 'Latest completed underlying minute not evaluated yet'
         else:
             quote = _quote(provider, mark, now, utc(position.first_seen_at)+timedelta(
                 seconds=policy["minimum_latency_seconds"]), policy)
@@ -315,8 +316,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                 if quote.bid <= 0 or spread > policy["entry_max_spread_percent"]:
                     reason = "Refreshed entry spread exceeds account limit"
                 else:
-                    premium = cents(quote.ask*100)+policy["slippage_premium_cents"]*100
-                    fee = policy["opening_commission_cents"]+policy["fee_allowance_per_side_cents"]
+                    premium = entry_premium_cents(quote.ask, costs, mark.contract_multiplier)
+                    fee = costs.opening_cost_cents
                     debit = premium+fee
                     if debit+close_fee > policy["max_entry_cents"]:
                         reason = "Entry budget exceeded, including reserved closing fee"
@@ -324,6 +325,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                         reason = "Insufficient settled buying power"
                     else:
                         detail.update(entry_at=now.isoformat(), entry_debit_cents=debit,
+                            contract_multiplier=mark.contract_multiplier,
                             entry_premium_cents=premium, entry_fee_cents=fee,
                             entry_quote=_evidence(quote, now), valuation=_evidence(quote, now))
                         position.status = "OPEN"
@@ -342,7 +344,8 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
 
 
 def _valuation(active: list[ForwardPaperPosition], policy: dict, now: datetime, *, archived: bool = False) -> dict:
-    close_fee = policy["closing_commission_cents"]+policy["fee_allowance_per_side_cents"]
+    costs = from_policy(policy)
+    close_fee = costs.closing_cost_cents
     unknown = unknown_debit = known_value = reserve = open_fees = 0
     for position in active:
         if position.status not in HELD:
@@ -353,7 +356,8 @@ def _valuation(active: list[ForwardPaperPosition], policy: dict, now: datetime, 
         if (not archived and position.status == "OPEN" and valuation and market_session(now) == "regular"
                 and all(0 <= (now-datetime.fromisoformat(valuation[key])).total_seconds()
                         <= policy["quote_age_seconds"] for key in ("bid_at", "ask_at"))):
-            known_value += max(0, cents(valuation["bid"]*100)-policy["slippage_premium_cents"]*100)-close_fee
+            known_value += exit_premium_cents(valuation["bid"], costs,
+                position.detail.get("contract_multiplier", CONTRACT_MULTIPLIER))-close_fee
         else:
             unknown += 1
             unknown_debit += position.detail["entry_debit_cents"]
