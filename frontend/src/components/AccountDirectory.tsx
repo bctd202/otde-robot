@@ -45,7 +45,7 @@ export function AccountDirectory(){
       <p>Separate paper tests following shared opportunities. These are comparisons, not six independent sources of profit.</p>
       {experiments.map(group=><section key={group.title} aria-label={group.title}><h3>{group.title}</h3><AccountLinks group={group}/></section>)}
     </details>
-    <section aria-label="Debit-spread account"><AccountLinks group={{title:'Debit spreads',parameter:'spread_account',page:'backtest-lab',items:[{key:'debit-vertical-v1',label:'Debit spreads · separate research account',note:'Prepared · separate activation · $2,000 starting policy'}]}}/></section>
+    <section aria-label="Debit-spread account"><AccountLinks group={{title:'Debit spreads',parameter:'spread_account',page:'backtest-lab',items:[{key:'debit-vertical-v1',label:'Debit spreads · separate research account',note:'$2,000 starting policy · $250 per spread · ten slots'}]}}/></section>
     <details>
       <summary>History <span>Earlier accounts &amp; preserved exposure</span></summary>
       <p>Organized here for a cleaner board—not stopped, reset or settled. Existing processing rules remain unchanged; unresolved exits still count as unknown exposure.</p>
