@@ -44,8 +44,9 @@ not the start of an IV history archive or proof of regular-session freshness.
 
 The [official snapshot endpoint](https://developer.tastytrade.com/reference/market-metrics/getMarketMetricsIndex/)
 includes IV rank, its source, update times and per-expiration volatility information.
-The observed rank/index fields use fractional values; the observed 30-day IV field
-uses percentage values. A future decoder must validate field-specific units,
+The observed rank/index values were fractional (for example, about 0.24), while
+the 30-day IV field contained values such as 23.99. A future decoder must confirm
+the published field-specific units rather than infer them from magnitude alone,
 timestamps and source. It must not silently compare a fractional rank to a
 percentage threshold or substitute the general object update time for the IV time.
 
