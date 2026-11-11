@@ -62,6 +62,12 @@ def retest_research(page: int = 1, view: str = "accounts", db: Session = Depends
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@router.get("/debit-spread-account")
+def debit_spread_account(page: int = 1, db: Session = Depends(get_db)):
+    from app.services.debit_spread_account import summary
+    return summary(db, page=page)
+
+
 @router.get("/forward-paper-account")
 def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY,
                           trade_view: str = 'INCLUDED', db: Session = Depends(get_db)):

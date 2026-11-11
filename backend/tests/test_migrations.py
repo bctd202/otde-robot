@@ -22,7 +22,7 @@ def alembic(db: Path, *args: str) -> str:
 def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0018_retest_research" in alembic(db, "current")
+    assert "0019_debit_spread" in alembic(db, "current")
 
 
 def test_retest_tables_are_empty_and_old_ledger_preserved(tmp_path):
@@ -147,3 +147,20 @@ def test_unknown_audit_rows_do_not_change_live_metrics():
     assert live_metrics["average_r"] == 2
     assert live_metrics["cumulative_r"] == 2
     assert live_metrics["maximum_drawdown_r"] == 0
+
+
+def test_debit_spread_migration_is_additive_and_never_funds(tmp_path):
+    db = tmp_path / 'before-spreads.db'
+    alembic(db, 'upgrade', '0018_retest_research')
+    tables=('debit_spread_snapshots','debit_spread_events','debit_spread_positions','debit_spread_accounts')
+    with sqlite3.connect(db) as conn:
+        # Bootstrap uses current metadata; emulate an actual deployed 0018 schema.
+        for table in tables:conn.execute(f'DROP TABLE {table}')
+        conn.execute("INSERT INTO forward_paper_accounts VALUES ('main-preserved','2026-10-28','2026-11-09',7,8,'{}')")
+        conn.execute("INSERT INTO retest_runs VALUES ('existing','2026-10-28','2026-11-09',42,'{}')")
+        before={t:conn.execute(f'SELECT * FROM {t}').fetchall() for t in ('forward_paper_accounts','retest_runs')}
+    alembic(db,'upgrade','head')
+    alembic(db,'upgrade','head')
+    with sqlite3.connect(db) as conn:
+        for table,rows in before.items():assert conn.execute(f'SELECT * FROM {table}').fetchall()==rows
+        for table in tables:assert conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0]==0

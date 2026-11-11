@@ -679,3 +679,51 @@ class DataQualityEvent(Base):
     severity: Mapped[str] = mapped_column(String(16))
     message: Mapped[str] = mapped_column(Text)
     timestamp: Mapped[str] = mapped_column(DateTime(timezone=True))
+
+
+class DebitSpreadAccount(Base):
+    __tablename__ = "debit_spread_accounts"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    watermark: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    policy: Mapped[dict] = mapped_column(JSON)
+
+
+class DebitSpreadPosition(Base):
+    __tablename__ = "debit_spread_positions"
+    __table_args__ = (UniqueConstraint("account_key", "signal_id", name="uq_debit_spread_signal"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("debit_spread_accounts.key"), index=True)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("signal_performance.signal_id"))
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    decision_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    detail: Mapped[dict] = mapped_column(JSON)
+
+
+class DebitSpreadEvent(Base):
+    __tablename__ = "debit_spread_events"
+    __table_args__ = (UniqueConstraint("account_key", "event_key", name="uq_debit_spread_event"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("debit_spread_accounts.key"), index=True)
+    event_key: Mapped[str] = mapped_column(String(120))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(32))
+    settled: Mapped[int] = mapped_column(Integer, default=0)
+    unsettled: Mapped[int] = mapped_column(Integer, default=0)
+    realized: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DebitSpreadSnapshot(Base):
+    __tablename__ = "debit_spread_snapshots"
+    __table_args__ = (UniqueConstraint("account_key", "at", name="uq_debit_spread_snapshot"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_key: Mapped[str] = mapped_column(ForeignKey("debit_spread_accounts.key"), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    trading_date: Mapped[date] = mapped_column(Date, index=True)
+    cash: Mapped[int] = mapped_column(Integer)
+    equity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unknown: Mapped[int] = mapped_column(Integer)

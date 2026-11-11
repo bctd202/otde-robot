@@ -1,0 +1,10 @@
+.debit-spread-account.graph-panel{color:#e9f2fc;background:#0b1523}
+.debit-spread-account.graph-panel h3,.debit-spread-account.graph-panel h4{color:#e9f2fc}
+.debit-spread-account.graph-panel p{color:#bfcede}
+.debit-spread-account.graph-panel small{color:#a6bace}
+.debit-spread-account.graph-panel .graph-line{fill:none;stroke:#2dd4bf;stroke-width:2}
+.debit-spread-account.graph-panel .graph-point{fill:#2dd4bf;stroke:#0b1523;stroke-width:2}
+.debit-spread-account.graph-panel .graph-axis{fill:#a6bace;font-size:11px}
+.debit-spread-account.graph-panel .graph-grid{stroke:#314255;stroke-dasharray:3 4}
+.debit-spread-account.graph-panel .run-result{overflow-wrap:anywhere}
+.debit-spread-account.graph-panel nav[aria-label="Spread trade pages"]{display:flex;align-items:center;gap:12px;flex-wrap:wrap}

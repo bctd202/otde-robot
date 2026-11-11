@@ -235,3 +235,18 @@ export interface LottoTrialActive extends Pick<ForwardAccount,'account_key'|'as_
   trades:MoneyTrade[];pagination:{page:number;pages:number;total:number};
 }
 export type LottoTrialResponse=LottoTrialActive|{status:'SCHEDULED'|'NOT_STARTED';account_key:string;accounts:LottoTrialChoice[];scheduled_start:string|null;activation_required?:boolean};
+
+export interface DebitSpreadAccountData {
+  account_key:string; status:'NOT_ACTIVATED'|'ACTIVE'|'PAUSED'; enabled:boolean; paper_only:boolean;
+  baseline_account:string; starting_cash_cents:number; activation_required?:boolean;
+  activated_at?:string; processed_at?:string; as_of?:string;
+  equity_cents?:number|null; available_cents?:number|null; settled_cents?:number; unsettled_cents?:number;
+  realized_cents?:number; unknown_positions?:number; held_positions?:number; pending_positions?:number;
+  opportunities?:number; skips?:number; page?:number; pages?:number;
+  history?:{at:string;equity_cents:number|null;cash_cents:number;unknown:number}[];
+  entry_quote_coverage?:{requested:number;quoted:number;filled:number};exit_quote_coverage?:{requested:number;quoted:number;filled:number};
+  matched?:{entered_pairs:number;closed_priced_pairs:number;unresolved_pairs:number;complete:boolean;
+    spread_closed_subset_pnl_cents:number;baseline_closed_subset_pnl_cents:number};
+  positions?:{id:number;status:string;ticker:string;mode:string;reason?:string;entry_debit_cents?:number;net_pnl_cents?:number;
+    long?:{normalized_option_symbol?:string};short?:{normalized_option_symbol?:string}}[];
+}
