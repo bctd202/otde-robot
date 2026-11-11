@@ -303,6 +303,10 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         except Exception:
             logger.exception("Expanded paper account failed; baseline and retest retained")
         finish_phase('expanded_paper_account')
+        if get_settings().debit_spread_enabled:
+            from app.services.debit_spread_runner import run as advance_spreads
+            advance_spreads(db, provider)
+            finish_phase('debit_spread_research')
         if hasattr(provider, "budget_status"):
             budget = provider.budget_status()
             remaining = budget.get("remaining")
@@ -510,4 +514,7 @@ def reconcile_runtime_on_startup(*, now: datetime | None = None) -> None:
         else:
             runtime.status = "resume_pending"
             runtime.next_evaluation_at = latest_completed_candle_at(started_at) + timedelta(minutes=1)
+        if get_settings().debit_spread_enabled:
+            from app.services.debit_spread_runner import run as reconcile_spreads
+            reconcile_spreads(db, now=started_at)
         db.commit()

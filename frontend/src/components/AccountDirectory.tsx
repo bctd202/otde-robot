@@ -26,7 +26,7 @@ const experiments:AccountGroup[]=[
 function AccountLinks({group}:{group:AccountGroup}){
   return <div className="account-directory-grid">
       {group.items.map(item=>{const url=new URL(window.location.href);
-        for(const key of ['paper_account','lotto_account','research_account'])url.searchParams.delete(key);
+        for(const key of ['paper_account','lotto_account','research_account','spread_account'])url.searchParams.delete(key);
         url.searchParams.set(group.parameter,item.key);url.hash=group.page;
         return <a key={item.key} href={`${url.pathname}${url.search}${url.hash}`}><strong>{item.label}</strong><small>{item.note}</small><span>View balance &amp; trades →</span></a>;
       })}
@@ -45,6 +45,7 @@ export function AccountDirectory(){
       <p>Separate paper tests following shared opportunities. These are comparisons, not six independent sources of profit.</p>
       {experiments.map(group=><section key={group.title} aria-label={group.title}><h3>{group.title}</h3><AccountLinks group={group}/></section>)}
     </details>
+    <section aria-label="Debit-spread account"><AccountLinks group={{title:'Debit spreads',parameter:'spread_account',page:'backtest-lab',items:[{key:'debit-vertical-v1',label:'Debit spreads · separate research account',note:'Prepared · separate activation · $2,000 starting policy'}]}}/></section>
     <details>
       <summary>History <span>Earlier accounts &amp; preserved exposure</span></summary>
       <p>Organized here for a cleaner board—not stopped, reset or settled. Existing processing rules remain unchanged; unresolved exits still count as unknown exposure.</p>

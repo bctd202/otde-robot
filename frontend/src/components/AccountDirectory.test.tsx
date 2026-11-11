@@ -7,12 +7,12 @@ import {RetestResearch} from './RetestResearch';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/')});
 
-test('directory links all eight accounts without inventing balances or making requests',()=>{
+test('directory links all existing accounts and the unactivated spread account without inventing balances or making requests',()=>{
   window.history.replaceState(null,'','/?v=release&paper_account=old#parlay');
   const fetch=vi.spyOn(globalThis,'fetch');
   render(<AccountDirectory/>);
   const links=screen.getAllByRole('link',{hidden:true});
-  expect(links).toHaveLength(8);expect(fetch).not.toHaveBeenCalled();
+  expect(links).toHaveLength(9);expect(fetch).not.toHaveBeenCalled();
   const newAccount=new URL(links[0].getAttribute('href')!,'http://localhost');
   expect(newAccount.searchParams.get('paper_account')).toBe('tasty-capacity-ten-v1');
   expect(newAccount.searchParams.get('v')).toBe('release');
@@ -45,7 +45,7 @@ test('main is immediately visible; experiments and history are collapsed without
 test('every account link clears other account selections and retains the release marker',()=>{
   window.history.replaceState(null,'','/?v=release&paper_account=old&lotto_account=old&research_account=old#parlay');
   render(<AccountDirectory/>);
-  const keys=['paper_account','lotto_account','research_account'];
+  const keys=['paper_account','lotto_account','research_account','spread_account'];
   for(const link of screen.getAllByRole('link',{hidden:true})){
     const url=new URL(link.getAttribute('href')!,'http://localhost');
     expect(keys.filter(key=>url.searchParams.has(key))).toHaveLength(1);

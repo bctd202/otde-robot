@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { addDailyWatch, exitPaperPosition, getDailyWatch, getPaperPositions, getParlays, getSignalAlerts, paperEnter, removeDailyWatch, setScannerControl } from './api/client';
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import { Performance } from './components/Performance';
+import {DebitSpreadAccount} from './components/DebitSpreadAccount';
 import { BacktestLab } from './components/BacktestLab';
 import { DailyWatch } from './components/DailyWatch';
 import { SignalAlerts } from './components/SignalAlerts';
@@ -82,6 +83,7 @@ export function App() {
   const addWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await addDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} added for today.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to add ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const removeWatch=useCallback(async(symbol:string)=>{setDailyWatchBusy(true);setDailyWatchMessage('');try{const result=await removeDailyWatch(symbol);setDailyWatch(result);setDailyWatchMessage(`${symbol} removed.`);await refreshParlays()}catch(reason){setDailyWatchMessage(reason instanceof Error?reason.message:'Unable to remove ticker')}finally{setDailyWatchBusy(false)}},[refreshParlays]);
   const controlScanner=useCallback(async(action:'HOLD'|'RESUME')=>{if(action==='HOLD'&&!window.confirm('Hold automated scans? The dashboard and saved research will remain available.'))return;setScannerControlBusy(true);setScannerFeedback('');try{const result=await setScannerControl(action);setScannerFeedback(result.message);await refreshParlays()}catch(reason){setScannerFeedback(reason instanceof Error?reason.message:'Unable to update scanner control')}finally{setScannerControlBusy(false)}},[refreshParlays]);
+  const spreadSelected=new URLSearchParams(window.location.search).get('spread_account')==='debit-vertical-v1';
   return <AppShell activePage={activePage} onNavigate={navigate} data={parlays} stale={parlayStale} refreshing={parlayRefreshing} onRefresh={()=>void refreshParlays()}>
     <div className="app-page" hidden={activePage!=='parlay'}>
     {paperFeedback&&<p className="paper-feedback" role="status">{paperFeedback}</p>}
@@ -95,7 +97,7 @@ export function App() {
     </div>
     <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>
     <div className="app-page" hidden={activePage!=='performance'}><Performance/></div>
-    <div className="app-page" hidden={activePage!=='backtest-lab'}><RetestResearch active={activePage==='backtest-lab'}/><BacktestLab/></div>
+    <div className="app-page" hidden={activePage!=='backtest-lab'}>{spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<RetestResearch active={activePage==='backtest-lab'}/>{!spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<BacktestLab/></div>
   </AppShell>;
 }
 
