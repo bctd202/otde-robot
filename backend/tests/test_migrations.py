@@ -22,7 +22,7 @@ def alembic(db: Path, *args: str) -> str:
 def test_clean_upgrade_through_head(tmp_path):
     db = tmp_path / "clean.db"
     alembic(db, "upgrade", "head")
-    assert "0019_debit_spread" in alembic(db, "current")
+    assert "0020_entry_cap_review" in alembic(db, "current")
 
 
 def test_retest_tables_are_empty_and_old_ledger_preserved(tmp_path):
@@ -164,3 +164,16 @@ def test_debit_spread_migration_is_additive_and_never_funds(tmp_path):
     with sqlite3.connect(db) as conn:
         for table,rows in before.items():assert conn.execute(f'SELECT * FROM {table}').fetchall()==rows
         for table in tables:assert conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0]==0
+
+
+def test_entry_cap_review_migration_preserves_accounts_and_creates_no_evidence(tmp_path):
+    db=tmp_path/'before-entry-cap.db'
+    alembic(db,'upgrade','0019_debit_spread')
+    with sqlite3.connect(db) as conn:
+        conn.execute('DROP TABLE entry_cap_review_events')
+        conn.execute("INSERT INTO forward_paper_accounts VALUES ('preserved','2026-10-28','2026-11-11',20,4,'{\"max_entry_cents\":10000}')")
+        account=conn.execute('SELECT * FROM forward_paper_accounts').fetchall()
+    alembic(db,'upgrade','head')
+    with sqlite3.connect(db) as conn:
+        assert conn.execute('SELECT * FROM forward_paper_accounts').fetchall()==account
+        assert conn.execute('SELECT count(*) FROM entry_cap_review_events').fetchone()[0]==0

@@ -727,3 +727,14 @@ class DebitSpreadSnapshot(Base):
     cash: Mapped[int] = mapped_column(Integer)
     equity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     unknown: Mapped[int] = mapped_column(Integer)
+
+
+class EntryCapReviewEvent(Base):
+    """Append-only observational evidence; no cash, funding or account mutation."""
+    __tablename__ = 'entry_cap_review_events'
+    __table_args__ = (UniqueConstraint('position_id', 'kind', name='uq_entry_cap_review_kind'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    position_id: Mapped[int] = mapped_column(ForeignKey('forward_paper_positions.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    detail: Mapped[dict] = mapped_column(JSON)

@@ -68,6 +68,12 @@ def debit_spread_account(page: int = 1, db: Session = Depends(get_db)):
     return summary(db, page=page)
 
 
+@router.get('/entry-cap-review')
+def entry_cap_review(page: int = 1, db: Session = Depends(get_db)):
+    from app.services.entry_cap_review import summary
+    return summary(db, page=page)
+
+
 @router.get("/forward-paper-account")
 def forward_paper_account(page: int = 1, account_key: str = FORWARD_ACCOUNT_KEY,
                           trade_view: str = 'INCLUDED', db: Session = Depends(get_db)):
