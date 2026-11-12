@@ -274,10 +274,9 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
         track_lottery_scan(db, provider, get_settings().symbol_list, evaluation_at)
         advance_lotto_trials(db)
         finish_phase('lotto')
-        record_option_observations(db, provider)
         refresh_account_quotes(db, provider)
         advance_account(db, provider)
-        finish_phase('forward_account_and_observations')
+        finish_phase('forward_account')
         _position_alerts(db, provider)
         _performance_alerts(db)
         finish_phase('alerts')
@@ -307,6 +306,16 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
             from app.services.debit_spread_runner import run as advance_spreads
             advance_spreads(db, provider)
             finish_phase('debit_spread_research')
+        # Passive sampling must see the quotes already refreshed for accounts in
+        # this scan. It never refreshes a chain or takes request capacity itself.
+        observation_collection = {'version': 'after-account-refresh-v1', 'additional_requests': 0}
+        try:
+            with db.begin_nested():
+                record_option_observations(db, provider)
+        except Exception as exc:
+            logger.exception('Optional option-path sampling failed; account work retained')
+            observation_collection['error_type'] = type(exc).__name__
+        finish_phase('option_observations')
         if hasattr(provider, "budget_status"):
             budget = provider.budget_status()
             remaining = budget.get("remaining")
@@ -321,6 +330,7 @@ def _run_signal_scan(db: Session, provider, universe: list[str], *, force: bool 
             scanned_at=completed, evaluation_candle_at=evaluation_at,
             provider_status={**final_status.model_dump(mode="json"), "scan_timing_v1": {
                 "total_ms": round((perf_counter()-started)*1000, 2), "phases_ms": timings},
+                'option_observation_collection': observation_collection,
                 'collection_v2': collection_integrity.snapshot(provider,evaluation_at)}, universe=universe,
             candidates=[candidate.model_dump(mode="json") for candidate in candidates])
         db.add(scan)
