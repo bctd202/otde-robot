@@ -31,3 +31,4 @@ export const getRetestResearch=(page=1,view:'accounts'|'opportunities'='accounts
 export const startBacktest=(start:string,end:string,tickers:string[])=>send<import('../types').BacktestRun>('/backtests',{start,end,tickers});
 
 export const getDebitSpreadAccount=(page=1)=>request<import('../types').DebitSpreadAccountData>(`/debit-spread-account?page=${page}`);
+export const getEntryCapReview=(page=1)=>request<import('../components/EntryCapReview').EntryCapReviewData>(`/entry-cap-review?page=${page}`);

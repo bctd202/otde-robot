@@ -348,6 +348,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
         assert mark is not None and row is not None
         age = (now-utc(mark.created_at)).total_seconds()
         reason = None
+        review_quote = None
         evidence = (row.strategy_snapshot or {}).get("input_evidence", {})
         if (mark.provider != policy["required_provider"] or mark.data_mode != "live"
                 or row.strategy_version != policy["strategy_versions"].get(mark.strategy_mode)
@@ -379,6 +380,7 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
                     debit = premium+fee
                     if debit+close_fee > policy["max_entry_cents"]:
                         reason = "Entry budget exceeded, including reserved closing fee"
+                        review_quote = quote
                     elif debit+close_fee > settled-held*close_fee:
                         reason = "Insufficient settled buying power"
                     else:
@@ -396,9 +398,15 @@ def advance_account(db: Session, provider=None, *, now: datetime | None = None) 
             detail["reason"] = reason
             _event(db, "SKIP", f"{position.id}:skip", now,
                 detail={"position_id": position.id, "ticker": detail["ticker"], "reason": reason})
+            if review_quote is not None:
+                from app.services.entry_cap_review import record_skip
+                record_skip(db, position, review_quote, policy, now=now, debit=debit,
+                            close_fee=close_fee, settled=settled, held=held)
         position.detail = detail
     db.flush()
     _record_equity_snapshot(db, account, now)
+    from app.services.entry_cap_review import advance as review_caps
+    review_caps(db, provider, now=now)
 
 
 def account_catalog(db: Session) -> list[dict]:

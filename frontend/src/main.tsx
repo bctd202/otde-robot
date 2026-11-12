@@ -4,6 +4,7 @@ import { addDailyWatch, exitPaperPosition, getDailyWatch, getPaperPositions, get
 import { ParlayBoard, ParlaySkeleton } from './components/ParlayBoard';
 import { Performance } from './components/Performance';
 import {DebitSpreadAccount} from './components/DebitSpreadAccount';
+import {EntryCapReview} from './components/EntryCapReview';
 import { BacktestLab } from './components/BacktestLab';
 import { DailyWatch } from './components/DailyWatch';
 import { SignalAlerts } from './components/SignalAlerts';
@@ -97,7 +98,7 @@ export function App() {
     </div>
     <div className="app-page" hidden={activePage!=='lottery'}><LotteryLab active={activePage==='lottery'}/></div>
     <div className="app-page" hidden={activePage!=='performance'}><Performance/></div>
-    <div className="app-page" hidden={activePage!=='backtest-lab'}>{spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<RetestResearch active={activePage==='backtest-lab'}/>{!spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<BacktestLab/></div>
+    <div className="app-page" hidden={activePage!=='backtest-lab'}><EntryCapReview active={activePage==='backtest-lab'}/>{spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<RetestResearch active={activePage==='backtest-lab'}/>{!spreadSelected&&<DebitSpreadAccount active={activePage==='backtest-lab'}/>}<BacktestLab/></div>
   </AppShell>;
 }
 
